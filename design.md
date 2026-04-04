@@ -36,11 +36,11 @@ Questions belong to modules and support multiple types. The initial app includes
 - an ordered multi-input type for prompts where the sequence itself matters
 - a type where the prompt contains inline blanks to fill in
 
-Questions are revisable. Revisions should preserve history while allowing the active version to move forward cleanly. Numeric ranking exists as a rough importance hint for default ordering.
+Questions are editable in place. Numeric ranking exists as a rough importance hint for default ordering.
 
 ### Progress
 
-The app tracks quiz sessions and per-question progress over time. It should be easy to see how often a question is asked, how often it is answered correctly, and which questions need revision. Multi-input questions may award fractional credit within the question, but each question still contributes one total point to session scoring and aggregate accuracy.
+The app tracks quiz sessions and derives per-question progress from those sessions over time. Question content should stay separate from performance data so future per-user progress remains straightforward to add. Multi-input questions may award fractional credit within the question, but each question still contributes one total point to session scoring and aggregate accuracy.
 
 ## Content Format
 
@@ -72,14 +72,14 @@ The experience should feel immediate:
 - `Enter` advances through multi-input questions and submits from the final input
 - correct submissions tint the question card green and mark the submitted answer fields green
 - incorrect submissions tint the question card red and mark only the incorrect submitted fields red
-- expected answers are shown below each answered question in a neutral suggestion box
+- expected answers are shown below a question only when the answer was not fully correct, and they appear in a neutral suggestion box
 - multi-input questions may show partial progress such as `2/3` on the card while still counting as one total question in the session score
 
-The completed quiz acts as the review surface. There is no need for a separate review page. When the last question is submitted, the finished session should clearly transition into a completed state, focus an obvious way to start another quiz immediately, and allow answered questions to be flagged for revision directly from the card header.
+The completed quiz acts as the review surface. There is no need for a separate review page. When the last question is submitted, the finished session should clearly transition into a completed state, focus an obvious way to start another quiz immediately, and allow answered questions to be flagged for revision directly from a compact action in the card header.
 
 ### Stats
 
-The stats page shows recent quiz performance and a question table for the selected module scope. It should also surface questions marked for review so maintenance work is easy to find.
+The stats page shows recent quiz performance and a question table for the selected module scope. Recent performance should be a compact graph of the latest ten sessions for the exact selected module, read left to right from older to newer within that window, with an average reference line. The table should be sortable by its headings, and questions marked for review should stand out through row treatment rather than a dedicated review column.
 
 ### Creation And Revision
 
@@ -88,7 +88,6 @@ Question creation and revision should feel straightforward and lightweight. It s
 - create questions for any supported type
 - create a new module inline when needed
 - move a question to a different module during revision
-- review prior versions of a question
 - mark whether a revision should reset historical stats
 
 ## UX Direction
@@ -96,10 +95,11 @@ Question creation and revision should feel straightforward and lightweight. It s
 The app should look modern, dark, and restrained rather than heavy or enterprise-like.
 
 - a visible header with only `Quiz`, `Stats`, and a hamburger menu
-- module selection from the hamburger menu
+- module selection from the hamburger menu with a click-to-expand module tree
 - a floating plus button on stats for question creation
 - strong keyboard-first interactions throughout
 - minimal instructional copy on the quiz page
+- mostly neutral dark surfaces, with brighter color used intentionally for actions, correctness feedback, and performance graphs
 
 For question input:
 
