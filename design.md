@@ -44,12 +44,13 @@ Pages and functionality:
 - Review page
   - Once quiz is complete
   - show total score
-  - a table of all questions, their correct answer(s), the answer given, a flag for revision
+  - a table of all questions, their correct answer(s), the answer given, a button to mark question for revision
 
 - Stats page
   - Show graph for last 10 quizzes
   - show table of all questions for selected module/submodule
-    - rank
+    - unique id
+    - rank (a default ordering, think 1.1.1 for chapter 1, section 1, question 1 this is unique to each module)
     - question
     - answers
     - how often they were asked
@@ -64,6 +65,7 @@ Pages and functionality:
   - a list of incorrect answers seen
   - a checkbox for wether stats needs to be invalidated (default on)
 
+-
 Modules and submodules:
 
 - hierarchical structure (e.g. Biology->plants)
