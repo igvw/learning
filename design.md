@@ -31,15 +31,16 @@ Modules are hierarchical, such as `Biology -> Plants`. A user can study a single
 
 Questions belong to modules and support multiple types. The initial app includes:
 
-- a type where multiple answers may be accepted but only one answer is expected
-- a type where several required answers must all be entered
+- a single-input type where multiple answers may be accepted but only one answer is expected
+- an unordered multi-input type where several required answers must be entered but answer order does not matter
+- an ordered multi-input type for prompts where the sequence itself matters
 - a type where the prompt contains inline blanks to fill in
 
 Questions are revisable. Revisions should preserve history while allowing the active version to move forward cleanly. Numeric ranking exists as a rough importance hint for default ordering.
 
 ### Progress
 
-The app tracks quiz sessions and per-question progress over time. It should be easy to see how often a question is asked, how often it is answered correctly, and which questions need revision.
+The app tracks quiz sessions and per-question progress over time. It should be easy to see how often a question is asked, how often it is answered correctly, and which questions need revision. Multi-input questions may award fractional credit within the question, but each question still contributes one total point to session scoring and aggregate accuracy.
 
 ## Content Format
 
@@ -67,12 +68,14 @@ The quiz is the default page. It presents a fixed number of questions and grows 
 
 The experience should feel immediate:
 
-- submitted questions stay visible
-- correct answers are highlighted in green
-- incorrect answers are highlighted in red
-- correct answers are shown below each answered question
+- only one unanswered question is active at a time, but submitted questions stay visible above it
+- `Enter` advances through multi-input questions and submits from the final input
+- correct submissions tint the question card green and mark the submitted answer fields green
+- incorrect submissions tint the question card red and mark only the incorrect submitted fields red
+- expected answers are shown below each answered question in a neutral suggestion box
+- multi-input questions may show partial progress such as `2/3` on the card while still counting as one total question in the session score
 
-The completed quiz acts as the review surface. There is no need for a separate review page. When the last question is submitted, the finished session should clearly transition into a completed state and offer an obvious way to start another quiz immediately.
+The completed quiz acts as the review surface. There is no need for a separate review page. When the last question is submitted, the finished session should clearly transition into a completed state, focus an obvious way to start another quiz immediately, and allow answered questions to be flagged for revision directly from the card header.
 
 ### Stats
 
@@ -101,7 +104,9 @@ The app should look modern, dark, and restrained rather than heavy or enterprise
 For question input:
 
 - required multi-answer questions use multiple input boxes
+- unordered and ordered multi-input questions are distinct authoring choices
 - inline definition questions are answered directly in place
+- `Enter` should move the user forward whenever possible
 - once a question is submitted, its submit control should disappear
 
 ## Testing
