@@ -83,7 +83,7 @@ Modules and submodules:
 - Should be able to select parent module and submodules to train individual chapters or entire bundle of work
 - view stats for selected module only.
 - There needs to be a modules metadata table that handles the UI variation in app (question titles etc)
-- The structure of the questions and metadata table needs to be simple to give to an LLM to generate module content
+- The structure of the questions and metadata table needs to be simple to give to an LLM to generate module content in a ./module directory
 
 pay special attention to keyboard navigation throughout the app. I want to complete a quiz without lifting my hands off the keyboard
 
