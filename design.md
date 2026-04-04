@@ -22,7 +22,7 @@ Data layout:
     - marked disabled
     - new ID for the revised question
     - new question points back to old question so revision history can be seen
-  - questions need unique rank, that does not update when a question is revised
+  - questions need unique, but editable rank per module, that stays consistent when a question is revised
 - modules and submodules
   - should have all app variance for each module
 
@@ -64,8 +64,18 @@ Pages and functionality:
   - both question and answer should be revisable
   - a list of incorrect answers seen
   - a checkbox for wether stats needs to be invalidated (default on)
+  - a rank selector that will increment all questions equal to or below the selected rank without updating their ID's. Don't update ID of edited question if only this field changed.
+  - a way to see question history:
+    - list of links
+    - uneditable version of revision page with irrelevant options greyed out
 
--
+- Creation page
+  - accessed from floating plus icon on stats page.
+  - select existing(sub)module from dropdown
+  - ability to create new module
+  - need to be able to create all types of questions
+  - rank selector, default auto-increment
+
 Modules and submodules:
 
 - hierarchical structure (e.g. Biology->plants)
@@ -76,6 +86,19 @@ Modules and submodules:
 - The structure of the questions and metadata table needs to be simple to give to an LLM to generate module content
 
 pay special attention to keyboard navigation throughout the app. I want to complete a quiz without lifting my hands off the keyboard
+
+Suggested tech stack:
+
+- Flask
+- SQLite
+- Jinja templates
+- Vanilla javascript or htmx
+
+testing:
+
+- add normal python tests
+- make a ./app.sh that will run the webapp
+- seed the project with 2 modules that contain at least one of each type of question
 
 ## iterate on the prompt
 
