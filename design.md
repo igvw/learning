@@ -1,111 +1,105 @@
-# Learning app
+# Learning App Design
 
-I will make a comprehensive design prompt that includes planning instructions and skills.md and planning.
+## Overview
 
-## This design document
+This project is a minimalist, modern, keyboard-first web app for learning basic facts through short quizzes. The app stays independent from the learning content itself. Content lives in simple module files, while the app focuses on quiz flow, revision, and progress tracking.
 
-Should be a minimal design plan to recreate the app from scratch. It should be converted to a README.md, which has table schemas and more comprehensive information.
+The app uses:
 
-## Prompt
-
-I want to build a web app used for learning basic facts with codex. I want to keep it as simple as possible while supporting different modules. The actual app should be completely independent of the content.
-
-Data layout:
-
-- the questions table is most important and needs to be considered most
-  - There should be different kinds of questions:
-    - multiple correct answers from which a single answer is expected
-    - multiple required answers from which all must be given
-    - more to be implemented later
-  - Questions belong to modules and submodules
-  - Questions need to be revised
-    - marked disabled
-    - new ID for the revised question
-    - new question points back to old question so revision history can be seen
-  - questions need unique, but editable rank per module, that stays consistent when a question is revised
-- modules and submodules
-  - should have all app variance for each module
-
-- progress tracking
-  - sessions
-    - how long and when a session was started
-  - progress for each question
-
-Pages and functionality:
-
-- Quizz page
-  - asks a fixed amount of questions
-  - should scroll vertically as questions are answered
-  - quick review: after each question highlight question
-    - red for wrong and green for correct
-    - show all correct answers below the question
-    - highlight the rows green for correct and red for incorrect
-
-- Review page
-  - Once quiz is complete
-  - show total score
-  - a table of all questions, their correct answer(s), the answer given, a button to mark question for revision
-
-- Stats page
-  - Show graph for last 10 quizzes
-  - show table of all questions for selected module/submodule
-    - unique id
-    - rank (a default ordering, think 1.1.1 for chapter 1, section 1, question 1 this is unique to each module)
-    - question
-    - answers
-    - how often they were asked
-    - percentage of times correct
-    - when they were last asked
-    - revision button to revise the question
-  - highlight questions flagged for revision in orange
-  - show a box with list of questions flagged for revision at the top of the stats page
-
-- Revision page
-  - both question and answer should be revisable
-  - a list of incorrect answers seen
-  - a checkbox for wether stats needs to be invalidated (default on)
-  - a rank selector that will increment all questions equal to or below the selected rank without updating their ID's. Don't update ID of edited question if only this field changed.
-  - a way to see question history:
-    - list of links
-    - uneditable version of revision page with irrelevant options greyed out
-
-- Creation page
-  - accessed from floating plus icon on stats page.
-  - select existing(sub)module from dropdown
-  - ability to create new module
-  - need to be able to create all types of questions
-  - rank selector, default auto-increment
-
-Modules and submodules:
-
-- hierarchical structure (e.g. Biology->plants)
-- Select from hamburger menu on the top left
-- Should be able to select parent module and submodules to train individual chapters or entire bundle of work
-- view stats for selected module only.
-- There needs to be a modules metadata table that handles the UI variation in app (question titles etc)
-- The structure of the questions and metadata table needs to be simple to give to an LLM to generate module content in a ./module directory
-
-pay special attention to keyboard navigation throughout the app. I want to complete a quiz without lifting my hands off the keyboard
-
-Suggested tech stack:
-
-- Flask
+- FastAPI
+- Svelte
 - SQLite
-- Jinja templates
-- Vanilla javascript or htmx
 
-testing:
+The overall feel should be clean, lightweight, and fast. The interface should support finishing a quiz without lifting your hands from the keyboard.
 
-- add normal python tests
-- make a ./app.sh that will run the webapp
-- seed the project with 2 modules that contain at least one of each type of question
+## Product Goals
 
-## iterate on the prompt
+- Keep the app simple.
+- Keep app logic separate from module content.
+- Support multiple modules and nested submodules.
+- Make quiz flow fast and pleasant.
+- Make revision and maintenance of questions easy.
+- Keep the UI modern and uncluttered.
 
-### Instruction
+## Core Concepts
 
-I want to iterate on the above minimal design document to ensure it is as simple and comprehensive as possible. Output raw markdown only with only required edits.
+### Modules
 
-## codex
+Modules are hierarchical, such as `Biology -> Plants`. A user can study a single leaf module or a larger parent bundle. Modules also carry the small amount of metadata needed to vary labels and copy across different content areas.
 
-I want to plan this a bit better in this chat and then proceed to codex. Once we are ready to go to codex, please provide me with tips for plan mode, skills and other context md file tips and a prompt.
+### Questions
+
+Questions belong to modules and support multiple types. The initial app includes:
+
+- a type where multiple answers may be accepted but only one answer is expected
+- a type where several required answers must all be entered
+- a type where the prompt contains inline blanks to fill in
+
+Questions are revisable. Revisions should preserve history while allowing the active version to move forward cleanly. Numeric ranking exists as a rough importance hint for default ordering.
+
+### Progress
+
+The app tracks quiz sessions and per-question progress over time. It should be easy to see how often a question is asked, how often it is answered correctly, and which questions need revision.
+
+## Content Format
+
+Content should stay easy to generate and edit outside the app.
+
+- module metadata lives in simple YAML files
+- questions live in CSV files
+- module slugs are inferred from titles
+
+The app should be able to import missing seed content into an existing local database without forcing a reset.
+
+## Main Screens
+
+### Quiz
+
+The quiz is the default page. It presents a fixed number of questions and grows vertically as answers are submitted.
+
+The experience should feel immediate:
+
+- submitted questions stay visible
+- correct answers are highlighted in green
+- incorrect answers are highlighted in red
+- correct answers are shown below each answered question
+
+The completed quiz acts as the review surface. There is no need for a separate review page. When the last question is submitted, the finished session should clearly transition into a completed state and offer an obvious way to start another quiz immediately.
+
+### Stats
+
+The stats page shows recent quiz performance and a question table for the selected module scope. It should also surface questions marked for review so maintenance work is easy to find.
+
+### Creation And Revision
+
+Question creation and revision should feel straightforward and lightweight. It should be possible to:
+
+- create questions for any supported type
+- create a new module inline when needed
+- move a question to a different module during revision
+- review prior versions of a question
+- mark whether a revision should reset historical stats
+
+## UX Direction
+
+The app should look modern, dark, and restrained rather than heavy or enterprise-like.
+
+- a visible header with only `Quiz`, `Stats`, and a hamburger menu
+- module selection from the hamburger menu
+- a floating plus button on stats for question creation
+- strong keyboard-first interactions throughout
+- minimal instructional copy on the quiz page
+
+For question input:
+
+- required multi-answer questions use multiple input boxes
+- inline definition questions are answered directly in place
+- once a question is submitted, its submit control should disappear
+
+## Testing
+
+The project should include normal Python tests for backend behavior and practical coverage for the main quiz flow. The local project should still be easy to run with `./app.sh`.
+
+## Design Principle
+
+This document stays intentionally high level. It should describe the product clearly without over-specifying the implementation. Schema details, endpoint details, and other low-level decisions can be figured out during implementation.
