@@ -51,6 +51,14 @@ Content should stay easy to generate and edit outside the app.
 
 The app should be able to import missing seed content into an existing local database without forcing a reset.
 
+## Starter Content
+
+The first version should include enough seed content to make the quiz, stats, and revision flows feel real during development.
+
+- Seed 2 parent modules with 2 submodules each with 5 questions each (total 20 questions) for testing.
+- include every supported question type
+- make the sample content varied enough to exercise module hierarchy, rankings, and revision workflows
+
 ## Main Screens
 
 ### Quiz
