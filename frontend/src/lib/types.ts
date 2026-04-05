@@ -1,5 +1,12 @@
-export type RouteName = 'quiz' | 'stats';
+export type RouteName = 'quiz' | 'stats' | 'admin';
 export type QuestionType = 'single_text' | 'multi_text' | 'ordered_multi' | 'inline_cloze';
+export type ScheduleBucket =
+  | 'hot'
+  | 'due_review'
+  | 'unseen'
+  | 'one_shot_easy'
+  | 'backlog_seen_correct'
+  | 'not_due_recovered';
 
 export interface ModuleUiCopy {
   question_label: string;
@@ -14,6 +21,7 @@ export interface ModuleNode {
   title: string;
   slug: string;
   full_slug: string;
+  instruction: string;
   ui_copy: ModuleUiCopy;
   children: ModuleNode[];
 }
@@ -34,10 +42,13 @@ export interface QuizItem {
   id: number;
   position: number;
   question_id: number;
+  module_id: number;
+  module_title: string;
+  module_instruction: string;
   review_flag: boolean;
   prompt: string;
   question_type: QuestionType;
-  ranking: number;
+  rank: number;
   type_config: QuizTypeConfig;
   submitted_answer: string[] | null;
   is_correct: boolean | null;
@@ -74,14 +85,31 @@ export interface RecentSession {
   accuracy: number;
 }
 
+export interface User {
+  id: number;
+  handle: string;
+  display_name: string;
+  created_at: string;
+  disabled_at: string | null;
+}
+
+export interface QuestionSchedule {
+  bucket: ScheduleBucket;
+  recovery_streak: number | null;
+  interval_step: number | null;
+  last_incorrect_at: string | null;
+  next_due_at: string | null;
+}
+
 export interface QuestionRow {
   question_id: number;
   module_id: number;
   module_title: string;
+  module_full_slug: string;
   prompt: string;
   prompt_preview: string;
   question_type: QuestionType;
-  ranking: number;
+  rank: number;
   attempts: number;
   correct_percentage: number;
   last_asked_at: string | null;
@@ -89,6 +117,11 @@ export interface QuestionRow {
   accepted_answers: string[][];
   slot_prompts: string[];
   segments: string[];
+  recent_incorrect_answers: Array<{
+    submitted_answer: string[];
+    answered_at: string;
+  }>;
+  schedule: QuestionSchedule;
 }
 
 export interface StatsResponse {
@@ -108,8 +141,7 @@ export interface QuestionDraftPayload {
   module_id: number;
   prompt: string;
   question_type: QuestionType;
-  ranking: number;
-  review_flag: boolean;
+  rank: number;
   accepted_answers: string[][];
   slot_prompts: string[];
   segments: string[];
@@ -118,5 +150,29 @@ export interface QuestionDraftPayload {
 export interface CreateModulePayload {
   title: string;
   parent_id: number | null;
+  instruction: string;
   ui_copy?: ModuleUiCopy;
+}
+
+export interface QuestionImportUnresolvedRow {
+  row_number: number;
+  csv_line: string;
+  issues: string[];
+  inferred_type?: QuestionType | null;
+}
+
+export interface QuestionImportSession {
+  session_id: number;
+  expires_at: string;
+  ready_to_commit: boolean;
+  staged_valid_count: number;
+  unresolved_rows: QuestionImportUnresolvedRow[];
+  report_text: string;
+  committed: boolean;
+  committed_count: number;
+}
+
+export interface QuestionImportRowPayload {
+  row_number: number;
+  csv_line: string;
 }

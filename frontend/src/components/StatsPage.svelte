@@ -2,7 +2,7 @@
   import type { QuestionRow, RecentSession, StatsResponse } from '../lib/types';
 
   type SortDirection = 'asc' | 'desc';
-  type SortKey = 'prompt' | 'question_type' | 'module_title' | 'ranking' | 'attempts' | 'correct_percentage';
+  type SortKey = 'prompt' | 'question_type' | 'module_title' | 'rank' | 'attempts' | 'correct_percentage';
 
   type SortDefinition = {
     key: SortKey;
@@ -11,7 +11,7 @@
   };
 
   const sortDefinitions: SortDefinition[] = [
-    { key: 'ranking', label: 'Rank', defaultDirection: 'desc' },
+    { key: 'rank', label: 'Rank', defaultDirection: 'asc' },
     { key: 'prompt', label: 'Prompt', defaultDirection: 'asc' },
     { key: 'question_type', label: 'Type', defaultDirection: 'asc' },
     { key: 'module_title', label: 'Module', defaultDirection: 'asc' },
@@ -20,6 +20,7 @@
   ];
 
   export let moduleLabel = 'All Modules';
+  export let activeUserLabel = 'Current User';
   export let stats: StatsResponse | null = null;
   export let loading = false;
   export let reviewOnly = false;
@@ -37,6 +38,25 @@
 
   function formatScorePair(earned: number, possible: number): string {
     return `${formatScore(earned)}/${formatScore(possible)}`;
+  }
+
+  function formatScheduleLabel(question: QuestionRow): string {
+    switch (question.schedule.bucket) {
+      case 'hot':
+        return `Hot · recovery ${question.schedule.recovery_streak ?? 0}/${2}`;
+      case 'due_review':
+        return `Due review · step ${(question.schedule.interval_step ?? 0) + 1}`;
+      case 'unseen':
+        return 'Unseen';
+      case 'one_shot_easy':
+        return 'First pass correct';
+      case 'not_due_recovered':
+        return question.schedule.next_due_at
+          ? `Cooling · due ${new Date(question.schedule.next_due_at).toLocaleDateString()}`
+          : 'Cooling';
+      default:
+        return 'Seen correct';
+    }
   }
 
   function handleSort(nextSortKey: SortKey): void {
@@ -67,8 +87,8 @@
         return left.question_type.localeCompare(right.question_type);
       case 'module_title':
         return left.module_title.localeCompare(right.module_title);
-      case 'ranking':
-        return left.ranking - right.ranking;
+      case 'rank':
+        return left.rank - right.rank;
       case 'attempts':
         return left.attempts - right.attempts;
       case 'correct_percentage':
@@ -193,15 +213,18 @@
     <div>
       <p class="eyebrow">Stats scope</p>
       <h2>{moduleLabel}</h2>
+      <p class="muted-copy">Progress for {activeUserLabel}.</p>
     </div>
-    <label class="review-filter">
-      <input
-        type="checkbox"
-        checked={reviewOnly}
-        on:change={(event) => onToggleReviewOnly((event.currentTarget as HTMLInputElement).checked)}
-      />
-      Review only
-    </label>
+    <div class="stats-page-actions">
+      <label class="review-filter">
+        <input
+          type="checkbox"
+          checked={reviewOnly}
+          on:change={(event) => onToggleReviewOnly((event.currentTarget as HTMLInputElement).checked)}
+        />
+        Review only
+      </label>
+    </div>
   </div>
 
   {#if errorMessage}
@@ -217,7 +240,7 @@
       <article class="panel stat-card">
         <p class="eyebrow">Question bank</p>
         <h3>{stats.summary.total_questions}</h3>
-        <p>{stats.summary.reviewed_questions} manually flagged for review.</p>
+        <p>{stats.summary.reviewed_questions} flagged for review by this user.</p>
       </article>
       <article class="panel stat-card">
         <p class="eyebrow">Attempts</p>
@@ -227,7 +250,7 @@
       <article class="panel stat-card">
         <p class="eyebrow">Accuracy</p>
         <h3>{Math.round(stats.summary.accuracy * 100)}%</h3>
-        <p>Across the active revision bucket for each question.</p>
+        <p>Across the selected module scope.</p>
       </article>
     </div>
 
@@ -314,8 +337,13 @@
             <tbody>
               {#each sortedQuestions as question (question.question_id)}
                 <tr class:flagged-review={question.review_flag} on:click={() => onOpenEdit(question)}>
-                  <td>{question.ranking}</td>
-                  <td>{question.prompt_preview}</td>
+                  <td>{question.rank}</td>
+                  <td>
+                    <div class="question-cell">
+                      <span>{question.prompt_preview}</span>
+                      <span class="question-schedule">{formatScheduleLabel(question)}</span>
+                    </div>
+                  </td>
                   <td>{question.question_type}</td>
                   <td>{question.module_title}</td>
                   <td>{question.attempts}</td>

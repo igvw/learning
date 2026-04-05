@@ -23,6 +23,7 @@ pnpm-debug.log*
 # Local app data
 data/
 tools/
+.env
 
 # OS / editors
 .DS_Store

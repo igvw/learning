@@ -5,21 +5,27 @@ from pathlib import Path
 
 from .database import get_connection, initialize_database
 from .services import sync_seed_content
-from .settings import CONTENT_DIR, resolve_db_path
+from .settings import CONTENT_DIR, resolve_database_url
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Learning app maintenance commands.")
     subcommands = parser.add_subparsers(dest="command", required=True)
 
-    sync_parser = subcommands.add_parser("import-content", help="Import any missing seed content into SQLite.")
-    sync_parser.add_argument("--db-path", default=str(resolve_db_path()))
+    init_parser = subcommands.add_parser("init-db", help="Initialize the PostgreSQL schema.")
+    init_parser.add_argument("--database-url", default=resolve_database_url())
+
+    sync_parser = subcommands.add_parser("import-content", help="Import any missing seed content into PostgreSQL.")
+    sync_parser.add_argument("--database-url", default=resolve_database_url())
     sync_parser.add_argument("--content-root", default=str(CONTENT_DIR))
 
     args = parser.parse_args()
+    if args.command == "init-db":
+        initialize_database(args.database_url)
+        print("Database initialized.")
     if args.command == "import-content":
-        initialize_database(args.db_path)
-        with get_connection(args.db_path) as connection:
+        initialize_database(args.database_url)
+        with get_connection(args.database_url) as connection:
             result = sync_seed_content(connection, Path(args.content_root))
         print(f"Imported {result['modules']} modules and {result['questions']} questions.")
 

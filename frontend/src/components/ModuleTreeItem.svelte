@@ -27,6 +27,9 @@
     void onSelect(node.id, false);
   }
 
+  $: if (depth === 0 && selectedModuleId !== null && !branchContainsSelected(node, selectedModuleId)) {
+    expanded = false;
+  }
   $: branchOpen = expanded || branchContainsSelected(node, selectedModuleId);
 </script>
 

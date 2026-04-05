@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, model_validator
 
 
 QuestionType = Literal["single_text", "multi_text", "ordered_multi", "inline_cloze"]
+ScheduleBucket = Literal["hot", "due_review", "unseen", "one_shot_easy", "backlog_seen_correct", "not_due_recovered"]
 
 
 class ModuleUiCopy(BaseModel):
@@ -21,6 +22,7 @@ class ModuleNodeOut(BaseModel):
     title: str
     slug: str
     full_slug: str
+    instruction: str = ""
     ui_copy: ModuleUiCopy
     children: list["ModuleNodeOut"] = Field(default_factory=list)
 
@@ -28,7 +30,21 @@ class ModuleNodeOut(BaseModel):
 class CreateModuleIn(BaseModel):
     title: str = Field(min_length=1, max_length=120)
     parent_id: Optional[int] = None
+    instruction: str = ""
     ui_copy: ModuleUiCopy = Field(default_factory=ModuleUiCopy)
+
+
+class UserCreateIn(BaseModel):
+    handle: str = Field(min_length=1, max_length=60)
+    display_name: str = Field(min_length=1, max_length=120)
+
+
+class UserOut(BaseModel):
+    id: int
+    handle: str
+    display_name: str
+    created_at: str
+    disabled_at: Optional[str] = None
 
 
 class QuizSessionCreateIn(BaseModel):
@@ -40,10 +56,13 @@ class QuizItemOut(BaseModel):
     id: int
     position: int
     question_id: int
+    module_id: int
+    module_title: str
+    module_instruction: str = ""
     review_flag: bool
     prompt: str
     question_type: QuestionType
-    ranking: float
+    rank: int
     type_config: dict[str, Any]
     submitted_answer: Optional[List[str]] = None
     is_correct: Optional[bool] = None
@@ -83,8 +102,7 @@ class QuestionDraftIn(BaseModel):
     module_id: int
     prompt: str = Field(min_length=1)
     question_type: QuestionType
-    ranking: float = Field(default=1, ge=0)
-    review_flag: bool = False
+    rank: int = Field(default=1, ge=1)
     accepted_answers: list[list[str]] = Field(min_length=1)
     slot_prompts: list[str] = Field(default_factory=list)
     segments: list[str] = Field(default_factory=list)
@@ -152,14 +170,23 @@ class StatsSummaryOut(BaseModel):
     accuracy: float
 
 
+class QuestionScheduleOut(BaseModel):
+    bucket: ScheduleBucket
+    recovery_streak: Optional[int] = None
+    interval_step: Optional[int] = None
+    last_incorrect_at: Optional[str] = None
+    next_due_at: Optional[str] = None
+
+
 class QuestionRowOut(BaseModel):
     question_id: int
     module_id: int
     module_title: str
+    module_full_slug: str
     prompt: str
     prompt_preview: str
     question_type: QuestionType
-    ranking: float
+    rank: int
     attempts: int
     correct_percentage: float
     last_asked_at: Optional[str] = None
@@ -167,9 +194,43 @@ class QuestionRowOut(BaseModel):
     accepted_answers: list[list[str]]
     slot_prompts: list[str]
     segments: list[str]
+    recent_incorrect_answers: list[dict[str, Any]] = Field(default_factory=list)
+    schedule: QuestionScheduleOut
 
 
 class StatsResponseOut(BaseModel):
     summary: StatsSummaryOut
     recent_sessions: list[RecentSessionOut]
     questions: list[QuestionRowOut]
+
+
+class CreateQuestionImportSessionIn(BaseModel):
+    module_id: int
+    csv_text: str = Field(min_length=1)
+
+
+class QuestionImportRowIn(BaseModel):
+    row_number: int = Field(ge=1)
+    csv_line: str
+
+
+class RevalidateQuestionImportSessionIn(BaseModel):
+    rows: list[QuestionImportRowIn] = Field(default_factory=list)
+
+
+class QuestionImportUnresolvedRowOut(BaseModel):
+    row_number: int
+    csv_line: str
+    issues: list[str]
+    inferred_type: Optional[QuestionType] = None
+
+
+class QuestionImportSessionOut(BaseModel):
+    session_id: int
+    expires_at: str
+    ready_to_commit: bool
+    staged_valid_count: int
+    unresolved_rows: list[QuestionImportUnresolvedRowOut]
+    report_text: str
+    committed: bool = False
+    committed_count: int = 0

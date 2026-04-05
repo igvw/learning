@@ -1,0 +1,49 @@
+services:
+  postgres:
+    image: postgres:16-bookworm
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-learning}
+      POSTGRES_USER: ${POSTGRES_USER:-learning}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-learning}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      LEARNING_APP_ENV: production
+      LEARNING_APP_DATABASE_URL: postgresql://${POSTGRES_USER:-learning}:${POSTGRES_PASSWORD:-learning}@postgres:5432/${POSTGRES_DB:-learning}
+      LEARNING_APP_SEED_ON_BOOT: ${LEARNING_APP_SEED_ON_BOOT:-true}
+      LEARNING_APP_CORS_ORIGINS: ${LEARNING_APP_CORS_ORIGINS:-}
+    ports:
+      - "${LEARNING_APP_PORT:-8000}:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=2).read()",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

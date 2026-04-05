@@ -4,6 +4,8 @@
 
   export let session: QuizSession | null = null;
   export let moduleLabel = 'Selected Module';
+  export let moduleInstruction = '';
+  export let selectedModuleIsLeaf = false;
   export let busyItemId: number | null = null;
   export let markingReviewQuestionId: number | null = null;
   export let errorMessage = '';
@@ -24,6 +26,17 @@
       return item.type_config.expected_slots ?? item.type_config.slot_prompts?.length ?? 0;
     }
     return Math.max((item.type_config.segments?.length ?? 1) - 1, 0);
+  }
+
+  function renderedInlinePrompt(item: QuizItem): string {
+    return (item.type_config.segments ?? []).join('[_]');
+  }
+
+  function shouldShowPromptHeading(item: QuizItem): boolean {
+    if (item.question_type !== 'inline_cloze') {
+      return true;
+    }
+    return item.prompt.trim() !== renderedInlinePrompt(item).trim();
   }
 
   function itemScorePossible(item: QuizItem): number {
@@ -181,6 +194,13 @@
     {/if}
   </div>
 
+  {#if selectedModuleIsLeaf && moduleInstruction}
+    <div class="panel instruction-panel">
+      <p class="eyebrow">Instruction</p>
+      <p>{moduleInstruction}</p>
+    </div>
+  {/if}
+
   {#if errorMessage}
     <div class="banner error">{errorMessage}</div>
   {/if}
@@ -235,7 +255,13 @@
             </div>
 
             <div class="quiz-card-body">
-              <h3>{item.prompt}</h3>
+              {#if !selectedModuleIsLeaf && item.module_instruction}
+                <p class="eyebrow quiz-item-instruction">{item.module_instruction}</p>
+              {/if}
+
+              {#if shouldShowPromptHeading(item)}
+                <h3>{item.prompt}</h3>
+              {/if}
 
               {#if item.question_type === 'single_text'}
                 <input
