@@ -1,0 +1,4 @@
+# Keep this directory for source material and drafting files used to create
+# module questions. Final importable seed content belongs in content/modules.
+*
+!.gitignore

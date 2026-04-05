@@ -1,0 +1,6 @@
+source_id,module_source_id,type,ranking,prompt,accepted_answers_json,slot_prompts_json,segments_json
+biology-animals-001,biology-animals,single_text,5,What type of animal regulates its own body temperature internally?,"[[""endotherm"",""warm-blooded animal"",""warm blooded animal""]]","",""
+biology-animals-002,biology-animals,multi_text,4,Name the three major body sections of an insect.,"[[""head""],[""thorax""],[""abdomen""]]","[""Section 1"",""Section 2"",""Section 3""]",""
+biology-animals-003,biology-animals,inline_cloze,3,Complete the sentence about vertebrates.,"[[""backbone"",""spine""]]","","[""A vertebrate is an animal with a "","".""]"
+biology-animals-004,biology-animals,single_text,2,What is the process by which animals maintain stable internal conditions called?,"[[""homeostasis""]]","",""
+biology-animals-005,biology-animals,multi_text,1,Name two ways mammals usually feed their young.,"[[""milk"",""nursing""],[""suckling"",""feeding milk""]]","[""Way 1"",""Way 2""]",""

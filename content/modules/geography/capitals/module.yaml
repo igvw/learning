@@ -1,0 +1,8 @@
+source_id: geography-capitals
+title: Capitals
+parent_source_id: geography
+ui_copy:
+  question_label: Capital prompt
+  answer_label: Capital answer
+  stats_title: Capitals Stats
+  review_title: Capitals Review

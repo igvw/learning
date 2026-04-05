@@ -1,0 +1,8 @@
+source_id: biology-plants
+title: Plants
+parent_source_id: biology
+ui_copy:
+  question_label: Plant prompt
+  answer_label: Plant answer
+  stats_title: Plant Stats
+  review_title: Plant Review

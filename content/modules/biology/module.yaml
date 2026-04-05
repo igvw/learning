@@ -1,0 +1,7 @@
+source_id: biology
+title: Biology
+ui_copy:
+  question_label: Prompt
+  answer_label: Accepted answer
+  stats_title: Biology Stats
+  review_title: Biology Review

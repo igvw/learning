@@ -1,0 +1,8 @@
+source_id: geography-rivers
+title: Rivers
+parent_source_id: geography
+ui_copy:
+  question_label: River prompt
+  answer_label: River answer
+  stats_title: River Stats
+  review_title: River Review

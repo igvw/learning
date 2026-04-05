@@ -1,0 +1,8 @@
+source_id: biology-animals
+title: Animals
+parent_source_id: biology
+ui_copy:
+  question_label: Animal prompt
+  answer_label: Animal answer
+  stats_title: Animal Stats
+  review_title: Animal Review

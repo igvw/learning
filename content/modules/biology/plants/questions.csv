@@ -1,0 +1,6 @@
+source_id,module_source_id,type,ranking,prompt,accepted_answers_json,slot_prompts_json,segments_json
+biology-plants-001,biology-plants,single_text,5,Which pigment gives most plants their green color?,"[[""chlorophyll""]]","",""
+biology-plants-002,biology-plants,multi_text,4,Name the two main vascular tissues in flowering plants.,"[[""xylem""],[""phloem""]]","[""Tissue 1"",""Tissue 2""]",""
+biology-plants-003,biology-plants,inline_cloze,3,Complete the sentence about photosynthesis.,"[[""chloroplasts"",""chloroplast""]]","","[""Photosynthesis mainly happens in the "","" of plant cells.""]"
+biology-plants-004,biology-plants,single_text,2,What structure anchors most plants in the ground?,"[[""roots"",""root system""]]","",""
+biology-plants-005,biology-plants,multi_text,1,What three things do most seeds need to germinate?,"[[""water""],[""oxygen""],[""warmth"",""heat""]]","[""Need 1"",""Need 2"",""Need 3""]",""

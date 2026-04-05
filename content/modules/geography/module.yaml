@@ -1,0 +1,7 @@
+source_id: geography
+title: Geography
+ui_copy:
+  question_label: Prompt
+  answer_label: Accepted answer
+  stats_title: Geography Stats
+  review_title: Geography Review
