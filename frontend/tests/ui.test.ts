@@ -1,7 +1,24 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/svelte';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('../src/lib/api', () => ({
+  commitQuestionImport: vi.fn(),
+  createModule: vi.fn(),
+  createQuestion: vi.fn(),
+  createQuizSession: vi.fn(),
+  createUser: vi.fn(),
+  getModulesTree: vi.fn(),
+  getStats: vi.fn(),
+  getUsers: vi.fn(),
+  reviseQuestion: vi.fn(),
+  setQuestionReviewFlag: vi.fn(),
+  submitQuizAnswer: vi.fn(),
+  validateQuestionImportRows: vi.fn(),
+  validateQuestionImportText: vi.fn()
+}));
+
+import App from '../src/App.svelte';
 import AdminPage from '../src/components/AdminPage.svelte';
 import EditorDrawer from '../src/components/EditorDrawer.svelte';
 import Header from '../src/components/Header.svelte';
@@ -9,11 +26,15 @@ import ImportDrawer from '../src/components/ImportDrawer.svelte';
 import QuizPage from '../src/components/QuizPage.svelte';
 import ModuleMenu from '../src/components/ModuleMenu.svelte';
 import StatsPage from '../src/components/StatsPage.svelte';
+import * as api from '../src/lib/api';
 import { ensureModulePath } from '../src/lib/module-paths';
-import type { ModuleNode, QuestionImportSession, QuizSession, StatsResponse, User } from '../src/lib/types';
+import type { ModuleNode, QuestionImportResult, QuizSession, StatsResponse, User } from '../src/lib/types';
 
 afterEach(() => {
   cleanup();
+  vi.clearAllMocks();
+  window.localStorage.clear();
+  window.history.replaceState({}, '', '/quiz');
 });
 
 describe('module paths', () => {
@@ -21,31 +42,17 @@ describe('module paths', () => {
     let moduleTree: ModuleNode[] = [
       {
         id: 1,
-        source_id: 'norwegian',
         title: 'Norwegian',
         slug: 'norwegian',
         full_slug: 'norwegian',
         instruction: '',
-        ui_copy: {
-          question_label: 'Question',
-          answer_label: 'Answer',
-          stats_title: 'Stats',
-          review_title: 'Review'
-        },
         children: [
           {
             id: 2,
-            source_id: 'norwegian-vocabulary',
             title: 'Vocabulary',
             slug: 'vocabulary',
             full_slug: 'norwegian/vocabulary',
             instruction: '',
-            ui_copy: {
-              question_label: 'Question',
-              answer_label: 'Answer',
-              stats_title: 'Stats',
-              review_title: 'Review'
-            },
             children: []
           }
         ]
@@ -60,17 +67,10 @@ describe('module paths', () => {
           : 'norwegian/vocabulary/nouns_to_english/plural_forms';
       return {
         id,
-        source_id: null,
         title,
         slug: title,
         full_slug: fullSlug,
         instruction,
-        ui_copy: {
-          question_label: 'Question',
-          answer_label: 'Answer',
-          stats_title: 'Stats',
-          review_title: 'Review'
-        },
         children: []
       };
     });
@@ -85,17 +85,10 @@ describe('module paths', () => {
               children: [
                 {
                   id: 3,
-                  source_id: null,
                   title: 'nouns_to_english',
                   slug: 'nouns_to_english',
                   full_slug: 'norwegian/vocabulary/nouns_to_english',
                   instruction: 'Translate to English.',
-                  ui_copy: {
-                    question_label: 'Question',
-                    answer_label: 'Answer',
-                    stats_title: 'Stats',
-                    review_title: 'Review'
-                  },
                   children: []
                 }
               ]
@@ -119,8 +112,7 @@ describe('module paths', () => {
     expect(createSpy).toHaveBeenCalledWith({
       title: 'nouns_to_english',
       parent_id: 2,
-      instruction: 'Translate to English.',
-      ui_copy: undefined
+      instruction: 'Translate to English.'
     });
     expect(created.full_slug).toBe('norwegian/vocabulary/nouns_to_english');
   });
@@ -135,15 +127,13 @@ describe('Header', () => {
         id: 1,
         handle: 'ignazio',
         display_name: 'Ignazio',
-        created_at: '2026-04-05T10:00:00Z',
-        disabled_at: null
+        created_at: '2026-04-05T10:00:00Z'
       },
       {
         id: 2,
         handle: 'ingrid',
         display_name: 'Ingrid',
-        created_at: '2026-04-05T10:05:00Z',
-        disabled_at: null
+        created_at: '2026-04-05T10:05:00Z'
       }
     ];
 
@@ -170,6 +160,64 @@ describe('Header', () => {
   });
 });
 
+describe('App', () => {
+  it('persists the selected module across remounts', async () => {
+    const user = userEvent.setup();
+    const modules: ModuleNode[] = [
+      {
+        id: 1,
+        title: 'Biology',
+        slug: 'biology',
+        full_slug: 'biology',
+        instruction: '',
+        children: []
+      },
+      {
+        id: 2,
+        title: 'Geography',
+        slug: 'geography',
+        full_slug: 'geography',
+        instruction: '',
+        children: []
+      }
+    ];
+    const users: User[] = [
+      {
+        id: 1,
+        handle: 'ignazio',
+        display_name: 'Ignazio',
+        created_at: '2026-04-05T10:00:00Z'
+      }
+    ];
+
+    vi.mocked(api.getModulesTree).mockResolvedValue(modules);
+    vi.mocked(api.getUsers).mockResolvedValue(users);
+
+    const firstRender = render(App);
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Biology' })).toBeTruthy();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Open module menu' }));
+    const moduleSelection = screen.getByLabelText('Module selection');
+    await user.click(within(moduleSelection).getByRole('button', { name: /Geography\s*geography/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Geography' })).toBeTruthy();
+    });
+    expect(window.localStorage.getItem('learning.selected-module-id')).toBe('2');
+
+    firstRender.unmount();
+
+    render(App);
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Geography' })).toBeTruthy();
+    });
+  });
+});
+
 describe('QuizPage', () => {
   it('submits a single-answer prompt with Enter', async () => {
     const user = userEvent.setup();
@@ -184,7 +232,6 @@ describe('QuizPage', () => {
           position: 1,
           question_id: 10,
           module_id: 5,
-          module_title: 'Capitals',
           module_instruction: '',
           review_flag: false,
           prompt: 'What is the capital of Japan?',
@@ -225,7 +272,6 @@ describe('QuizPage', () => {
           position: 1,
           question_id: 12,
           module_id: 5,
-          module_title: 'Capitals',
           module_instruction: '',
           review_flag: false,
           prompt: 'Name the capitals of Spain and Portugal.',
@@ -270,7 +316,6 @@ describe('QuizPage', () => {
           position: 1,
           question_id: 11,
           module_id: 5,
-          module_title: 'Capitals',
           module_instruction: '',
           review_flag: false,
           prompt: 'What is the capital of Kenya?',
@@ -296,7 +341,7 @@ describe('QuizPage', () => {
       }
     });
 
-    const answeredCard = screen.getByText('What is the capital of Kenya?').closest('article');
+    const answeredCard = screen.getByText('1. What is the capital of Kenya?').closest('article');
     const answeredInput = screen.getByRole('textbox');
     const answerBox = screen.getByText('nairobi').closest('.answer-box');
 
@@ -314,6 +359,94 @@ describe('QuizPage', () => {
     expect(screen.getByRole('button', { name: 'Flag for revision' })).toBeTruthy();
   });
 
+  it('lets you choose the number of questions before starting a quiz', async () => {
+    const user = userEvent.setup();
+    const changeSpy = vi.fn();
+
+    render(QuizPage, {
+      props: {
+        session: null,
+        moduleLabel: 'Geography',
+        questionCount: 10,
+        onChangeQuestionCount: changeSpy,
+        onStartQuiz: vi.fn(),
+        onSubmit: vi.fn()
+      }
+    });
+
+    const input = screen.getByRole('spinbutton', { name: 'Questions per quiz' });
+    await user.clear(input);
+    await user.type(input, '15');
+    await user.tab();
+
+    expect(changeSpy).toHaveBeenCalledWith(15);
+  });
+
+  it('filters the completed session down to mistakes only', async () => {
+    const user = userEvent.setup();
+    const session: QuizSession = {
+      id: 24,
+      module_id: null,
+      completed_at: '2026-04-04T10:00:00Z',
+      items: [
+        {
+          id: 8,
+          position: 1,
+          question_id: 11,
+          module_id: 5,
+          module_instruction: '',
+          review_flag: false,
+          prompt: 'What is the capital of Kenya?',
+          question_type: 'single_text',
+          rank: 1,
+          type_config: { expected_slots: 1 },
+          submitted_answer: ['Mombasa'],
+          is_correct: false,
+          score_earned: 0,
+          score_possible: 1,
+          slot_results: [{ index: 0, is_correct: false, expected: 'nairobi' }],
+          canonical_answers: ['nairobi']
+        },
+        {
+          id: 9,
+          position: 2,
+          question_id: 12,
+          module_id: 5,
+          module_instruction: '',
+          review_flag: false,
+          prompt: 'What is the capital of Japan?',
+          question_type: 'single_text',
+          rank: 2,
+          type_config: { expected_slots: 1 },
+          submitted_answer: ['Tokyo'],
+          is_correct: true,
+          score_earned: 1,
+          score_possible: 1,
+          slot_results: [{ index: 0, is_correct: true, expected: 'tokyo' }],
+          canonical_answers: ['tokyo']
+        }
+      ]
+    };
+
+    render(QuizPage, {
+      props: {
+        session,
+        moduleLabel: 'Geography',
+        busyItemId: null,
+        onSubmit: vi.fn()
+      }
+    });
+
+    expect(screen.getByText('1. What is the capital of Kenya?')).toBeTruthy();
+    expect(screen.getByText('2. What is the capital of Japan?')).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: 'Review Mistakes' }));
+
+    expect(screen.getByText('1. What is the capital of Kenya?')).toBeTruthy();
+    expect(screen.queryByText('2. What is the capital of Japan?')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Show All Answers' })).toBeTruthy();
+  });
+
   it('marks a completed question for revision', async () => {
     const user = userEvent.setup();
     const markSpy = vi.fn().mockResolvedValue(undefined);
@@ -327,7 +460,6 @@ describe('QuizPage', () => {
           position: 1,
           question_id: 21,
           module_id: 3,
-          module_title: 'Rivers',
           module_instruction: '',
           review_flag: false,
           prompt: 'Which river runs through Cairo?',
@@ -354,7 +486,7 @@ describe('QuizPage', () => {
       }
     });
 
-    const answeredCard = screen.getByText('Which river runs through Cairo?').closest('article');
+    const answeredCard = screen.getByText('1. Which river runs through Cairo?').closest('article');
     const answeredInput = screen.getByRole('textbox');
 
     expect(answeredCard?.className).toContain('correct');
@@ -375,7 +507,6 @@ describe('QuizPage', () => {
           position: 1,
           question_id: 22,
           module_id: 2,
-          module_title: 'Animals',
           module_instruction: '',
           review_flag: false,
           prompt: 'Name the three major body sections of an insect.',
@@ -415,7 +546,7 @@ describe('QuizPage', () => {
 });
 
 describe('StatsPage', () => {
-  it('opens a question row, toggles the review filter, renders the graph, and sorts the table', async () => {
+  it('opens a question row, toggles the review filter, renders both graphs, and sorts the table', async () => {
     const user = userEvent.setup();
     const openSpy = vi.fn();
     const toggleSpy = vi.fn();
@@ -450,7 +581,6 @@ describe('StatsPage', () => {
         {
           question_id: 50,
           module_id: 3,
-          module_title: 'Plants',
           module_full_slug: 'biology/plants',
           prompt: 'What structure anchors most plants in the ground?',
           prompt_preview: 'What structure anchors most plants in the ground?',
@@ -458,29 +588,30 @@ describe('StatsPage', () => {
           rank: 2,
           attempts: 3,
           correct_percentage: 2 / 3,
-          last_asked_at: null,
+          last_asked_at: '2026-04-01T06:00:00Z',
           review_flag: true,
           accepted_answers: [['roots']],
-          slot_prompts: [],
           segments: [],
           schedule: {
-            bucket: 'hot',
+            bucket: 'hot1_sit_out',
+            logical_bucket: 'review',
             recovery_streak: 1,
             interval_step: 0,
             last_incorrect_at: '2026-04-04T08:00:00Z',
-            next_due_at: null
+            next_due_at: null,
+            retry_pending: false
           },
           recent_incorrect_answers: [
             {
-              submitted_answer: ['stems'],
-              answered_at: '2026-04-04T08:00:00Z'
+              answer_text: 'stems',
+              count: 2,
+              latest_answered_at: '2026-04-04T08:00:00Z'
             }
           ]
         },
         {
           question_id: 51,
           module_id: 5,
-          module_title: 'Capitals',
           module_full_slug: 'geography/capitals',
           prompt: 'What is the capital of Canada?',
           prompt_preview: 'What is the capital of Canada?',
@@ -491,14 +622,40 @@ describe('StatsPage', () => {
           last_asked_at: null,
           review_flag: false,
           accepted_answers: [['ottawa']],
-          slot_prompts: [],
           segments: [],
           schedule: {
-            bucket: 'backlog_seen_correct',
+            bucket: 'due_review',
+            logical_bucket: '3h',
+            recovery_streak: null,
+            interval_step: 1,
+            last_incorrect_at: '2026-04-01T08:00:00Z',
+            next_due_at: '2026-04-07T08:00:00Z',
+            retry_pending: false
+          },
+          recent_incorrect_answers: []
+        },
+        {
+          question_id: 52,
+          module_id: 5,
+          module_full_slug: 'geography/capitals',
+          prompt: 'What is the capital of Sweden?',
+          prompt_preview: 'What is the capital of Sweden?',
+          question_type: 'single_text',
+          rank: 6,
+          attempts: 2,
+          correct_percentage: 1,
+          last_asked_at: '2026-04-02T07:30:00Z',
+          review_flag: false,
+          accepted_answers: [['stockholm']],
+          segments: [],
+          schedule: {
+            bucket: 'mastery',
+            logical_bucket: 'mastery',
             recovery_streak: null,
             interval_step: null,
             last_incorrect_at: null,
-            next_due_at: null
+            next_due_at: null,
+            retry_pending: false
           },
           recent_incorrect_answers: []
         }
@@ -524,66 +681,132 @@ describe('StatsPage', () => {
     expect(toggleSpy).toHaveBeenCalledWith(true);
 
     expect(screen.getByRole('img', { name: 'Recent session accuracy graph' })).toBeTruthy();
+    expect(screen.getByRole('img', { name: 'Spaced repetition stage counts' })).toBeTruthy();
+    expect(screen.getByRole('img', { name: 'Entry state counts' })).toBeTruthy();
     const graphLabels = Array.from(view.container.querySelectorAll('.session-bar text')).map((node) => node.textContent);
-    expect(graphLabels).toEqual(['2/3', '2/2']);
+    expect(graphLabels).toContain('2/3');
+    expect(graphLabels).toContain('2/2');
+    expect(graphLabels).toContain('Unseen');
+    expect(graphLabels).toContain('Review');
+    expect(graphLabels).toContain('Bucketed');
+    expect(graphLabels).toContain('1h');
+    expect(graphLabels).toContain('3h');
+    expect(graphLabels).toContain('6h');
+    expect(graphLabels).toContain('12h');
+    expect(graphLabels).toContain('1d');
+    expect(graphLabels).toContain('3d');
+    expect(graphLabels).toContain('7d');
+    expect(graphLabels).toContain('14d');
+    expect(graphLabels).toContain('Mastery');
     expect(view.container.querySelector('.graph-average-line title')?.textContent).toBe('83%');
     expect(screen.queryByRole('button', { name: 'Review' })).toBeNull();
-    expect(screen.getByText('What structure anchors most plants in the ground?').closest('tr')?.className).toContain(
-      'flagged-review'
-    );
+    expect(screen.getByRole('button', { name: 'Bucket' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Last seen' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Type' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Module' })).toBeNull();
+    const firstRowClass = screen.getByText('What structure anchors most plants in the ground?').closest('tr')?.className ?? '';
+    expect(firstRowClass).toContain('flagged-review');
+    expect(firstRowClass).not.toContain('hot1-row');
+
+    await user.click(screen.getByRole('button', { name: 'Bucket' }));
+    await waitFor(() => {
+      const rowsAfterScheduleSort = screen.getAllByRole('row');
+      expect(rowsAfterScheduleSort[1].textContent).toContain('What is the capital of Canada?');
+      expect(rowsAfterScheduleSort[1].textContent).toContain('3h');
+    });
 
     await user.click(screen.getByRole('button', { name: 'Attempts' }));
     await waitFor(() => {
       const rowsAfterSort = screen.getAllByRole('row');
       expect(rowsAfterSort[1].textContent).toContain('What is the capital of Canada?');
     });
+
+    await user.click(screen.getByRole('button', { name: 'Last seen' }));
+    await waitFor(() => {
+      const rowsAfterLastSeenSort = screen.getAllByRole('row');
+      expect(rowsAfterLastSeenSort[1].textContent).toContain('What is the capital of Sweden?');
+      expect(rowsAfterLastSeenSort[2].textContent).toContain(
+        'What structure anchors most plants in the ground?'
+      );
+      expect(rowsAfterLastSeenSort[3].textContent).toContain('What is the capital of Canada?');
+      expect(rowsAfterLastSeenSort[3].textContent).toContain('Never');
+    });
   });
 });
 
 describe('EditorDrawer', () => {
-  it('shows full module path and recent incorrect answers without inline module creation or review checkbox', () => {
+  it('shows type-specific ghost text in create mode', async () => {
+    const user = userEvent.setup();
     const modules: ModuleNode[] = [
       {
         id: 1,
-        source_id: 'norwegian',
+        title: 'Geography',
+        slug: 'geography',
+        full_slug: 'geography',
+        instruction: '',
+        children: []
+      }
+    ];
+
+    render(EditorDrawer, {
+      props: {
+        open: true,
+        modules,
+        defaultModuleId: 1,
+        editingQuestion: null,
+        saving: false,
+        onClose: vi.fn(),
+        onSave: vi.fn()
+      }
+    });
+
+    expect(screen.getByPlaceholderText('What is the capital of Norway?')).toBeTruthy();
+    expect(screen.getByPlaceholderText('oslo')).toBeTruthy();
+
+    await user.selectOptions(screen.getByLabelText('Question type'), 'multi_text');
+    expect(screen.getByPlaceholderText('Name the two rivers that meet at Khartoum.')).toBeTruthy();
+    expect(screen.getByPlaceholderText('white nile')).toBeTruthy();
+    expect(screen.getByPlaceholderText('blue nile')).toBeTruthy();
+
+    await user.selectOptions(screen.getByLabelText('Question type'), 'ordered_multi');
+    expect(screen.getByPlaceholderText('Name the stages in order.')).toBeTruthy();
+    expect(screen.getByPlaceholderText('stage one')).toBeTruthy();
+    expect(screen.getByPlaceholderText('stage two')).toBeTruthy();
+
+    await user.selectOptions(screen.getByLabelText('Question type'), 'inline_cloze');
+    expect(screen.getByPlaceholderText('The [Amazon | Amazon River] flows through South America.')).toBeTruthy();
+    expect(screen.getByPlaceholderText(/The derivative of/)).toBeTruthy();
+    expect(screen.getByPlaceholderText('x^2')).toBeTruthy();
+    expect(screen.getByPlaceholderText('.')).toBeTruthy();
+
+    await user.selectOptions(screen.getByLabelText('Question type'), 'computed_text');
+    expect(screen.getByPlaceholderText(/\$m=\[1-10\]\*100\$/)).toBeTruthy();
+    expect(screen.getByPlaceholderText('$m/v$ ml')).toBeTruthy();
+    expect(screen.getByText('QML')).toBeTruthy();
+  });
+
+  it('shows dense revision fields and aggregated incorrect answers without duplicate module UI', () => {
+    const modules: ModuleNode[] = [
+      {
+        id: 1,
         title: 'Norwegian',
         slug: 'norwegian',
         full_slug: 'norwegian',
         instruction: '',
-        ui_copy: {
-          question_label: 'Question',
-          answer_label: 'Answer',
-          stats_title: 'Stats',
-          review_title: 'Review'
-        },
         children: [
           {
             id: 2,
-            source_id: 'norwegian-vocabulary',
             title: 'Vocabulary',
             slug: 'vocabulary',
             full_slug: 'norwegian/vocabulary',
             instruction: '',
-            ui_copy: {
-              question_label: 'Question',
-              answer_label: 'Answer',
-              stats_title: 'Stats',
-              review_title: 'Review'
-            },
             children: [
               {
                 id: 3,
-                source_id: 'norwegian-vocabulary-noun2en',
                 title: 'noun2en',
                 slug: 'noun2en',
                 full_slug: 'norwegian/vocabulary/noun2en',
                 instruction: 'Translate the Norwegian term into English.',
-                ui_copy: {
-                  question_label: 'Question',
-                  answer_label: 'Answer',
-                  stats_title: 'Stats',
-                  review_title: 'Review'
-                },
                 children: []
               }
             ]
@@ -599,7 +822,6 @@ describe('EditorDrawer', () => {
         editingQuestion: {
           question_id: 30,
           module_id: 3,
-          module_title: 'noun2en',
           module_full_slug: 'norwegian/vocabulary/noun2en',
           prompt: 'hund',
           prompt_preview: 'hund',
@@ -610,23 +832,26 @@ describe('EditorDrawer', () => {
           last_asked_at: '2026-04-04T09:00:00Z',
           review_flag: true,
           accepted_answers: [['dog']],
-          slot_prompts: [],
           segments: [],
           schedule: {
-            bucket: 'hot',
+            bucket: 'hot0',
+            logical_bucket: 'unseen',
             recovery_streak: 0,
             interval_step: 0,
             last_incorrect_at: '2026-04-04T08:00:00Z',
-            next_due_at: null
+            next_due_at: null,
+            retry_pending: false
           },
           recent_incorrect_answers: [
             {
-              submitted_answer: ['hound'],
-              answered_at: '2026-04-04T08:00:00Z'
+              answer_text: 'hound',
+              count: 3,
+              latest_answered_at: '2026-04-04T08:00:00Z'
             },
             {
-              submitted_answer: ['puppy'],
-              answered_at: '2026-04-03T08:00:00Z'
+              answer_text: 'puppy',
+              count: 1,
+              latest_answered_at: '2026-04-03T08:00:00Z'
             }
           ]
         },
@@ -636,10 +861,13 @@ describe('EditorDrawer', () => {
       }
     });
 
-    expect(screen.getByText('norwegian/vocabulary/noun2en')).toBeTruthy();
     expect(screen.getByText('Previously incorrect answers')).toBeTruthy();
     expect(screen.getByText('hound')).toBeTruthy();
     expect(screen.getByText('puppy')).toBeTruthy();
+    expect(screen.getByText('3')).toBeTruthy();
+    expect(screen.getByText('1')).toBeTruthy();
+    expect(screen.getByText('Module')).toBeTruthy();
+    expect(screen.queryByText('Module path')).toBeNull();
     expect(screen.queryByText('Create module inline')).toBeNull();
     expect(screen.queryByText('Flag this question for manual review')).toBeNull();
   });
@@ -652,62 +880,34 @@ describe('ModuleMenu', () => {
     const modules: ModuleNode[] = [
       {
         id: 1,
-        source_id: 'biology',
         title: 'Biology',
         slug: 'biology',
         full_slug: 'biology',
         instruction: '',
-        ui_copy: {
-          question_label: 'Question',
-          answer_label: 'Answer',
-          stats_title: 'Stats',
-          review_title: 'Review'
-        },
         children: [
           {
             id: 2,
-            source_id: 'biology-plants',
             title: 'Plants',
             slug: 'plants',
             full_slug: 'biology/plants',
             instruction: 'Name the plant concept.',
-            ui_copy: {
-              question_label: 'Question',
-              answer_label: 'Answer',
-              stats_title: 'Stats',
-              review_title: 'Review'
-            },
             children: []
           }
         ]
       },
       {
         id: 3,
-        source_id: 'geography',
         title: 'Geography',
         slug: 'geography',
         full_slug: 'geography',
         instruction: '',
-        ui_copy: {
-          question_label: 'Question',
-          answer_label: 'Answer',
-          stats_title: 'Stats',
-          review_title: 'Review'
-        },
         children: [
           {
             id: 4,
-            source_id: 'geography-rivers',
             title: 'Rivers',
             slug: 'rivers',
             full_slug: 'geography/rivers',
             instruction: 'Name the river system.',
-            ui_copy: {
-              question_label: 'Question',
-              answer_label: 'Answer',
-              stats_title: 'Stats',
-              review_title: 'Review'
-            },
             children: []
           }
         ]
@@ -768,68 +968,39 @@ describe('AdminPage', () => {
       id: 9,
       handle: 'ignazio',
       display_name: 'Ignazio',
-      created_at: '2026-04-05T10:00:00Z',
-      disabled_at: null
+      created_at: '2026-04-05T10:00:00Z'
     });
     const createSpy = vi.fn().mockResolvedValue({
       id: 8,
-      source_id: null,
       title: 'Norwegian',
       slug: 'norwegian',
       full_slug: 'norwegian',
       instruction: 'Translate the Norwegian term into English.',
-      ui_copy: {
-        question_label: 'Question',
-        answer_label: 'Answer',
-        stats_title: 'Stats',
-        review_title: 'Review'
-      },
       children: []
     });
     const openImportSpy = vi.fn();
     const modules: ModuleNode[] = [
       {
         id: 1,
-        source_id: 'nursing',
         title: 'Nursing',
         slug: 'nursing',
         full_slug: 'nursing',
         instruction: '',
-        ui_copy: {
-          question_label: 'Question',
-          answer_label: 'Answer',
-          stats_title: 'Stats',
-          review_title: 'Review'
-        },
         children: [
           {
             id: 2,
-            source_id: 'nursing-checks',
             title: 'Checks',
             slug: 'checks',
             full_slug: 'nursing/checks',
             instruction: 'List the safety checks in order.',
-            ui_copy: {
-              question_label: 'Question',
-              answer_label: 'Answer',
-              stats_title: 'Stats',
-              review_title: 'Review'
-            },
             children: []
           },
           {
             id: 3,
-            source_id: 'nursing-definitions',
             title: 'Definitions',
             slug: 'definitions',
             full_slug: 'nursing/definitions',
             instruction: 'Define the nursing term in plain language.',
-            ui_copy: {
-              question_label: 'Question',
-              answer_label: 'Answer',
-              stats_title: 'Stats',
-              review_title: 'Review'
-            },
             children: []
           }
         ]
@@ -841,6 +1012,7 @@ describe('AdminPage', () => {
         modules,
         users: [],
         activeUser: null,
+        selectedModuleId: 2,
         onCreateUser: createUserSpy,
         onCreateModule: createSpy,
         onOpenImport: openImportSpy
@@ -848,7 +1020,17 @@ describe('AdminPage', () => {
     });
 
     expect(screen.queryByText('Current modules')).toBeNull();
-    expect(screen.getAllByText(/Uploads will create questions directly in/).length).toBeGreaterThan(0);
+    expect(screen.getByRole('heading', { name: 'Create Module Path' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Create User' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Import QML' })).toBeTruthy();
+    expect(screen.queryByText('Users')).toBeNull();
+    expect(screen.queryByText('Question import')).toBeNull();
+    expect(screen.getAllByText(/Imports will create questions directly in/).length).toBeGreaterThan(0);
+
+    expect(screen.getByRole('button', { name: 'Create Module' }).className).toContain('primary-button');
+    expect(screen.getByRole('button', { name: 'Create User' }).className).toContain('primary-button');
+    expect(screen.getByRole('button', { name: 'Import QML' }).className).toContain('primary-button');
+
     await user.type(screen.getByPlaceholderText('ignazio'), 'ignazio');
     await user.type(screen.getByPlaceholderText('Ignazio'), 'Ignazio');
     await user.click(screen.getByRole('button', { name: 'Create User' }));
@@ -860,7 +1042,7 @@ describe('AdminPage', () => {
 
     const selects = screen.getAllByRole('combobox');
     await user.selectOptions(selects[1], '3');
-    await user.click(screen.getByRole('button', { name: 'Import CSV' }));
+    await user.click(screen.getByRole('button', { name: 'Import QML' }));
     expect(openImportSpy).toHaveBeenCalledWith(3);
 
     await user.type(screen.getByPlaceholderText('norwegian/vocabulary/nouns_to_english'), 'Vocabulary');
@@ -885,43 +1067,42 @@ describe('ImportDrawer', () => {
   it('revalidates edited unresolved rows, supports discard, and returns to the start state after commit', async () => {
     const user = userEvent.setup();
     const revalidateSpy = vi.fn().mockResolvedValue(undefined);
-    const discardSpy = vi.fn().mockResolvedValue(undefined);
     const commitSpy = vi.fn().mockResolvedValue(undefined);
     const moduleNode: ModuleNode = {
       id: 12,
-      source_id: 'norwegian-vocabulary-noun2en',
       title: 'noun2en',
       slug: 'noun2en',
       full_slug: 'norwegian/vocabulary/noun2en',
       instruction: 'Translate each Norwegian noun into English.',
-      ui_copy: {
-        question_label: 'Question',
-        answer_label: 'Answer',
-        stats_title: 'Stats',
-        review_title: 'Review'
-      },
       children: []
     };
-    const session: QuestionImportSession = {
-      session_id: 77,
-      expires_at: '2026-04-06T10:00:00Z',
+    const result: QuestionImportResult = {
       ready_to_commit: false,
-      staged_valid_count: 2,
-      report_text: 'row 2 | Prompt already exists in this leaf module. | hund,dog',
+      valid_row_count: 2,
+      skipped_duplicate_count: 1,
+      skipped_rows: [
+        {
+          row_number: 1,
+          qml_line: 'hund [dog]',
+          reason: 'Prompt already exists in this leaf module.',
+          inferred_type: 'single_text'
+        }
+      ],
+      report_text: 'row 2 | needs fix | Question lines cannot be blank. | ',
       committed: false,
       committed_count: 0,
       unresolved_rows: [
         {
           row_number: 2,
-          csv_line: 'hund,dog',
-          issues: ['Prompt already exists in this leaf module.'],
-          inferred_type: 'single_text'
+          qml_line: 'ordered: stage one',
+          issues: ['Question lines cannot be blank.'],
+          inferred_type: null
         },
         {
           row_number: 4,
-          csv_line: 'katt,cat',
-          issues: ['Prompt duplicates another kept row in this upload.'],
-          inferred_type: 'single_text'
+          qml_line: 'ordered: stage alpha',
+          issues: ['Question lines cannot be blank.'],
+          inferred_type: null
         }
       ]
     };
@@ -930,41 +1111,47 @@ describe('ImportDrawer', () => {
       props: {
         open: true,
         moduleNode,
-        session,
+        result,
         busy: false,
         onClose: vi.fn(),
         onStartImport: vi.fn(),
         onRevalidate: revalidateSpy,
-        onDiscardRow: discardSpy,
         onCommit: commitSpy
       }
     });
 
-    expect(screen.getByText('prompt,answers')).toBeTruthy();
-    expect(screen.getByDisplayValue('hund,dog')).toBeTruthy();
+    expect(screen.getByDisplayValue('ordered: stage one')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Discard row 2' })).toBeTruthy();
 
     const rowInputs = view.getAllByRole('textbox');
-    const unresolvedInput = rowInputs.find((input) => (input as HTMLInputElement).value === 'hund,dog') as HTMLInputElement;
+    const unresolvedInput = rowInputs.find(
+      (input) => (input as HTMLInputElement).value === 'ordered: stage one'
+    ) as HTMLInputElement;
     await user.clear(unresolvedInput);
-    await user.type(unresolvedInput, 'hund,hound');
+    await user.type(unresolvedInput, 'ordered: stage one ; stage two');
     await user.click(screen.getByRole('button', { name: 'Revalidate Rows' }));
 
     expect(revalidateSpy).toHaveBeenCalledWith([
-      { row_number: 2, csv_line: 'hund,hound' },
-      { row_number: 4, csv_line: 'katt,cat' }
+      { row_number: 1, qml_line: 'hund [dog]' },
+      { row_number: 2, qml_line: 'ordered: stage one ; stage two' },
+      { row_number: 4, qml_line: 'ordered: stage alpha' }
     ]);
 
     await user.click(screen.getByRole('button', { name: 'Discard row 4' }));
-    expect(discardSpy).toHaveBeenCalledWith(4);
+    expect(revalidateSpy).toHaveBeenLastCalledWith([
+      { row_number: 1, qml_line: 'hund [dog]' },
+      { row_number: 2, qml_line: 'ordered: stage one ; stage two' }
+    ]);
 
     await view.rerender({
       open: true,
       moduleNode,
-      session: {
-        ...session,
+      result: {
+        ...result,
         ready_to_commit: true,
-        staged_valid_count: 3,
+        valid_row_count: 3,
+        skipped_duplicate_count: 1,
+        skipped_rows: result.skipped_rows,
         report_text: 'All remaining rows are valid. Commit to save them.',
         unresolved_rows: []
       },
@@ -972,23 +1159,24 @@ describe('ImportDrawer', () => {
       onClose: vi.fn(),
       onStartImport: vi.fn(),
       onRevalidate: revalidateSpy,
-      onDiscardRow: discardSpy,
       onCommit: commitSpy
     });
 
     expect(screen.queryByRole('button', { name: 'Discard row 2' })).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Commit Import' }));
-    expect(commitSpy).toHaveBeenCalled();
+    expect(commitSpy).toHaveBeenCalledWith([
+      { row_number: 1, qml_line: 'hund [dog]' },
+      { row_number: 2, qml_line: 'ordered: stage one ; stage two' }
+    ]);
 
     await view.rerender({
       open: true,
       moduleNode,
-      session: null,
+      result: null,
       busy: false,
       onClose: vi.fn(),
       onStartImport: vi.fn(),
       onRevalidate: revalidateSpy,
-      onDiscardRow: discardSpy,
       onCommit: commitSpy
     });
 

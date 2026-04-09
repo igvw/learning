@@ -2,8 +2,8 @@ import type {
   CreateModulePayload,
   ModuleNode,
   QuestionDraftPayload,
+  QuestionImportResult,
   QuestionImportRowPayload,
-  QuestionImportSession,
   QuizSession,
   StatsResponse,
   SubmitAnswerResult,
@@ -104,11 +104,15 @@ export function getStats(userId: number, moduleId: number | null, reviewOnly: bo
   return request<StatsResponse>(`/api/stats?${params.toString()}`, undefined, userId);
 }
 
-export function createQuestion(payload: QuestionDraftPayload): Promise<{ question_id: number }> {
-  return request<{ question_id: number }>('/api/questions', {
-    method: 'POST',
-    body: JSON.stringify(payload)
-  });
+export function createQuestion(userId: number | null, payload: QuestionDraftPayload): Promise<{ question_id: number }> {
+  return request<{ question_id: number }>(
+    '/api/questions',
+    {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    },
+    userId
+  );
 }
 
 export function reviseQuestion(
@@ -136,34 +140,26 @@ export function setQuestionReviewFlag(
   );
 }
 
-export function createQuestionImportSession(moduleId: number, csvText: string): Promise<QuestionImportSession> {
-  return request<QuestionImportSession>('/api/question-import-sessions', {
+export function validateQuestionImportText(moduleId: number, qmlText: string): Promise<QuestionImportResult> {
+  return request<QuestionImportResult>('/api/question-imports/validate', {
     method: 'POST',
-    body: JSON.stringify({ module_id: moduleId, csv_text: csvText })
+    body: JSON.stringify({ module_id: moduleId, qml_text: qmlText })
   });
 }
 
-export function revalidateQuestionImportSession(
-  sessionId: number,
+export function validateQuestionImportRows(
+  moduleId: number,
   rows: QuestionImportRowPayload[]
-): Promise<QuestionImportSession> {
-  return request<QuestionImportSession>(`/api/question-import-sessions/${sessionId}/revalidate`, {
+): Promise<QuestionImportResult> {
+  return request<QuestionImportResult>('/api/question-imports/validate', {
     method: 'POST',
-    body: JSON.stringify({ rows })
+    body: JSON.stringify({ module_id: moduleId, rows })
   });
 }
 
-export function discardQuestionImportSessionRow(
-  sessionId: number,
-  rowNumber: number
-): Promise<QuestionImportSession> {
-  return request<QuestionImportSession>(`/api/question-import-sessions/${sessionId}/rows/${rowNumber}`, {
-    method: 'DELETE'
-  });
-}
-
-export function commitQuestionImportSession(sessionId: number): Promise<QuestionImportSession> {
-  return request<QuestionImportSession>(`/api/question-import-sessions/${sessionId}/commit`, {
-    method: 'POST'
+export function commitQuestionImport(moduleId: number, rows: QuestionImportRowPayload[]): Promise<QuestionImportResult> {
+  return request<QuestionImportResult>('/api/question-imports/commit', {
+    method: 'POST',
+    body: JSON.stringify({ module_id: moduleId, rows })
   });
 }

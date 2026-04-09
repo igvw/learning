@@ -1,17 +1,20 @@
 from __future__ import annotations
 
-import csv
 import json
 import random
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-import yaml
-
+from .config import (
+    FORCED_UNORDERED_PROMPTS,
+    FULL_CREDIT_TOLERANCE,
+    SCHEDULE_INTERVALS,
+)
 from .database import DatabaseConnection, execute_insert_returning_id, utc_now
-from .schemas import ModuleUiCopy, QuestionDraftIn
+from .schemas import QuestionDraftIn
+from .qml import QMLError, parse_qml_line, qml_lines_from_text, render_prompt_and_answers
 
 
 class ServiceError(Exception):
@@ -26,38 +29,26 @@ class ValidationError(ServiceError):
     status_code = 400
 
 
-DEFAULT_UI_COPY = ModuleUiCopy().model_dump()
-FORCED_UNORDERED_SOURCE_IDS = {"geography-rivers-002", "geography-rivers-005"}
-IMPORT_SESSION_TTL_HOURS = 24
-UPLOAD_CSV_HEADER = ["prompt", "answers"]
-SCHEDULE_INTERVAL_DAYS = [1, 3, 7, 14]
-HOT_RECOVERY_TARGET = 2
-FULL_CREDIT_TOLERANCE = 1e-9
-
-
 def slugify_title(title: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", title.strip().lower()).strip("-")
+    slug = re.sub(r"[^a-z0-9]+", "_", title.strip().lower()).strip("_")
     return slug or "module"
 
 
-def normalize_answer(value: str) -> str:
+def normalize_text(value: str) -> str:
     return " ".join(value.strip().split()).casefold()
 
 
-def normalize_text_key(value: str) -> str:
-    return " ".join(value.strip().split()).casefold()
-
-
-def normalize_title_key(value: str) -> str:
-    return normalize_text_key(value)
+def title_from_slug(slug: str) -> str:
+    value = slug.replace("_", " ").strip()
+    return value[:1].upper() + value[1:] if value else ""
 
 
 def parse_iso_timestamp(value: str) -> datetime:
     return datetime.fromisoformat(value)
 
 
-def add_days_to_timestamp(value: str, days: int) -> str:
-    return (parse_iso_timestamp(value) + timedelta(days=days)).isoformat()
+def add_interval_to_timestamp(value: str, interval: timedelta) -> str:
+    return (parse_iso_timestamp(value) + interval).isoformat()
 
 
 def is_full_credit(score_earned: Optional[float], score_possible: Optional[float]) -> bool:
@@ -79,13 +70,6 @@ def parse_json_list(raw_value: Optional[str]) -> list[Any]:
     return parsed
 
 
-def merge_ui_copy(raw_value: Optional[dict[str, Any]]) -> dict[str, Any]:
-    merged = dict(DEFAULT_UI_COPY)
-    if raw_value:
-        merged.update({key: value for key, value in raw_value.items() if value is not None})
-    return merged
-
-
 def render_inline_segments(segments: list[str]) -> str:
     return "[_]".join(segments)
 
@@ -95,13 +79,11 @@ def serialize_type_config(payload: QuestionDraftIn) -> dict[str, Any]:
         "accepted_answers": payload.accepted_answers,
         "segments": payload.segments,
     }
-    if payload.slot_prompts:
-        type_config["slot_prompts"] = payload.slot_prompts
     return type_config
 
 
 def public_type_config(question_type: str, type_config: dict[str, Any]) -> dict[str, Any]:
-    if question_type == "single_text":
+    if question_type in {"single_text", "computed_text"}:
         return {"expected_slots": 1}
     if question_type in {"multi_text", "ordered_multi"}:
         return {"expected_slots": len(type_config.get("accepted_answers", []))}
@@ -125,15 +107,107 @@ def preview_prompt(prompt: str, question_type: str, type_config: dict[str, Any])
 
 def question_prompt_key(question_type: str, prompt: str, type_config: dict[str, Any]) -> str:
     if question_type == "inline_cloze":
-        return normalize_text_key(render_inline_segments(type_config.get("segments", [])))
-    return normalize_text_key(prompt)
+        return normalize_text(render_inline_segments(type_config.get("segments", [])))
+    return normalize_text(prompt)
+
+
+def _module_question_rank_rows(connection: DatabaseConnection, module_id: int) -> list[Any]:
+    return connection.execute(
+        """
+        SELECT id, rank
+        FROM questions
+        WHERE module_id = ?
+        ORDER BY rank ASC, id ASC
+        """,
+        (module_id,),
+    ).fetchall()
+
+
+def _append_rank(connection: DatabaseConnection, module_id: int) -> int:
+    row = connection.execute(
+        "SELECT COALESCE(MAX(rank), 0) AS max_rank FROM questions WHERE module_id = ?",
+        (module_id,),
+    ).fetchone()
+    return int(row["max_rank"]) + 1
+
+
+def _shift_ranks_for_insert(
+    connection: DatabaseConnection,
+    *,
+    module_id: int,
+    insert_rank: int,
+    exclude_question_id: Optional[int] = None,
+) -> None:
+    rows = _module_question_rank_rows(connection, module_id)
+    next_rank = 1
+    inserted = False
+    for row in rows:
+        if exclude_question_id is not None and row["id"] == exclude_question_id:
+            continue
+        if not inserted and next_rank == insert_rank:
+            inserted = True
+            next_rank += 1
+        connection.execute("UPDATE questions SET rank = ? WHERE id = ?", (next_rank, row["id"]))
+        next_rank += 1
+
+
+def _remove_rank_gap(connection: DatabaseConnection, *, module_id: int, exclude_question_id: int) -> None:
+    next_rank = 1
+    for row in _module_question_rank_rows(connection, module_id):
+        if row["id"] == exclude_question_id:
+            continue
+        connection.execute("UPDATE questions SET rank = ? WHERE id = ?", (next_rank, row["id"]))
+        next_rank += 1
+
+
+def _clamp_insert_rank(connection: DatabaseConnection, *, module_id: int, rank: int, exclude_question_id: Optional[int] = None) -> int:
+    rows = [row for row in _module_question_rank_rows(connection, module_id) if exclude_question_id is None or row["id"] != exclude_question_id]
+    return max(1, min(int(rank), len(rows) + 1))
+
+
+def _priority_insert_rank(connection: DatabaseConnection, *, user_id: Optional[int], module_id: int, priority_mode: str) -> int:
+    if user_id is None:
+        return _append_rank(connection, module_id)
+
+    question_rows = connection.execute(
+        """
+        SELECT id AS question_id, rank
+        FROM questions
+        WHERE module_id = ?
+        ORDER BY rank ASC, id ASC
+        """,
+        (module_id,),
+    ).fetchall()
+    question_ids = [row["question_id"] for row in question_rows]
+    history_by_question = _question_attempt_history(connection, user_id=user_id, question_ids=question_ids)
+    unseen_rows = [row for row in question_rows if not history_by_question.get(row["question_id"])]
+    if not unseen_rows:
+        return _append_rank(connection, module_id)
+
+    if priority_mode == "high":
+        return int(unseen_rows[0]["rank"])
+    if priority_mode == "mid":
+        return int(unseen_rows[len(unseen_rows) // 2]["rank"])
+    return int(unseen_rows[-1]["rank"]) + 1
+
+
+def _resolved_runtime(question_type: str, prompt: str, type_config: dict[str, Any], *, rng: Optional[random.Random] = None) -> tuple[str, dict[str, Any]]:
+    if question_type != "computed_text":
+        return prompt, type_config
+
+    rendered_prompt, rendered_answers = render_prompt_and_answers(
+        prompt=prompt,
+        accepted_answers=type_config.get("accepted_answers", []),
+        rng=rng,
+    )
+    return rendered_prompt, {"accepted_answers": rendered_answers, "segments": []}
 
 
 def ensure_module_exists(connection: DatabaseConnection, module_id: Optional[int]) -> Optional[Any]:
     if module_id is None:
         return None
     row = connection.execute(
-        "SELECT id, title, full_slug, instruction FROM modules WHERE id = ?",
+        "SELECT id, slug, full_slug, instruction FROM modules WHERE id = ?",
         (module_id,),
     ).fetchone()
     if row is None:
@@ -163,43 +237,30 @@ def ensure_module_can_accept_children(connection: DatabaseConnection, module_id:
     return module
 
 
-def ensure_unique_module_title(
+def ensure_unique_module_slug(
     connection: DatabaseConnection,
-    title: str,
+    slug: str,
     parent_id: Optional[int],
     *,
     exclude_module_id: Optional[int] = None,
 ) -> None:
     sibling_rows = connection.execute(
-        "SELECT id, title FROM modules WHERE parent_id IS ?",
+        "SELECT id, slug FROM modules WHERE parent_id IS ?",
         (parent_id,),
     ).fetchall()
-    candidate_key = normalize_title_key(title)
     for row in sibling_rows:
         if exclude_module_id is not None and row["id"] == exclude_module_id:
             continue
-        if normalize_title_key(row["title"]) == candidate_key:
+        if row["slug"] == slug:
             raise ValidationError("A sibling module with this title already exists.")
 
 
-def next_unique_slug(connection: DatabaseConnection, title: str, parent_id: Optional[int]) -> tuple[str, str]:
-    base_slug = slugify_title(title)
-    sibling_rows = connection.execute(
-        "SELECT slug FROM modules WHERE parent_id IS ?",
-        (parent_id,),
-    ).fetchall()
-    existing = {row["slug"] for row in sibling_rows}
-    slug = base_slug
-    suffix = 2
-    while slug in existing:
-        slug = f"{base_slug}-{suffix}"
-        suffix += 1
-
+def build_full_slug(connection: DatabaseConnection, slug: str, parent_id: Optional[int]) -> str:
     if parent_id is None:
-        return slug, slug
+        return slug
 
     parent_row = ensure_module_exists(connection, parent_id)
-    return slug, f"{parent_row['full_slug']}/{slug}"
+    return f"{parent_row['full_slug']}/{slug}"
 
 
 def _module_question_rows(connection: DatabaseConnection, module_id: int) -> list[Any]:
@@ -237,34 +298,33 @@ def create_module(
     title: str,
     parent_id: Optional[int],
     instruction: str,
-    ui_copy: dict[str, Any],
 ) -> dict[str, Any]:
     if parent_id is not None:
         ensure_module_can_accept_children(connection, parent_id)
-    ensure_unique_module_title(connection, title.strip(), parent_id)
-    slug, full_slug = next_unique_slug(connection, title, parent_id)
+    slug = slugify_title(title)
+    ensure_unique_module_slug(connection, slug, parent_id)
+    full_slug = build_full_slug(connection, slug, parent_id)
     module_id = execute_insert_returning_id(
         connection,
         """
-        INSERT INTO modules (source_id, parent_id, title, slug, full_slug, instruction, ui_copy_json, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO modules (parent_id, slug, full_slug, instruction, created_at)
+        VALUES (?, ?, ?, ?, ?)
         """,
-        (None, parent_id, title.strip(), slug, full_slug, instruction.strip(), json_dumps(merge_ui_copy(ui_copy)), utc_now()),
+        (parent_id, slug, full_slug, instruction.strip(), utc_now()),
     )
     return {
         "id": module_id,
-        "title": title.strip(),
+        "title": title_from_slug(slug),
         "slug": slug,
         "full_slug": full_slug,
         "instruction": instruction.strip(),
-        "ui_copy": merge_ui_copy(ui_copy),
     }
 
 
 def get_module_tree(connection: DatabaseConnection) -> list[dict[str, Any]]:
     rows = connection.execute(
         """
-        SELECT id, source_id, parent_id, title, slug, full_slug, instruction, ui_copy_json
+        SELECT id, parent_id, slug, full_slug, instruction
         FROM modules
         ORDER BY full_slug
         """
@@ -275,12 +335,10 @@ def get_module_tree(connection: DatabaseConnection) -> list[dict[str, Any]]:
     for row in rows:
         nodes[row["id"]] = {
             "id": row["id"],
-            "source_id": row["source_id"],
-            "title": row["title"],
+            "title": title_from_slug(row["slug"]),
             "slug": row["slug"],
             "full_slug": row["full_slug"],
             "instruction": row["instruction"] or "",
-            "ui_copy": merge_ui_copy(json.loads(row["ui_copy_json"])),
             "children": [],
             "_parent_id": row["parent_id"],
         }
@@ -319,7 +377,7 @@ def get_scope_module_ids(connection: DatabaseConnection, module_id: Optional[int
 def list_users(connection: DatabaseConnection) -> list[dict[str, Any]]:
     rows = connection.execute(
         """
-        SELECT id, handle, display_name, created_at, disabled_at
+        SELECT id, handle, display_name, created_at
         FROM users
         ORDER BY lower(display_name) ASC, id ASC
         """
@@ -346,8 +404,8 @@ def create_user(connection: DatabaseConnection, *, handle: str, display_name: st
     user_id = execute_insert_returning_id(
         connection,
         """
-        INSERT INTO users (handle, display_name, created_at, disabled_at)
-        VALUES (?, ?, ?, NULL)
+        INSERT INTO users (handle, display_name, created_at)
+        VALUES (?, ?, ?)
         """,
         (cleaned_handle, cleaned_display_name, created_at),
     )
@@ -356,20 +414,19 @@ def create_user(connection: DatabaseConnection, *, handle: str, display_name: st
         "handle": cleaned_handle,
         "display_name": cleaned_display_name,
         "created_at": created_at,
-        "disabled_at": None,
     }
 
 
 def ensure_user_exists(connection: DatabaseConnection, user_id: int) -> Any:
     row = connection.execute(
         """
-        SELECT id, handle, display_name, created_at, disabled_at
+        SELECT id, handle, display_name, created_at
         FROM users
         WHERE id = ?
         """,
         (user_id,),
     ).fetchone()
-    if row is None or row["disabled_at"] is not None:
+    if row is None:
         raise NotFoundError(f"User {user_id} was not found.")
     return row
 
@@ -440,64 +497,256 @@ def _question_attempt_history(
                 "score_earned": row["score_earned"],
                 "score_possible": row["score_possible"],
                 "answered_at": row["answered_at"],
+                "session_id": row["session_id"],
             }
         )
     return history
 
 
-def _derive_schedule_state_from_attempts(attempts: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
-    incorrect_indices = [
-        index
-        for index, attempt in enumerate(attempts)
-        if not is_full_credit(attempt["score_earned"], attempt["score_possible"])
-    ]
-    if not incorrect_indices:
-        return None
+def _latest_scored_session_id(connection: DatabaseConnection, *, user_id: int) -> Optional[int]:
+    row = connection.execute(
+        """
+        SELECT qs.id
+        FROM quiz_sessions AS qs
+        JOIN quiz_session_items AS qsi ON qsi.session_id = qs.id
+        WHERE qs.user_id = ? AND qsi.score_earned IS NOT NULL
+        GROUP BY qs.id, COALESCE(qs.completed_at, qs.created_at)
+        ORDER BY COALESCE(qs.completed_at, qs.created_at) DESC, qs.id DESC
+        LIMIT 1
+        """,
+        (user_id,),
+    ).fetchone()
+    return int(row["id"]) if row is not None else None
 
-    last_incorrect_index = incorrect_indices[-1]
-    last_incorrect_attempt = attempts[last_incorrect_index]
-    later_full_correct_attempts = [
-        attempt
-        for attempt in attempts[last_incorrect_index + 1 :]
-        if is_full_credit(attempt["score_earned"], attempt["score_possible"])
-    ]
-    latest_attempt = attempts[-1]
 
-    if not is_full_credit(latest_attempt["score_earned"], latest_attempt["score_possible"]):
-        return {
-            "recovery_streak": 0,
-            "interval_step": 0,
-            "last_incorrect_at": last_incorrect_attempt["answered_at"],
-            "next_due_at": None,
-            "last_answered_at": latest_attempt["answered_at"],
-        }
+def _bucket_step_after_hot_recovery(origin_step: Optional[int], failures_after_bucket_retry: int) -> int:
+    if origin_step is None:
+        return 0
+    if failures_after_bucket_retry > 1:
+        return max(origin_step - 1, 0)
+    return origin_step
 
-    if len(later_full_correct_attempts) == 1:
-        return {
-            "recovery_streak": 1,
-            "interval_step": 0,
-            "last_incorrect_at": last_incorrect_attempt["answered_at"],
-            "next_due_at": None,
-            "last_answered_at": latest_attempt["answered_at"],
-        }
 
-    interval_step = min(len(later_full_correct_attempts) - HOT_RECOVERY_TARGET, len(SCHEDULE_INTERVAL_DAYS) - 1)
-    return {
-        "recovery_streak": HOT_RECOVERY_TARGET,
-        "interval_step": interval_step,
-        "last_incorrect_at": last_incorrect_attempt["answered_at"],
-        "next_due_at": add_days_to_timestamp(
-            later_full_correct_attempts[-1]["answered_at"],
-            SCHEDULE_INTERVAL_DAYS[interval_step],
-        ),
-        "last_answered_at": latest_attempt["answered_at"],
+def _derive_schedule_state_from_attempts(attempts: list[dict[str, Any]]) -> dict[str, Any]:
+    state: dict[str, Any] = {
+        "bucket": "unseen",
+        "recovery_streak": None,
+        "interval_step": None,
+        "last_incorrect_at": None,
+        "next_due_at": None,
+        "last_answered_at": None,
+        "last_session_id": None,
+        "retry_pending": False,
+        "bucket_origin_step": None,
+        "failures_after_bucket_retry": 0,
     }
+
+    for attempt in attempts:
+        is_correct = is_full_credit(attempt["score_earned"], attempt["score_possible"])
+        answered_at = attempt["answered_at"]
+        session_id = attempt["session_id"]
+        bucket = state["bucket"]
+
+        if bucket == "unseen":
+            if is_correct:
+                state.update(
+                    {
+                        "bucket": "mastery",
+                        "recovery_streak": None,
+                        "interval_step": None,
+                        "last_answered_at": answered_at,
+                        "last_session_id": session_id,
+                    }
+                )
+            else:
+                state.update(
+                    {
+                        "bucket": "hot0",
+                        "recovery_streak": 0,
+                        "interval_step": None,
+                        "last_incorrect_at": answered_at,
+                        "next_due_at": None,
+                        "last_answered_at": answered_at,
+                        "last_session_id": session_id,
+                        "retry_pending": False,
+                        "bucket_origin_step": None,
+                        "failures_after_bucket_retry": 0,
+                    }
+                )
+            continue
+
+        if bucket == "mastery":
+            if is_correct:
+                state.update({"last_answered_at": answered_at, "last_session_id": session_id})
+            else:
+                state.update(
+                    {
+                        "bucket": "hot0",
+                        "recovery_streak": 0,
+                        "interval_step": None,
+                        "last_incorrect_at": answered_at,
+                        "next_due_at": None,
+                        "last_answered_at": answered_at,
+                        "last_session_id": session_id,
+                        "retry_pending": False,
+                        "bucket_origin_step": None,
+                        "failures_after_bucket_retry": 0,
+                    }
+                )
+            continue
+
+        if bucket in {"cooling", "due_review"}:
+            current_step = int(state["interval_step"])
+            if is_correct:
+                if current_step >= len(SCHEDULE_INTERVALS) - 1:
+                    state.update(
+                        {
+                            "bucket": "mastery",
+                            "recovery_streak": None,
+                            "interval_step": None,
+                            "last_answered_at": answered_at,
+                            "last_session_id": session_id,
+                            "next_due_at": None,
+                            "retry_pending": False,
+                            "bucket_origin_step": None,
+                            "failures_after_bucket_retry": 0,
+                        }
+                    )
+                else:
+                    next_step = current_step + 1
+                    state.update(
+                        {
+                            "bucket": "cooling",
+                            "recovery_streak": None,
+                            "interval_step": next_step,
+                            "last_answered_at": answered_at,
+                            "last_session_id": session_id,
+                            "next_due_at": add_interval_to_timestamp(answered_at, SCHEDULE_INTERVALS[next_step][1]),
+                            "retry_pending": False,
+                            "bucket_origin_step": None,
+                            "failures_after_bucket_retry": 0,
+                        }
+                    )
+            else:
+                state.update(
+                    {
+                        "bucket": "bucket_retry_wait",
+                        "recovery_streak": None,
+                        "interval_step": current_step,
+                        "last_incorrect_at": answered_at,
+                        "last_answered_at": answered_at,
+                        "last_session_id": session_id,
+                        "next_due_at": None,
+                        "retry_pending": True,
+                        "bucket_origin_step": current_step,
+                        "failures_after_bucket_retry": 0,
+                    }
+                )
+            continue
+
+        if bucket == "bucket_retry_wait":
+            origin_step = int(state["bucket_origin_step"])
+            if is_correct:
+                state.update(
+                    {
+                        "bucket": "cooling",
+                        "recovery_streak": None,
+                        "interval_step": origin_step,
+                        "last_answered_at": answered_at,
+                        "last_session_id": session_id,
+                        "next_due_at": add_interval_to_timestamp(answered_at, SCHEDULE_INTERVALS[origin_step][1]),
+                        "retry_pending": False,
+                        "bucket_origin_step": None,
+                        "failures_after_bucket_retry": 0,
+                    }
+                )
+            else:
+                state.update(
+                    {
+                        "bucket": "hot0",
+                        "recovery_streak": 0,
+                        "interval_step": None,
+                        "last_incorrect_at": answered_at,
+                        "last_answered_at": answered_at,
+                        "last_session_id": session_id,
+                        "next_due_at": None,
+                        "retry_pending": True,
+                        "bucket_origin_step": origin_step,
+                        "failures_after_bucket_retry": 1,
+                    }
+                )
+            continue
+
+        if bucket == "hot0":
+            if is_correct:
+                state.update(
+                    {
+                        "bucket": "hot1",
+                        "recovery_streak": 1,
+                        "last_answered_at": answered_at,
+                        "last_session_id": session_id,
+                    }
+                )
+            else:
+                failures = state["failures_after_bucket_retry"]
+                if state["bucket_origin_step"] is not None and failures > 0:
+                    failures += 1
+                state.update(
+                    {
+                        "bucket": "hot0",
+                        "recovery_streak": 0,
+                        "last_incorrect_at": answered_at,
+                        "last_answered_at": answered_at,
+                        "last_session_id": session_id,
+                        "failures_after_bucket_retry": failures,
+                    }
+                )
+            continue
+
+        if bucket == "hot1":
+            if is_correct:
+                resolved_step = _bucket_step_after_hot_recovery(
+                    state["bucket_origin_step"],
+                    int(state["failures_after_bucket_retry"] or 0),
+                )
+                state.update(
+                    {
+                        "bucket": "cooling",
+                        "recovery_streak": 2,
+                        "interval_step": resolved_step,
+                        "last_answered_at": answered_at,
+                        "last_session_id": session_id,
+                        "next_due_at": add_interval_to_timestamp(answered_at, SCHEDULE_INTERVALS[resolved_step][1]),
+                        "retry_pending": False,
+                        "bucket_origin_step": None,
+                        "failures_after_bucket_retry": 0,
+                    }
+                )
+            else:
+                failures = state["failures_after_bucket_retry"]
+                if state["bucket_origin_step"] is not None and failures > 0:
+                    failures += 1
+                state.update(
+                    {
+                        "bucket": "hot0",
+                        "recovery_streak": 0,
+                        "last_incorrect_at": answered_at,
+                        "last_answered_at": answered_at,
+                        "last_session_id": session_id,
+                        "next_due_at": None,
+                        "failures_after_bucket_retry": failures,
+                    }
+                )
+            continue
+
+    return state
 
 
 def _schedule_snapshot_from_attempts(
     attempts: list[dict[str, Any]],
     *,
     now: str,
+    latest_scored_session_id: Optional[int] = None,
 ) -> dict[str, Any]:
     if not attempts:
         return {
@@ -507,34 +756,32 @@ def _schedule_snapshot_from_attempts(
             "last_incorrect_at": None,
             "next_due_at": None,
             "last_answered_at": None,
+            "retry_pending": False,
         }
 
     state = _derive_schedule_state_from_attempts(attempts)
-    if state is None:
-        latest_attempt = attempts[-1]
-        if len(attempts) == 1 and is_full_credit(latest_attempt["score_earned"], latest_attempt["score_possible"]):
-            bucket = "one_shot_easy"
-        else:
-            bucket = "backlog_seen_correct"
-        return {
-            "bucket": bucket,
-            "recovery_streak": None,
-            "interval_step": None,
-            "last_incorrect_at": None,
-            "next_due_at": None,
-            "last_answered_at": latest_attempt["answered_at"],
-        }
+    bucket = state["bucket"]
+    if bucket == "hot1" and latest_scored_session_id is not None and state.get("last_session_id") == latest_scored_session_id:
+        bucket = "hot1_sit_out"
+    elif bucket == "bucket_retry_wait" and latest_scored_session_id is not None and state.get("last_session_id") != latest_scored_session_id:
+        bucket = "due_review"
+    elif bucket == "cooling" and state["next_due_at"] is not None and parse_iso_timestamp(state["next_due_at"]) <= parse_iso_timestamp(now):
+        bucket = "due_review"
 
-    bucket = "hot"
-    if state["next_due_at"] is not None:
-        bucket = "due_review" if parse_iso_timestamp(state["next_due_at"]) <= parse_iso_timestamp(now) else "not_due_recovered"
     return {
         "bucket": bucket,
-        **state,
+        "recovery_streak": state["recovery_streak"],
+        "interval_step": state["interval_step"],
+        "bucket_origin_step": state.get("bucket_origin_step"),
+        "last_incorrect_at": state["last_incorrect_at"],
+        "next_due_at": state["next_due_at"],
+        "last_answered_at": state["last_answered_at"],
+        "retry_pending": bool(state.get("retry_pending", False)),
+        "last_session_id": state.get("last_session_id"),
     }
 
 
-def create_question(connection: DatabaseConnection, payload: QuestionDraftIn) -> dict[str, int]:
+def create_question(connection: DatabaseConnection, payload: QuestionDraftIn, *, user_id: Optional[int] = None) -> dict[str, int]:
     ensure_leaf_module(connection, payload.module_id)
     type_config = serialize_type_config(payload)
     ensure_unique_question_prompt(
@@ -544,18 +791,24 @@ def create_question(connection: DatabaseConnection, payload: QuestionDraftIn) ->
         prompt=payload.prompt.strip(),
         type_config=type_config,
     )
+    insert_rank = (
+        _priority_insert_rank(connection, user_id=user_id, module_id=payload.module_id, priority_mode=payload.priority_mode)
+        if payload.priority_mode
+        else int(payload.rank)
+    )
+    insert_rank = _clamp_insert_rank(connection, module_id=payload.module_id, rank=insert_rank)
+    _shift_ranks_for_insert(connection, module_id=payload.module_id, insert_rank=insert_rank)
     question_id = execute_insert_returning_id(
         connection,
         """
-        INSERT INTO questions (source_id, module_id, question_type, prompt, rank, type_config_json)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO questions (module_id, question_type, prompt, rank, type_config_json)
+        VALUES (?, ?, ?, ?, ?)
         """,
         (
-            None,
             payload.module_id,
             payload.question_type,
             payload.prompt.strip(),
-            int(payload.rank),
+            insert_rank,
             json_dumps(type_config),
         ),
     )
@@ -563,7 +816,7 @@ def create_question(connection: DatabaseConnection, payload: QuestionDraftIn) ->
 
 
 def revise_question(connection: DatabaseConnection, question_id: int, payload: QuestionDraftIn, *, reset_stats: bool) -> dict[str, int]:
-    current = connection.execute("SELECT id FROM questions WHERE id = ?", (question_id,)).fetchone()
+    current = connection.execute("SELECT id, module_id, rank FROM questions WHERE id = ?", (question_id,)).fetchone()
     if current is None:
         raise NotFoundError(f"Question {question_id} was not found.")
 
@@ -581,6 +834,24 @@ def revise_question(connection: DatabaseConnection, question_id: int, payload: Q
         connection.execute("DELETE FROM quiz_session_items WHERE question_id = ?", (question_id,))
         connection.execute("DELETE FROM user_review_flags WHERE question_id = ?", (question_id,))
 
+    target_rank = _clamp_insert_rank(
+        connection,
+        module_id=payload.module_id,
+        rank=int(payload.rank),
+        exclude_question_id=question_id,
+    )
+    if int(current["module_id"]) != payload.module_id:
+        _remove_rank_gap(connection, module_id=int(current["module_id"]), exclude_question_id=question_id)
+        _shift_ranks_for_insert(connection, module_id=payload.module_id, insert_rank=target_rank)
+    else:
+        _remove_rank_gap(connection, module_id=payload.module_id, exclude_question_id=question_id)
+        _shift_ranks_for_insert(
+            connection,
+            module_id=payload.module_id,
+            insert_rank=target_rank,
+            exclude_question_id=question_id,
+        )
+
     connection.execute(
         """
         UPDATE questions
@@ -596,7 +867,7 @@ def revise_question(connection: DatabaseConnection, question_id: int, payload: Q
             payload.module_id,
             payload.question_type,
             payload.prompt.strip(),
-            int(payload.rank),
+            target_rank,
             json_dumps(type_config),
             question_id,
         ),
@@ -676,7 +947,7 @@ def _recent_incorrect_answers_by_question(
     *,
     user_id: int,
     question_ids: list[int],
-    limit_per_question: int = 5,
+    limit_per_question: int = 10,
 ) -> dict[int, list[dict[str, Any]]]:
     if not question_ids:
         return {}
@@ -700,18 +971,55 @@ def _recent_incorrect_answers_by_question(
         (user_id, *question_ids, FULL_CREDIT_TOLERANCE),
     ).fetchall()
 
-    grouped: dict[int, list[dict[str, Any]]] = {}
+    grouped: dict[int, dict[str, dict[str, Any]]] = {}
     for row in rows:
-        bucket = grouped.setdefault(row["question_id"], [])
-        if len(bucket) >= limit_per_question:
-            continue
-        bucket.append(
+        answer_values = json.loads(row["submitted_answer_json"])
+        answer_text = " | ".join(value.strip() for value in answer_values if value and value.strip()) or "No answer recorded"
+        bucket = grouped.setdefault(row["question_id"], {})
+        entry = bucket.setdefault(
+            answer_text,
             {
-                "submitted_answer": json.loads(row["submitted_answer_json"]),
-                "answered_at": row["answered_at"],
-            }
+                "answer_text": answer_text,
+                "count": 0,
+                "latest_answered_at": row["answered_at"],
+            },
         )
-    return grouped
+        entry["count"] += 1
+        if row["answered_at"] > entry["latest_answered_at"]:
+            entry["latest_answered_at"] = row["answered_at"]
+
+    summarized: dict[int, list[dict[str, Any]]] = {}
+    for question_id, answers in grouped.items():
+        summarized[question_id] = sorted(
+            answers.values(),
+            key=lambda value: (
+                -value["count"],
+                -parse_iso_timestamp(value["latest_answered_at"]).timestamp(),
+                value["answer_text"],
+            ),
+        )[:limit_per_question]
+    return summarized
+
+
+def _logical_bucket_label(
+    *,
+    bucket: str,
+    interval_step: Optional[int],
+    bucket_origin_step: Optional[int],
+    review_flag: bool,
+) -> str:
+    if review_flag:
+        return "review"
+    if bucket == "unseen":
+        return "unseen"
+    if bucket == "mastery":
+        return "mastery"
+    step = interval_step
+    if bucket in {"hot0", "hot1", "hot1_sit_out"} and bucket_origin_step is not None:
+        step = bucket_origin_step
+    if step is None:
+        return "unseen"
+    return SCHEDULE_INTERVALS[step][0]
 
 
 def _iso_timestamp_sort_value(value: Optional[str], *, descending: bool = False) -> float:
@@ -730,86 +1038,68 @@ def _bucketed_question_selection(
     if count <= 0 or not candidates:
         return []
 
-    hot: list[dict[str, Any]] = []
+    hot0: list[dict[str, Any]] = []
+    hot1: list[dict[str, Any]] = []
     due_review: list[dict[str, Any]] = []
     unseen: list[dict[str, Any]] = []
-    one_shot_easy: list[dict[str, Any]] = []
-    backlog_seen_correct: list[dict[str, Any]] = []
-    not_due_recovered: list[dict[str, Any]] = []
     _ = now
 
     for candidate in candidates:
         bucket = candidate["bucket"]
-        if bucket == "hot":
-            hot.append(candidate)
+        if bucket == "hot0":
+            hot0.append(candidate)
+        elif bucket == "hot1":
+            hot1.append(candidate)
         elif bucket == "due_review":
             due_review.append(candidate)
         elif bucket == "unseen":
             unseen.append(candidate)
-        elif bucket == "one_shot_easy":
-            one_shot_easy.append(candidate)
-        elif bucket == "not_due_recovered":
-            not_due_recovered.append(candidate)
-        else:
-            backlog_seen_correct.append(candidate)
 
-    hot.sort(
+    hot0.sort(
         key=lambda row: (
+            0 if row.get("last_session_id") == row.get("latest_scored_session_id") else 1,
             _iso_timestamp_sort_value(row.get("last_incorrect_at"), descending=True),
             row.get("recovery_streak", 0),
             row["rank"],
             row["question_id"],
         )
     )
+    hot1.sort(
+        key=lambda row: (
+            _iso_timestamp_sort_value(row.get("last_incorrect_at"), descending=True),
+            row["rank"],
+            row["question_id"],
+        )
+    )
     due_review.sort(
         key=lambda row: (
+            row.get("interval_step") if row.get("interval_step") is not None else len(SCHEDULE_INTERVALS),
+            0 if row.get("retry_pending") else 1,
             _iso_timestamp_sort_value(row.get("next_due_at")),
             row["rank"],
             row["question_id"],
         )
     )
     unseen.sort(key=lambda row: (row["rank"], row["question_id"]))
-    one_shot_easy.sort(
-        key=lambda row: (
-            _iso_timestamp_sort_value(row.get("last_asked_at")),
-            row["rank"],
-            row["question_id"],
-        )
-    )
-    backlog_seen_correct.sort(
-        key=lambda row: (
-            _iso_timestamp_sort_value(row.get("last_asked_at")),
-            row["rank"],
-            row["question_id"],
-        )
-    )
-    not_due_recovered.sort(
-        key=lambda row: (
-            _iso_timestamp_sort_value(row.get("next_due_at")),
-            row["rank"],
-            row["question_id"],
-        )
-    )
 
     selected: list[dict[str, Any]] = []
-    for bucket in (hot, due_review, unseen):
-        remaining = count - len(selected)
-        if remaining <= 0:
-            break
-        selected.extend(bucket[:remaining])
-
-    unseen_exists = bool(unseen)
-    if len(selected) < count and not unseen_exists:
-        remaining = count - len(selected)
-        selected.extend(one_shot_easy[:remaining])
-
-    for bucket in (backlog_seen_correct, not_due_recovered):
+    for bucket in (hot0, hot1, due_review, unseen):
         remaining = count - len(selected)
         if remaining <= 0:
             break
         selected.extend(bucket[:remaining])
 
     return selected
+
+
+def _eligible_quiz_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [candidate for candidate in candidates if not candidate.get("review_flag", False)]
+
+
+def _randomize_quiz_order(rows: list[dict[str, Any]], *, rng: Optional[random.Random] = None) -> list[dict[str, Any]]:
+    shuffled = list(rows)
+    (rng or random).shuffle(shuffled)
+    return shuffled
 
 
 def create_quiz_session(
@@ -820,7 +1110,6 @@ def create_quiz_session(
     count: int,
     rng: Optional[random.Random] = None,
 ) -> dict[str, Any]:
-    _ = rng
     ensure_user_exists(connection, user_id)
     scope_module_ids = get_scope_module_ids(connection, module_id)
     placeholders = ",".join("?" for _ in scope_module_ids) or "NULL"
@@ -829,7 +1118,6 @@ def create_quiz_session(
         SELECT
             q.id AS question_id,
             q.module_id,
-            m.title AS module_title,
             m.instruction AS module_instruction,
             q.prompt,
             q.question_type,
@@ -847,6 +1135,7 @@ def create_quiz_session(
     review_flags = _review_flags_by_question(connection, user_id=user_id, question_ids=question_ids)
     stats_by_question = _question_stats_by_question(connection, user_id=user_id, question_ids=question_ids)
     history_by_question = _question_attempt_history(connection, user_id=user_id, question_ids=question_ids)
+    latest_scored_session_id = _latest_scored_session_id(connection, user_id=user_id)
     now = utc_now()
     scheduled_candidates: list[dict[str, Any]] = []
     for row in candidate_rows:
@@ -854,21 +1143,31 @@ def create_quiz_session(
             row["question_id"],
             {"attempts_count": 0, "correct_count": 0.0, "incorrect_count": 0.0, "last_asked_at": None},
         )
-        schedule = _schedule_snapshot_from_attempts(history_by_question.get(row["question_id"], []), now=now)
+        schedule = _schedule_snapshot_from_attempts(
+            history_by_question.get(row["question_id"], []),
+            now=now,
+            latest_scored_session_id=latest_scored_session_id,
+        )
         scheduled_candidates.append(
             {
                 **dict(row),
                 **stats,
                 **schedule,
+                "latest_scored_session_id": latest_scored_session_id,
                 "review_flag": review_flags.get(row["question_id"], False),
             }
         )
 
+    eligible_candidates = _eligible_quiz_candidates(scheduled_candidates)
+    if scheduled_candidates and not eligible_candidates:
+        raise ValidationError("All questions in this scope are currently flagged for review.")
+
     chosen_rows = _bucketed_question_selection(
-        scheduled_candidates,
-        count=min(count, len(scheduled_candidates)),
+        eligible_candidates,
+        count=min(count, len(eligible_candidates)),
         now=now,
     )
+    chosen_rows = _randomize_quiz_order(chosen_rows, rng=rng)
     session_id = execute_insert_returning_id(
         connection,
         """
@@ -881,12 +1180,31 @@ def create_quiz_session(
     items: list[dict[str, Any]] = []
     for index, row in enumerate(chosen_rows, start=1):
         type_config = json.loads(row["type_config_json"])
+        resolved_prompt, resolved_type_config = _resolved_runtime(
+            row["question_type"],
+            row["prompt"],
+            type_config,
+            rng=rng,
+        )
         connection.execute(
             """
-            INSERT INTO quiz_session_items (session_id, question_id, score_earned, score_possible)
-            VALUES (?, ?, NULL, ?)
+            INSERT INTO quiz_session_items (
+                session_id,
+                question_id,
+                score_earned,
+                score_possible,
+                resolved_prompt,
+                resolved_type_config_json
+            )
+            VALUES (?, ?, NULL, ?, ?, ?)
             """,
-            (session_id, row["question_id"], score_possible(type_config)),
+            (
+                session_id,
+                row["question_id"],
+                score_possible(resolved_type_config),
+                resolved_prompt,
+                json_dumps(resolved_type_config),
+            ),
         )
         items.append(
             {
@@ -894,17 +1212,16 @@ def create_quiz_session(
                 "position": index,
                 "question_id": row["question_id"],
                 "module_id": row["module_id"],
-                "module_title": row["module_title"],
                 "module_instruction": row["module_instruction"] or "",
                 "review_flag": bool(row["review_flag"]),
-                "prompt": row["prompt"],
+                "prompt": resolved_prompt,
                 "question_type": row["question_type"],
                 "rank": row["rank"],
-                "type_config": public_type_config(row["question_type"], type_config),
+                "type_config": public_type_config(row["question_type"], resolved_type_config),
                 "submitted_answer": None,
                 "is_correct": None,
                 "score_earned": None,
-                "score_possible": score_possible(type_config),
+                "score_possible": score_possible(resolved_type_config),
             }
         )
 
@@ -917,7 +1234,7 @@ def create_quiz_session(
 
 
 def _unordered_multi_alignment(expected_groups: list[list[str]], normalized_inputs: list[str]) -> list[Optional[int]]:
-    normalized_expected_groups = [{normalize_answer(answer) for answer in group} for group in expected_groups]
+    normalized_expected_groups = [{normalize_text(answer) for answer in group} for group in expected_groups]
     padded_inputs = normalized_inputs[: len(expected_groups)] + [""] * max(0, len(expected_groups) - len(normalized_inputs))
 
     def match_slots(input_index: int, remaining_indices: list[int]) -> list[Optional[int]]:
@@ -945,7 +1262,7 @@ def evaluate_answers(
     type_config: dict[str, Any],
     answers: list[str],
 ) -> tuple[bool, float, float, list[dict[str, Any]]]:
-    normalized_inputs = [normalize_answer(answer) for answer in answers]
+    normalized_inputs = [normalize_text(answer) for answer in answers]
     expected_groups = type_config.get("accepted_answers", [])
     possible_score = float(score_possible(type_config))
     slot_total = max(len(expected_groups), 1)
@@ -979,7 +1296,7 @@ def evaluate_answers(
     correct_slots = 0
     for index, expected_group in enumerate(expected_groups):
         submitted = normalized_inputs[index] if index < len(normalized_inputs) else ""
-        expected_normalized = {normalize_answer(answer) for answer in expected_group}
+        expected_normalized = {normalize_text(answer) for answer in expected_group}
         is_correct = submitted in expected_normalized
         slot_results.append({"index": index, "is_correct": is_correct, "expected": " / ".join(expected_group)})
         all_correct = all_correct and is_correct
@@ -987,7 +1304,7 @@ def evaluate_answers(
             correct_slots += 1
 
     earned_score = correct_slots / slot_total
-    if question_type == "single_text" and len(expected_groups) == 1:
+    if question_type in {"single_text", "computed_text"} and len(expected_groups) == 1:
         return slot_results[0]["is_correct"], earned_score, possible_score, slot_results
     return all_correct, earned_score, possible_score, slot_results
 
@@ -1007,6 +1324,7 @@ def submit_answer(
             qsi.question_id,
             qsi.score_earned,
             qsi.score_possible,
+            qsi.resolved_type_config_json,
             q.question_type,
             q.type_config_json
         FROM quiz_session_items AS qsi
@@ -1021,7 +1339,7 @@ def submit_answer(
     if row["score_earned"] is not None:
         raise ValidationError("Quiz session item has already been answered.")
 
-    type_config = json.loads(row["type_config_json"])
+    type_config = json.loads(row["resolved_type_config_json"] or row["type_config_json"])
     is_correct, earned_score, possible_score, slot_results = evaluate_answers(row["question_type"], type_config, answers)
     answered_at = utc_now()
     connection.execute(
@@ -1076,7 +1394,6 @@ def get_stats(
         SELECT
             q.id AS question_id,
             q.module_id,
-            m.title AS module_title,
             m.full_slug AS module_full_slug,
             q.prompt,
             q.question_type,
@@ -1094,6 +1411,7 @@ def get_stats(
     review_flags = _review_flags_by_question(connection, user_id=user_id, question_ids=question_ids)
     stats_by_question = _question_stats_by_question(connection, user_id=user_id, question_ids=question_ids)
     history_by_question = _question_attempt_history(connection, user_id=user_id, question_ids=question_ids)
+    latest_scored_session_id = _latest_scored_session_id(connection, user_id=user_id)
     recent_incorrect_answers = _recent_incorrect_answers_by_question(
         connection,
         user_id=user_id,
@@ -1111,14 +1429,17 @@ def get_stats(
             row["question_id"],
             {"attempts_count": 0, "correct_count": 0.0, "incorrect_count": 0.0, "last_asked_at": None},
         )
-        schedule = _schedule_snapshot_from_attempts(history_by_question.get(row["question_id"], []), now=now)
+        schedule = _schedule_snapshot_from_attempts(
+            history_by_question.get(row["question_id"], []),
+            now=now,
+            latest_scored_session_id=latest_scored_session_id,
+        )
         type_config = json.loads(row["type_config_json"])
         denominator = stats["correct_count"] + stats["incorrect_count"]
         questions.append(
             {
                 "question_id": row["question_id"],
                 "module_id": row["module_id"],
-                "module_title": row["module_title"],
                 "module_full_slug": row["module_full_slug"],
                 "prompt": row["prompt"],
                 "prompt_preview": preview_prompt(row["prompt"], row["question_type"], type_config),
@@ -1129,15 +1450,21 @@ def get_stats(
                 "last_asked_at": stats["last_asked_at"],
                 "review_flag": review_flag,
                 "accepted_answers": type_config["accepted_answers"],
-                "slot_prompts": type_config.get("slot_prompts", []),
                 "segments": type_config.get("segments", []),
                 "recent_incorrect_answers": recent_incorrect_answers.get(row["question_id"], []),
                 "schedule": {
                     "bucket": schedule["bucket"],
+                    "logical_bucket": _logical_bucket_label(
+                        bucket=schedule["bucket"],
+                        interval_step=schedule["interval_step"],
+                        bucket_origin_step=schedule.get("bucket_origin_step"),
+                        review_flag=review_flag,
+                    ),
                     "recovery_streak": schedule["recovery_streak"],
                     "interval_step": schedule["interval_step"],
                     "last_incorrect_at": schedule["last_incorrect_at"],
                     "next_due_at": schedule["next_due_at"],
+                    "retry_pending": schedule["retry_pending"],
                 },
             }
         )
@@ -1208,162 +1535,6 @@ def get_stats(
     }
 
 
-def _strip_utf8_bom(value: str) -> str:
-    return value[1:] if value.startswith("\ufeff") else value
-
-
-def _parse_csv_cells(csv_line: str) -> list[str]:
-    try:
-        cells = next(csv.reader([csv_line]))
-    except csv.Error as error:
-        raise ValidationError(f"Malformed CSV row: {error}") from error
-    if len(cells) != 2:
-        raise ValidationError("Rows must contain exactly 2 columns.")
-    return cells
-
-
-def _split_escaped(text: str, separator: str) -> list[str]:
-    parts: list[str] = []
-    current: list[str] = []
-    escape = False
-    for char in text:
-        if escape:
-            current.append(char)
-            escape = False
-            continue
-        if char == "\\":
-            escape = True
-            continue
-        if char == separator:
-            parts.append("".join(current))
-            current = []
-            continue
-        current.append(char)
-    if escape:
-        raise ValidationError("Dangling escape sequence.")
-    parts.append("".join(current))
-    return parts
-
-
-def _parse_answer_group(text: str) -> list[str]:
-    values = [value.strip() for value in _split_escaped(text, "|")]
-    answers = [value for value in values if value]
-    if not answers:
-        raise ValidationError("Each answer slot needs at least one accepted answer.")
-    return answers
-
-
-def _parse_inline_prompt(prompt: str) -> tuple[list[str], list[list[str]], str]:
-    segments: list[str] = []
-    answer_groups: list[list[str]] = []
-    current_segment: list[str] = []
-    current_group: Optional[list[str]] = None
-    escape = False
-    saw_group = False
-
-    for char in prompt:
-        if escape:
-            target = current_group if current_group is not None else current_segment
-            target.append(char)
-            escape = False
-            continue
-
-        if char == "\\":
-            escape = True
-            continue
-
-        if current_group is None:
-            if char == "[":
-                saw_group = True
-                segments.append("".join(current_segment))
-                current_segment = []
-                current_group = []
-                continue
-            if char == "]":
-                raise ValidationError("Malformed inline cloze prompt.")
-            current_segment.append(char)
-            continue
-
-        if char == "]":
-            group_text = "".join(current_group)
-            answers = _parse_answer_group(group_text)
-            answer_groups.append(answers)
-            current_group = None
-            continue
-
-        current_group.append(char)
-
-    if escape or current_group is not None:
-        raise ValidationError("Malformed inline cloze prompt.")
-    if not saw_group:
-        raise ValidationError("Prompt does not contain inline cloze blanks.")
-
-    segments.append("".join(current_segment))
-    return segments, answer_groups, render_inline_segments(segments)
-
-
-def _parse_upload_row(prompt: str, answers: str, row_number: int, module_id: int) -> tuple[str, dict[str, Any]]:
-    normalized_prompt = prompt.strip()
-    normalized_answers = answers.strip()
-    if not normalized_prompt:
-        raise ValidationError("Prompt is required.")
-
-    has_inline_marker = bool(re.search(r"(?<!\\)\[", normalized_prompt) or re.search(r"(?<!\\)\]", normalized_prompt))
-    if has_inline_marker:
-        segments, accepted_answers, rendered_prompt = _parse_inline_prompt(normalized_prompt)
-        if normalized_answers:
-            raise ValidationError("Inline cloze rows must leave answers empty.")
-        payload = QuestionDraftIn(
-            module_id=module_id,
-            prompt=rendered_prompt,
-            question_type="inline_cloze",
-            rank=row_number,
-            accepted_answers=accepted_answers,
-            slot_prompts=[],
-            segments=segments,
-        )
-        return "inline_cloze", payload.model_dump()
-
-    if not normalized_answers:
-        raise ValidationError("Answers are required for non-inline questions.")
-
-    ordered = False
-    answer_text = normalized_answers
-    if answer_text[:8].casefold() == "ordered:":
-        ordered = True
-        answer_text = answer_text[8:].lstrip()
-        if not answer_text:
-            raise ValidationError("ordered: rows need at least two answer slots.")
-
-    slot_values = [value.strip() for value in _split_escaped(answer_text, ";")]
-    if len(slot_values) > 1:
-        accepted_answers = [_parse_answer_group(value) for value in slot_values]
-        payload = QuestionDraftIn(
-            module_id=module_id,
-            prompt=normalized_prompt,
-            question_type="ordered_multi" if ordered else "multi_text",
-            rank=row_number,
-            accepted_answers=accepted_answers,
-            slot_prompts=[],
-            segments=[],
-        )
-        return payload.question_type, payload.model_dump()
-
-    if ordered:
-        raise ValidationError("ordered: rows need at least two answer slots.")
-
-    payload = QuestionDraftIn(
-        module_id=module_id,
-        prompt=normalized_prompt,
-        question_type="single_text",
-        rank=row_number,
-        accepted_answers=[_parse_answer_group(answer_text)],
-        slot_prompts=[],
-        segments=[],
-    )
-    return "single_text", payload.model_dump()
-
-
 def _existing_prompt_keys(connection: DatabaseConnection, module_id: int) -> set[str]:
     existing_rows = _module_question_rows(connection, module_id)
     return {
@@ -1372,424 +1543,183 @@ def _existing_prompt_keys(connection: DatabaseConnection, module_id: int) -> set
     }
 
 
-def _report_text(unresolved_rows: list[dict[str, Any]], *, staged_valid_count: int) -> str:
-    if not unresolved_rows:
-        if staged_valid_count:
-            return "All remaining rows are valid. Commit to save them."
-        return "No rows remain in this upload session."
-    return "\n".join(
-        f"row {row['row_number']} | {'; '.join(row['issues'])} | {row['csv_line']}"
+def _report_text(
+    unresolved_rows: list[dict[str, Any]],
+    *,
+    valid_row_count: int,
+    skipped_rows: list[dict[str, Any]],
+) -> str:
+    lines: list[str] = []
+    lines.extend(
+        f"row {row['row_number']} | needs fix | {'; '.join(row['issues'])} | {row['qml_line']}"
         for row in unresolved_rows
     )
+    lines.extend(
+        f"row {row['row_number']} | skipped duplicate | {row['reason']} | {row['qml_line']}"
+        for row in skipped_rows
+    )
+
+    if lines:
+        return "\n".join(lines)
+    if valid_row_count:
+        return "All remaining rows are valid. Commit to save them."
+    return "No importable rows remain."
 
 
-def _build_import_session_response(
+def _classify_import_rows(
     connection: DatabaseConnection,
-    session_id: int,
     *,
-    committed: bool = False,
-    committed_count: int = 0,
-) -> dict[str, Any]:
-    session_row = connection.execute(
-        """
-        SELECT id, expires_at, committed_at
-        FROM question_import_sessions
-        WHERE id = ?
-        """,
-        (session_id,),
-    ).fetchone()
-    if session_row is None:
-        raise NotFoundError("Question import session was not found.")
+    module_id: int,
+    parsed_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    existing_keys = _existing_prompt_keys(connection, module_id)
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for row in parsed_rows:
+        if row["issues"]:
+            continue
+        payload = row["payload"]
+        type_config = serialize_type_config(QuestionDraftIn(**payload))
+        key = question_prompt_key(payload["question_type"], payload["prompt"], type_config)
+        row["prompt_key"] = key
+        groups.setdefault(key, []).append(row)
 
+    for key, rows in groups.items():
+        ordered_rows = sorted(rows, key=lambda row: row["row_number"])
+        if key in existing_keys:
+            for row in ordered_rows:
+                row["skip_reason"] = "Prompt already exists in this leaf module."
+            continue
+        if len(ordered_rows) > 1:
+            for row in ordered_rows[1:]:
+                row["skip_reason"] = "Prompt duplicates an earlier row in this upload."
+    return parsed_rows
+
+
+def _normalize_import_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not rows:
+        raise ValidationError("Import must include at least one question row.")
+
+    normalized_rows: list[dict[str, Any]] = []
+    seen_row_numbers: set[int] = set()
+    for row in sorted(rows, key=lambda candidate: candidate["row_number"]):
+        row_number = int(row["row_number"])
+        qml_line = row["qml_line"]
+        if row_number in seen_row_numbers:
+            raise ValidationError("Row numbers must be unique.")
+        if "\n" in qml_line or "\r" in qml_line:
+            raise ValidationError("Each QML row must stay on one line.")
+        seen_row_numbers.add(row_number)
+        normalized_rows.append({"row_number": row_number, "qml_line": qml_line})
+    return normalized_rows
+
+
+def _validate_question_import_rows(
+    connection: DatabaseConnection,
+    *,
+    module_id: int,
+    rows: list[dict[str, Any]],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    ensure_leaf_module(connection, module_id)
+
+    parsed_rows: list[dict[str, Any]] = []
+    for row in _normalize_import_rows(rows):
+        row_number = row["row_number"]
+        qml_line = row["qml_line"]
+        issues: list[str] = []
+        inferred_type: Optional[str] = None
+        payload: Optional[dict[str, Any]] = None
+        try:
+            payload = parse_qml_line(line=qml_line, module_id=module_id, rank=row_number)
+            draft = QuestionDraftIn(**payload)
+            inferred_type = draft.question_type
+            payload = draft.model_dump()
+        except (QMLError, ValueError) as error:
+            issues.append(str(error))
+        parsed_rows.append(
+            {
+                "row_number": row_number,
+                "qml_line": qml_line,
+                "inferred_type": inferred_type,
+                "payload": payload,
+                "issues": issues,
+            }
+        )
+
+    parsed_rows = _classify_import_rows(connection, module_id=module_id, parsed_rows=parsed_rows)
     unresolved_rows = [
         {
             "row_number": row["row_number"],
-            "csv_line": row["csv_line"],
-            "issues": json.loads(row["issues_json"]),
+            "qml_line": row["qml_line"],
+            "issues": row["issues"],
             "inferred_type": row["inferred_type"],
         }
-        for row in connection.execute(
-            """
-            SELECT row_number, csv_line, issues_json, inferred_type
-            FROM question_import_session_rows
-            WHERE session_id = ? AND status = 'unresolved'
-            ORDER BY row_number
-            """,
-            (session_id,),
-        ).fetchall()
+        for row in parsed_rows
+        if row["issues"]
     ]
-    staged_valid_count = connection.execute(
-        """
-        SELECT COUNT(*) AS staged_valid_count
-        FROM question_import_session_rows
-        WHERE session_id = ? AND status = 'staged'
-        """,
-        (session_id,),
-    ).fetchone()["staged_valid_count"]
-
-    return {
-        "session_id": session_id,
-        "expires_at": session_row["expires_at"],
-        "ready_to_commit": bool(not unresolved_rows and staged_valid_count > 0 and session_row["committed_at"] is None),
-        "staged_valid_count": staged_valid_count,
+    skipped_rows = [
+        {
+            "row_number": row["row_number"],
+            "qml_line": row["qml_line"],
+            "reason": row["skip_reason"],
+            "inferred_type": row["inferred_type"],
+        }
+        for row in parsed_rows
+        if row.get("skip_reason")
+    ]
+    valid_rows = [row for row in parsed_rows if not row["issues"] and not row.get("skip_reason") and row["payload"]]
+    result = {
+        "ready_to_commit": bool(not unresolved_rows and valid_rows),
+        "valid_row_count": len(valid_rows),
+        "skipped_duplicate_count": len(skipped_rows),
+        "skipped_rows": skipped_rows,
         "unresolved_rows": unresolved_rows,
-        "report_text": _report_text(unresolved_rows, staged_valid_count=staged_valid_count),
-        "committed": committed,
-        "committed_count": committed_count,
-    }
-
-
-def _delete_expired_import_sessions(connection: DatabaseConnection) -> None:
-    now = utc_now()
-    connection.execute(
-        "DELETE FROM question_import_sessions WHERE committed_at IS NULL AND expires_at < ?",
-        (now,),
-    )
-
-
-def _active_import_session(connection: DatabaseConnection, session_id: int) -> Any:
-    _delete_expired_import_sessions(connection)
-    row = connection.execute(
-        """
-        SELECT id, module_id, expires_at, committed_at
-        FROM question_import_sessions
-        WHERE id = ?
-        """,
-        (session_id,),
-    ).fetchone()
-    if row is None:
-        raise NotFoundError("Question import session was not found.")
-    if row["committed_at"] is not None:
-        raise ValidationError("Question import session has already been committed.")
-    expires_at = datetime.fromisoformat(row["expires_at"])
-    if expires_at < datetime.now(timezone.utc):
-        connection.execute("DELETE FROM question_import_sessions WHERE id = ?", (session_id,))
-        raise ValidationError("Question import session has expired. Upload the CSV again.")
-    return row
-
-
-def _insert_import_session_row(
-    connection: DatabaseConnection,
-    *,
-    session_id: int,
-    row_number: int,
-    csv_line: str,
-    status: str,
-    inferred_type: Optional[str],
-    payload_json: Optional[str],
-    issues: list[str],
-) -> None:
-    connection.execute(
-        """
-        INSERT INTO question_import_session_rows (
-            session_id,
-            row_number,
-            csv_line,
-            status,
-            inferred_type,
-            payload_json,
-            issues_json
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            session_id,
-            row_number,
-            csv_line,
-            status,
-            inferred_type,
-            payload_json,
-            json_dumps(issues),
+        "report_text": _report_text(
+            unresolved_rows,
+            valid_row_count=len(valid_rows),
+            skipped_rows=skipped_rows,
         ),
-    )
+        "committed": False,
+        "committed_count": 0,
+    }
+    return result, valid_rows
 
 
-def _reconcile_initial_upload_rows(
+def validate_question_import(
     connection: DatabaseConnection,
     *,
     module_id: int,
-    parsed_rows: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    existing_keys = _existing_prompt_keys(connection, module_id)
-    groups: dict[str, list[dict[str, Any]]] = {}
-    for row in parsed_rows:
-        if row["issues"]:
-            continue
-        payload = row["payload"]
-        type_config = serialize_type_config(QuestionDraftIn(**payload))
-        key = question_prompt_key(payload["question_type"], payload["prompt"], type_config)
-        row["prompt_key"] = key
-        groups.setdefault(key, []).append(row)
-
-    for key, rows in groups.items():
-        if key in existing_keys:
-            for row in rows:
-                row["issues"].append("Prompt already exists in this leaf module.")
-        if len(rows) > 1:
-            for row in rows:
-                row["issues"].append("Prompt duplicates another row in this upload.")
-    return parsed_rows
+    qml_text: Optional[str] = None,
+    rows: Optional[list[dict[str, Any]]] = None,
+) -> dict[str, Any]:
+    try:
+        normalized_rows = qml_lines_from_text(qml_text) if qml_text is not None else _normalize_import_rows(rows or [])
+    except QMLError as error:
+        raise ValidationError(str(error)) from error
+    result, _ = _validate_question_import_rows(connection, module_id=module_id, rows=normalized_rows)
+    return result
 
 
-def _reconcile_revalidated_rows(
+def commit_question_import(
     connection: DatabaseConnection,
     *,
     module_id: int,
-    parsed_rows: list[dict[str, Any]],
-    trusted_keys: set[str],
-) -> list[dict[str, Any]]:
-    existing_keys = _existing_prompt_keys(connection, module_id)
-    groups: dict[str, list[dict[str, Any]]] = {}
-    for row in parsed_rows:
-        if row["issues"]:
-            continue
-        payload = row["payload"]
-        type_config = serialize_type_config(QuestionDraftIn(**payload))
-        key = question_prompt_key(payload["question_type"], payload["prompt"], type_config)
-        row["prompt_key"] = key
-        groups.setdefault(key, []).append(row)
-
-    for key, rows in groups.items():
-        if key in existing_keys:
-            for row in rows:
-                row["issues"].append("Prompt already exists in this leaf module.")
-        if key in trusted_keys:
-            for row in rows:
-                row["issues"].append("Prompt duplicates another kept row in this upload.")
-        if len(rows) > 1:
-            for row in rows:
-                row["issues"].append("Prompt duplicates another unresolved row in this upload.")
-    return parsed_rows
-
-
-def create_question_import_session(connection: DatabaseConnection, *, module_id: int, csv_text: str) -> dict[str, Any]:
-    ensure_leaf_module(connection, module_id)
-    _delete_expired_import_sessions(connection)
-
-    lines = csv_text.splitlines()
-    if not lines:
-        raise ValidationError("CSV must include the prompt,answers header.")
-
-    header_cells = _parse_csv_cells(_strip_utf8_bom(lines[0]))
-    if header_cells != UPLOAD_CSV_HEADER:
-        raise ValidationError("CSV header must be exactly prompt,answers.")
-    if len(lines) == 1:
-        raise ValidationError("CSV must include at least one question row.")
-
-    expires_at = (datetime.now(timezone.utc) + timedelta(hours=IMPORT_SESSION_TTL_HOURS)).isoformat()
-    session_id = execute_insert_returning_id(
-        connection,
-        """
-        INSERT INTO question_import_sessions (module_id, created_at, expires_at)
-        VALUES (?, ?, ?)
-        """,
-        (module_id, utc_now(), expires_at),
-    )
-
-    parsed_rows: list[dict[str, Any]] = []
-    for row_number, csv_line in enumerate(lines[1:], start=1):
-        issues: list[str] = []
-        inferred_type: Optional[str] = None
-        payload: Optional[dict[str, Any]] = None
-        try:
-            prompt, answers = _parse_csv_cells(csv_line)
-            inferred_type, payload = _parse_upload_row(prompt, answers, row_number, module_id)
-        except ValidationError as error:
-            issues.append(str(error))
-        parsed_rows.append(
-            {
-                "row_number": row_number,
-                "csv_line": csv_line,
-                "inferred_type": inferred_type,
-                "payload": payload,
-                "issues": issues,
-            }
-        )
-
-    parsed_rows = _reconcile_initial_upload_rows(connection, module_id=module_id, parsed_rows=parsed_rows)
-    for row in parsed_rows:
-        status = "staged" if not row["issues"] else "unresolved"
-        _insert_import_session_row(
-            connection,
-            session_id=session_id,
-            row_number=row["row_number"],
-            csv_line=row["csv_line"],
-            status=status,
-            inferred_type=row["inferred_type"],
-            payload_json=json_dumps(row["payload"]) if row["payload"] and not row["issues"] else None,
-            issues=row["issues"],
-        )
-
-    return _build_import_session_response(connection, session_id)
-
-
-def revalidate_question_import_session(
-    connection: DatabaseConnection,
-    *,
-    session_id: int,
     rows: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    session_row = _active_import_session(connection, session_id)
-    unresolved_db_rows = connection.execute(
-        """
-        SELECT row_number
-        FROM question_import_session_rows
-        WHERE session_id = ? AND status = 'unresolved'
-        ORDER BY row_number
-        """,
-        (session_id,),
-    ).fetchall()
-    expected_row_numbers = [row["row_number"] for row in unresolved_db_rows]
-    provided_row_numbers = sorted(row["row_number"] for row in rows)
-    if provided_row_numbers != expected_row_numbers:
-        raise ValidationError("Revalidation must include the current unresolved rows only.")
-
-    trusted_keys = set()
-    for row in connection.execute(
-        """
-        SELECT payload_json
-        FROM question_import_session_rows
-        WHERE session_id = ? AND status = 'staged'
-        """,
-        (session_id,),
-    ).fetchall():
-        payload = json.loads(row["payload_json"])
-        type_config = serialize_type_config(QuestionDraftIn(**payload))
-        trusted_keys.add(question_prompt_key(payload["question_type"], payload["prompt"], type_config))
-
-    parsed_rows: list[dict[str, Any]] = []
-    row_map = {row["row_number"]: row["csv_line"] for row in rows}
-    for row_number in expected_row_numbers:
-        csv_line = row_map[row_number]
-        issues: list[str] = []
-        inferred_type: Optional[str] = None
-        payload: Optional[dict[str, Any]] = None
-        try:
-            prompt, answers = _parse_csv_cells(csv_line)
-            inferred_type, payload = _parse_upload_row(prompt, answers, row_number, session_row["module_id"])
-        except ValidationError as error:
-            issues.append(str(error))
-        parsed_rows.append(
-            {
-                "row_number": row_number,
-                "csv_line": csv_line,
-                "inferred_type": inferred_type,
-                "payload": payload,
-                "issues": issues,
-            }
-        )
-
-    parsed_rows = _reconcile_revalidated_rows(
-        connection,
-        module_id=session_row["module_id"],
-        parsed_rows=parsed_rows,
-        trusted_keys=trusted_keys,
-    )
-
-    for row in parsed_rows:
-        status = "staged" if not row["issues"] else "unresolved"
-        connection.execute(
-            """
-            UPDATE question_import_session_rows
-            SET
-                csv_line = ?,
-                status = ?,
-                inferred_type = ?,
-                payload_json = ?,
-                issues_json = ?
-            WHERE session_id = ? AND row_number = ?
-            """,
-            (
-                row["csv_line"],
-                status,
-                row["inferred_type"],
-                json_dumps(row["payload"]) if row["payload"] and not row["issues"] else None,
-                json_dumps(row["issues"]),
-                session_id,
-                row["row_number"],
-            ),
-        )
-
-    return _build_import_session_response(connection, session_id)
-
-
-def discard_question_import_session_row(connection: DatabaseConnection, *, session_id: int, row_number: int) -> dict[str, Any]:
-    _active_import_session(connection, session_id)
-    deleted = connection.execute(
-        """
-        DELETE FROM question_import_session_rows
-        WHERE session_id = ? AND row_number = ? AND status = 'unresolved'
-        """,
-        (session_id, row_number),
-    ).rowcount
-    if not deleted:
-        raise NotFoundError("Unresolved import row was not found.")
-    return _build_import_session_response(connection, session_id)
-
-
-def commit_question_import_session(connection: DatabaseConnection, *, session_id: int) -> dict[str, Any]:
-    session_row = _active_import_session(connection, session_id)
-    unresolved_count = connection.execute(
-        """
-        SELECT COUNT(*) AS unresolved_count
-        FROM question_import_session_rows
-        WHERE session_id = ? AND status = 'unresolved'
-        """,
-        (session_id,),
-    ).fetchone()["unresolved_count"]
-    if unresolved_count:
-        return _build_import_session_response(connection, session_id)
-
-    staged_rows = connection.execute(
-        """
-        SELECT row_number, csv_line, inferred_type, payload_json
-        FROM question_import_session_rows
-        WHERE session_id = ? AND status = 'staged'
-        ORDER BY row_number
-        """,
-        (session_id,),
-    ).fetchall()
-    if not staged_rows:
-        return _build_import_session_response(connection, session_id)
-
-    existing_keys = _existing_prompt_keys(connection, session_row["module_id"])
-    conflicting_row_numbers: list[int] = []
-    for row in staged_rows:
-        payload = json.loads(row["payload_json"])
-        type_config = serialize_type_config(QuestionDraftIn(**payload))
-        prompt_key = question_prompt_key(payload["question_type"], payload["prompt"], type_config)
-        if prompt_key in existing_keys:
-            conflicting_row_numbers.append(row["row_number"])
-
-    if conflicting_row_numbers:
-        for row in staged_rows:
-            if row["row_number"] not in conflicting_row_numbers:
-                continue
-            connection.execute(
-                """
-                UPDATE question_import_session_rows
-                SET status = 'unresolved', payload_json = NULL, issues_json = ?
-                WHERE session_id = ? AND row_number = ?
-                """,
-                (
-                    json_dumps(["Prompt already exists in this leaf module."]),
-                    session_id,
-                    row["row_number"],
-                ),
-            )
-        return _build_import_session_response(connection, session_id)
+    result, valid_rows = _validate_question_import_rows(connection, module_id=module_id, rows=rows)
+    if result["unresolved_rows"]:
+        return result
 
     committed_count = 0
-    for row in staged_rows:
-        payload = QuestionDraftIn(**json.loads(row["payload_json"]))
+    for row in valid_rows:
+        payload = QuestionDraftIn(**row["payload"])
         create_question(connection, payload)
         committed_count += 1
 
-    connection.execute(
-        "UPDATE question_import_sessions SET committed_at = ? WHERE id = ?",
-        (utc_now(), session_id),
-    )
-    return _build_import_session_response(connection, session_id, committed=True, committed_count=committed_count)
+    return {
+        **result,
+        "committed": True,
+        "committed_count": committed_count,
+    }
 
 
 def backfill_session_scores(connection: DatabaseConnection) -> None:
@@ -1804,7 +1734,11 @@ def backfill_session_scores(connection: DatabaseConnection) -> None:
 
 def backfill_question_type_defaults(connection: DatabaseConnection) -> None:
     rows = connection.execute(
-        "SELECT id, source_id, question_type, type_config_json FROM questions"
+        """
+        SELECT q.id, m.full_slug, q.prompt, q.question_type, q.type_config_json
+        FROM questions AS q
+        JOIN modules AS m ON m.id = q.module_id
+        """
     ).fetchall()
     for row in rows:
         type_config = json.loads(row["type_config_json"])
@@ -1814,7 +1748,11 @@ def backfill_question_type_defaults(connection: DatabaseConnection) -> None:
         if question_type == "multi_text" and type_config.get("answer_order_matters") is True:
             question_type = "ordered_multi"
             changed = True
-        if row["source_id"] in FORCED_UNORDERED_SOURCE_IDS and question_type != "multi_text":
+        if (
+            row["question_type"] != "inline_cloze"
+            and (row["full_slug"], normalize_text(row["prompt"])) in FORCED_UNORDERED_PROMPTS
+            and question_type != "multi_text"
+        ):
             question_type = "multi_text"
             changed = True
         if "answer_order_matters" in type_config:
@@ -1832,6 +1770,26 @@ def backfill_question_type_defaults(connection: DatabaseConnection) -> None:
             )
 
 
+def _read_seed_module_instruction(module_file: Path) -> str:
+    lines = module_file.read_text().splitlines()
+    for index, line in enumerate(lines):
+        if not line.startswith("instruction:"):
+            continue
+
+        raw_value = line.partition(":")[2].strip()
+        if not raw_value:
+            return ""
+        if raw_value in {"|", ">"}:
+            block_lines: list[str] = []
+            for block_line in lines[index + 1 :]:
+                if not block_line.startswith(("  ", "\t")):
+                    break
+                block_lines.append(block_line.strip())
+            return "\n".join(block_lines).strip()
+        return raw_value.strip().strip("\"'")
+    return ""
+
+
 def sync_seed_content(connection: DatabaseConnection, content_root: Path) -> dict[str, int]:
     content_root = Path(content_root)
     imported_modules = 0
@@ -1839,65 +1797,49 @@ def sync_seed_content(connection: DatabaseConnection, content_root: Path) -> dic
     module_files = sorted(content_root.rglob("module.yaml"), key=lambda path: (len(path.relative_to(content_root).parts), str(path)))
 
     module_lookup = {
-        row["source_id"]: row["id"]
-        for row in connection.execute("SELECT id, source_id FROM modules WHERE source_id IS NOT NULL").fetchall()
+        row["full_slug"]: row["id"]
+        for row in connection.execute("SELECT id, full_slug FROM modules").fetchall()
     }
     for module_file in module_files:
-        data = yaml.safe_load(module_file.read_text()) or {}
-        source_id = data["source_id"]
-        if source_id in module_lookup:
+        relative_parts = module_file.parent.relative_to(content_root).parts
+        slug = relative_parts[-1]
+        full_slug = "/".join(relative_parts)
+        if full_slug in module_lookup:
             continue
 
-        parent_source_id = data.get("parent_source_id")
+        parent_full_slug = "/".join(relative_parts[:-1]) if len(relative_parts) > 1 else None
         parent_id = None
-        if parent_source_id:
-            parent_id = module_lookup.get(parent_source_id)
+        if parent_full_slug:
+            parent_id = module_lookup.get(parent_full_slug)
             if parent_id is None:
-                raise ValidationError(f"Parent module {parent_source_id} must be imported before child {source_id}.")
+                raise ValidationError(f"Parent module {parent_full_slug} must be imported before child {full_slug}.")
             ensure_module_can_accept_children(connection, parent_id)
-        title = data["title"]
-        ui_copy = merge_ui_copy(data.get("ui_copy"))
-        ensure_unique_module_title(connection, title, parent_id)
-        slug, full_slug = next_unique_slug(connection, title, parent_id)
+        ensure_unique_module_slug(connection, slug, parent_id)
         module_id = execute_insert_returning_id(
             connection,
             """
-            INSERT INTO modules (source_id, parent_id, title, slug, full_slug, instruction, ui_copy_json, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO modules (parent_id, slug, full_slug, instruction, created_at)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            (source_id, parent_id, title, slug, full_slug, (data.get("instruction") or "").strip(), json_dumps(ui_copy), utc_now()),
+            (parent_id, slug, full_slug, _read_seed_module_instruction(module_file), utc_now()),
         )
-        module_lookup[source_id] = module_id
+        module_lookup[full_slug] = module_id
         imported_modules += 1
 
-    question_lookup = {
-        row["source_id"]
-        for row in connection.execute("SELECT source_id FROM questions WHERE source_id IS NOT NULL").fetchall()
-    }
-    question_files = sorted(content_root.rglob("questions.csv"))
+    question_files = sorted(content_root.rglob("questions.dsl"))
     for question_file in question_files:
-        with question_file.open(newline="") as handle:
-            reader = csv.DictReader(handle)
-            for raw_row in reader:
-                source_id = raw_row["source_id"]
-                if source_id in question_lookup:
-                    continue
-                payload = QuestionDraftIn(
-                    module_id=module_lookup[raw_row["module_source_id"]],
-                    prompt=raw_row["prompt"],
-                    question_type=raw_row["type"],
-                    rank=int(float(raw_row["ranking"])),
-                    accepted_answers=parse_json_list(raw_row.get("accepted_answers_json")),
-                    slot_prompts=parse_json_list(raw_row.get("slot_prompts_json")),
-                    segments=parse_json_list(raw_row.get("segments_json")),
-                )
-                question_ids = create_question(connection, payload)
-                connection.execute(
-                    "UPDATE questions SET source_id = ? WHERE id = ?",
-                    (source_id, question_ids["question_id"]),
-                )
-                question_lookup.add(source_id)
-                imported_questions += 1
+        module_full_slug = str(question_file.parent.relative_to(content_root)).replace("\\", "/")
+        module_id = module_lookup[module_full_slug]
+        existing_prompt_keys = _existing_prompt_keys(connection, module_id)
+        for row in qml_lines_from_text(question_file.read_text()):
+            payload = QuestionDraftIn(**parse_qml_line(line=row["qml_line"], module_id=module_id, rank=row["row_number"]))
+            type_config = serialize_type_config(payload)
+            prompt_key = question_prompt_key(payload.question_type, payload.prompt, type_config)
+            if prompt_key in existing_prompt_keys:
+                continue
+            create_question(connection, payload)
+            existing_prompt_keys.add(prompt_key)
+            imported_questions += 1
 
     backfill_question_type_defaults(connection)
     backfill_session_scores(connection)

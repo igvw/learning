@@ -1,6 +1,0 @@
-source_id,module_source_id,type,ranking,prompt,accepted_answers_json,slot_prompts_json,segments_json
-geography-rivers-001,geography-rivers,single_text,5,Which river runs through Cairo?,"[[""nile"",""the nile""]]","",""
-geography-rivers-002,geography-rivers,multi_text,4,Name the two rivers that meet in Khartoum.,"[[""white nile""],[""blue nile""]]","[""River 1"",""River 2""]",""
-geography-rivers-003,geography-rivers,inline_cloze,3,Complete the sentence about South America.,"[[""amazon"",""amazon river""]]","","[""The Amazon River flows mainly through "","" basin countries.""]"
-geography-rivers-004,geography-rivers,single_text,2,Which river is the longest in Europe?,"[[""volga"",""volga river""]]","",""
-geography-rivers-005,geography-rivers,multi_text,1,Name two rivers that flow through Germany.,"[[""rhine""],[""elbe"",""danube""]]","[""River 1"",""River 2""]",""

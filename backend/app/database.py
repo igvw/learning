@@ -3,109 +3,16 @@ from __future__ import annotations
 import re
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Iterator
 
 import psycopg
 from psycopg.rows import dict_row
 
 
-SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 6
 SCHEMA_VERSION_TABLE = "app_schema_version"
-
-SCHEMA_SQL = """
-CREATE TABLE IF NOT EXISTS modules (
-    id BIGSERIAL PRIMARY KEY,
-    source_id TEXT UNIQUE,
-    parent_id BIGINT REFERENCES modules(id) ON DELETE SET NULL,
-    title TEXT NOT NULL,
-    slug TEXT NOT NULL,
-    full_slug TEXT NOT NULL UNIQUE,
-    instruction TEXT NOT NULL DEFAULT '',
-    ui_copy_json TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_modules_parent_id ON modules(parent_id);
-
-CREATE TABLE IF NOT EXISTS questions (
-    id BIGSERIAL PRIMARY KEY,
-    source_id TEXT UNIQUE,
-    module_id BIGINT NOT NULL REFERENCES modules(id) ON DELETE CASCADE,
-    question_type TEXT NOT NULL,
-    prompt TEXT NOT NULL,
-    rank INTEGER NOT NULL,
-    type_config_json TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_questions_module_id ON questions(module_id);
-
-CREATE TABLE IF NOT EXISTS users (
-    id BIGSERIAL PRIMARY KEY,
-    handle TEXT NOT NULL UNIQUE,
-    display_name TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    disabled_at TEXT
-);
-
-CREATE TABLE IF NOT EXISTS user_review_flags (
-    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    question_id BIGINT NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
-    review_flag INTEGER NOT NULL DEFAULT 0,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (user_id, question_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_user_review_flags_review
-    ON user_review_flags(user_id, review_flag);
-
-CREATE TABLE IF NOT EXISTS quiz_sessions (
-    id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    module_id BIGINT REFERENCES modules(id) ON DELETE SET NULL,
-    created_at TEXT NOT NULL,
-    completed_at TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_quiz_sessions_user_module_created
-    ON quiz_sessions(user_id, module_id, created_at);
-
-CREATE TABLE IF NOT EXISTS quiz_session_items (
-    session_id BIGINT NOT NULL REFERENCES quiz_sessions(id) ON DELETE CASCADE,
-    question_id BIGINT NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
-    score_earned REAL,
-    score_possible REAL NOT NULL DEFAULT 1,
-    submitted_answer_json TEXT,
-    PRIMARY KEY (session_id, question_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_quiz_session_items_session_id
-    ON quiz_session_items(session_id);
-
-CREATE INDEX IF NOT EXISTS idx_quiz_session_items_question_id
-    ON quiz_session_items(question_id);
-
-CREATE TABLE IF NOT EXISTS question_import_sessions (
-    id BIGSERIAL PRIMARY KEY,
-    module_id BIGINT NOT NULL REFERENCES modules(id) ON DELETE CASCADE,
-    created_at TEXT NOT NULL,
-    expires_at TEXT NOT NULL,
-    committed_at TEXT
-);
-
-CREATE TABLE IF NOT EXISTS question_import_session_rows (
-    session_id BIGINT NOT NULL REFERENCES question_import_sessions(id) ON DELETE CASCADE,
-    row_number INTEGER NOT NULL,
-    csv_line TEXT NOT NULL,
-    status TEXT NOT NULL,
-    inferred_type TEXT,
-    payload_json TEXT,
-    issues_json TEXT NOT NULL DEFAULT '[]',
-    PRIMARY KEY (session_id, row_number)
-);
-
-CREATE INDEX IF NOT EXISTS idx_question_import_session_rows_status
-    ON question_import_session_rows(session_id, status);
-"""
+SCHEMA_SQL = Path(__file__).with_name("schema.sql").read_text()
 
 
 def utc_now() -> str:
@@ -236,11 +143,27 @@ def initialize_database(database_url: str) -> None:
 
         if existing_tables and current_version == 0:
             raise RuntimeError("Existing PostgreSQL database has no schema version. Refusing to mutate it automatically.")
-        if current_version not in {0, SCHEMA_VERSION}:
+        if current_version not in {0, 1, 2, 3, 4, 5, CURRENT_SCHEMA_VERSION}:
             raise RuntimeError(f"Unsupported PostgreSQL schema version {current_version}.")
 
         connection.executescript(SCHEMA_SQL)
-        _set_schema_version(connection, SCHEMA_VERSION)
+        if current_version == 1:
+            connection.execute("ALTER TABLE users DROP COLUMN IF EXISTS disabled_at")
+        if current_version in {1, 2, 3, 4}:
+            connection.execute("ALTER TABLE modules DROP COLUMN IF EXISTS source_id")
+            connection.execute("ALTER TABLE modules DROP COLUMN IF EXISTS title")
+            connection.execute("ALTER TABLE modules DROP COLUMN IF EXISTS ui_copy_json")
+        if current_version in {1, 2, 3, 4}:
+            connection.execute("ALTER TABLE questions DROP COLUMN IF EXISTS source_id")
+        if current_version in {1, 2, 3, 4}:
+            connection.execute("DROP TABLE IF EXISTS question_import_session_rows")
+            connection.execute("DROP TABLE IF EXISTS question_import_sessions")
+        if current_version in {1, 2, 3, 4, 5}:
+            connection.execute("ALTER TABLE quiz_session_items ADD COLUMN IF NOT EXISTS resolved_prompt TEXT")
+            connection.execute(
+                "ALTER TABLE quiz_session_items ADD COLUMN IF NOT EXISTS resolved_type_config_json TEXT"
+            )
+        _set_schema_version(connection, CURRENT_SCHEMA_VERSION)
         connection.commit()
 
 

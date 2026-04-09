@@ -13,6 +13,7 @@
   export let modules: ModuleNode[] = [];
   export let users: User[] = [];
   export let activeUser: User | null = null;
+  export let selectedModuleId: number | null = null;
   export let onCreateUser: (payload: { handle: string; display_name: string }) => Promise<User> = async () => {
     throw new Error('User creation handler is not configured.');
   };
@@ -29,7 +30,7 @@
 
   let title = '';
   let parentId = '';
-  let importModuleId: number | null = null;
+  let importModuleId: number | string | null = null;
   let instruction = '';
   let saving = false;
   let formError = '';
@@ -104,15 +105,18 @@
       formError = 'Select a leaf module before importing.';
       return;
     }
-    onOpenImport(importModuleId);
+    onOpenImport(Number(importModuleId));
   }
 
   $: flatModules = flattenModules(modules);
-  $: leafModules = flatModules.filter((module) => module.isLeaf);
-  $: if (leafModules.length > 0 && !leafModules.some((module) => module.id === importModuleId)) {
-    importModuleId = leafModules[0].id;
+  $: selectedImportModule = flatModules.find((module) => module.id === Number(importModuleId)) ?? null;
+  $: if (flatModules.length > 0 && !flatModules.some((module) => module.id === Number(importModuleId))) {
+    importModuleId =
+      selectedModuleId !== null && flatModules.some((module) => module.id === selectedModuleId)
+        ? selectedModuleId
+        : flatModules[0].id;
   }
-  $: if (leafModules.length === 0) {
+  $: if (flatModules.length === 0) {
     importModuleId = null;
   }
 </script>
@@ -136,10 +140,7 @@
   <div class="admin-stack">
     <article class="panel admin-bar-panel">
       <div class="panel-header">
-        <div>
-          <p class="eyebrow">Create module</p>
-          <h3>New module path</h3>
-        </div>
+        <div><h3>Create Module Path</h3></div>
       </div>
 
       <div class="admin-bar-form module-bar-form">
@@ -188,10 +189,7 @@
 
     <article class="panel admin-bar-panel">
       <div class="panel-header">
-        <div>
-          <p class="eyebrow">Users</p>
-          <h3>Create user</h3>
-        </div>
+        <div><h3>Create User</h3></div>
       </div>
 
       {#if userError}
@@ -224,7 +222,7 @@
         </div>
 
         <div class="admin-action-slot">
-          <button class="secondary-button" type="button" disabled={userSaving} on:click={() => void handleCreateUser()}>
+          <button class="primary-button" type="button" disabled={userSaving} on:click={() => void handleCreateUser()}>
             {userSaving ? 'Creating...' : 'Create User'}
           </button>
         </div>
@@ -233,20 +231,17 @@
 
     <article class="panel admin-bar-panel">
       <div class="panel-header">
-        <div>
-          <p class="eyebrow">Question import</p>
-          <h3>Choose a leaf module</h3>
-        </div>
+        <div><h3>Import QML</h3></div>
       </div>
 
       <div class="admin-bar-form import-bar-form">
         <label class="field">
           <span>Import target</span>
-          <select bind:value={importModuleId} disabled={leafModules.length === 0}>
-            {#if leafModules.length === 0}
-              <option value={null}>No leaf modules available</option>
+          <select bind:value={importModuleId} disabled={flatModules.length === 0}>
+            {#if flatModules.length === 0}
+              <option value={null}>No modules available</option>
             {:else}
-              {#each leafModules as module}
+              {#each flatModules as module}
                 <option value={module.id}>{module.full_slug}</option>
               {/each}
             {/if}
@@ -254,20 +249,21 @@
         </label>
 
         <div class="admin-status-slot">
-          {#if importModuleId !== null}
-            {@const selectedLeaf = leafModules.find((module) => module.id === importModuleId)}
-            {#if selectedLeaf}
-              <p class="muted-copy">Uploads will create questions directly in <code>{selectedLeaf.full_slug}</code>.</p>
-              {#if selectedLeaf.instruction}
-                <p class="muted-copy">{selectedLeaf.instruction}</p>
-              {/if}
+          {#if selectedImportModule}
+            {#if selectedImportModule.isLeaf}
+              <p class="muted-copy">Imports will create questions directly in <code>{selectedImportModule.full_slug}</code>.</p>
+            {:else}
+              <p class="muted-copy">Select a leaf module before importing QML.</p>
+            {/if}
+            {#if selectedImportModule.instruction}
+              <p class="muted-copy">{selectedImportModule.instruction}</p>
             {/if}
           {/if}
         </div>
 
         <div class="admin-action-slot">
-          <button class="secondary-button" type="button" disabled={importModuleId === null} on:click={handleOpenImport}>
-            Import CSV
+          <button class="primary-button" type="button" disabled={!selectedImportModule?.isLeaf} on:click={handleOpenImport}>
+            Import QML
           </button>
         </div>
       </div>

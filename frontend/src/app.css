@@ -349,7 +349,8 @@ kbd {
 
 .primary-button,
 .secondary-button,
-.ghost-button {
+.ghost-button,
+.review-button {
   padding: 0.8rem 1.1rem;
   border-radius: 0.95rem;
 }
@@ -363,6 +364,17 @@ kbd {
   background: rgba(84, 84, 94, 0.82);
   color: #e2e8f0;
   border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.review-button {
+  background: rgba(194, 65, 12, 0.9);
+  color: #fff7ed;
+  border: 1px solid rgba(251, 146, 60, 0.34);
+}
+
+.review-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .ghost-button {
@@ -380,6 +392,7 @@ kbd {
 .main-nav button:hover,
 .primary-button:hover,
 .secondary-button:hover,
+.review-button:hover,
 .floating-action:hover {
   transform: translateY(-1px);
 }
@@ -494,6 +507,11 @@ kbd {
   background: rgba(185, 28, 28, 0.12);
 }
 
+.quiz-card.flagged-review {
+  border-color: rgba(251, 146, 60, 0.56);
+  background: rgba(234, 88, 12, 0.14);
+}
+
 .quiz-card-header {
   display: flex;
   justify-content: space-between;
@@ -510,7 +528,8 @@ kbd {
 }
 
 .question-pill,
-.review-chip {
+.review-chip,
+.score-pill {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -525,6 +544,41 @@ kbd {
 .quiz-card h3 {
   margin: 0 0 1rem;
   font-size: 1.15rem;
+}
+
+.quiz-card-prompt-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.85rem;
+}
+
+.quiz-card-prompt-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.quiz-card-prompt-row .flag-button {
+  flex-shrink: 0;
+}
+
+.quiz-start-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.compact-field {
+  min-width: 0;
+}
+
+.compact-field select {
+  min-width: 9.5rem;
+}
+
+.compact-field input {
+  min-width: 8rem;
 }
 
 .instruction-panel p:last-child,
@@ -589,6 +643,10 @@ select:focus,
   flex-wrap: wrap;
   gap: 0.65rem;
   align-items: center;
+}
+
+.cloze-prefix {
+  font-weight: 700;
 }
 
 .quiz-card-actions,
@@ -665,6 +723,10 @@ select:focus,
 .completion-actions {
   display: flex;
   margin-top: 1rem;
+}
+
+.completion-actions .review-button {
+  margin-left: auto;
 }
 
 .stats-grid {
@@ -802,6 +864,12 @@ select:focus,
   gap: 0.85rem;
 }
 
+.stats-chart-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1fr);
+  gap: 1rem;
+}
+
 .session-graph {
   width: 100%;
   max-width: 100%;
@@ -826,6 +894,16 @@ select:focus,
   fill: var(--accent-text);
   font-size: 0.72rem;
   letter-spacing: 0.02em;
+}
+
+.graph-cooling-overlay {
+  fill: rgba(15, 23, 42, 0.3);
+}
+
+.stage-count-label {
+  fill: #f8fafc;
+  font-size: 0.8rem;
+  font-weight: 700;
 }
 
 .table-panel {
@@ -886,14 +964,25 @@ tbody tr.flagged-review:hover {
   background: rgba(245, 158, 11, 0.22);
 }
 
+tbody tr.hot0-row {
+  background: rgba(185, 28, 28, 0.18);
+}
+
+tbody tr.hot0-row:hover {
+  background: rgba(185, 28, 28, 0.26);
+}
+
+tbody tr.hot1-row {
+  background: rgba(220, 38, 38, 0.11);
+}
+
+tbody tr.hot1-row:hover {
+  background: rgba(220, 38, 38, 0.18);
+}
+
 .question-cell {
   display: grid;
   gap: 0.2rem;
-}
-
-.question-schedule {
-  font-size: 0.82rem;
-  color: var(--accent-text);
 }
 
 .review-chip.active {
@@ -1058,19 +1147,19 @@ tbody tr.flagged-review:hover {
 }
 
 .editor-layout {
-  grid-template-columns: minmax(0, 1.6fr) minmax(18rem, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
 }
 
 .editor-form,
 .version-history {
   display: grid;
-  gap: 1rem;
+  gap: 0.75rem;
 }
 
 .field {
   display: grid;
-  gap: 0.45rem;
+  gap: 0.35rem;
 }
 
 .field span,
@@ -1082,6 +1171,10 @@ tbody tr.flagged-review:hover {
   display: inline-flex;
   align-items: center;
   gap: 0.75rem;
+}
+
+.dense-checkbox-field {
+  margin-top: -0.1rem;
 }
 
 .checkbox-field input {
@@ -1102,6 +1195,60 @@ tbody tr.flagged-review:hover {
   margin: 0.25rem 0;
 }
 
+.editor-card {
+  padding: 0.9rem;
+  border-radius: 1rem;
+  background: rgba(66, 66, 74, 0.82);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  display: grid;
+  gap: 0.75rem;
+}
+
+.editor-card-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: minmax(0, 1.7fr) minmax(14rem, 1fr) minmax(6rem, 0.55fr);
+  align-items: start;
+}
+
+.editor-field-wide {
+  grid-column: 1 / -1;
+}
+
+.editor-field-prompt {
+  grid-column: 1 / 3;
+}
+
+.editor-field-small {
+  min-width: 0;
+}
+
+.editor-inline-note {
+  grid-column: 1 / -1;
+  margin: -0.25rem 0 0;
+}
+
+.compact-dynamic-group {
+  gap: 0.75rem;
+}
+
+.compact-dynamic-card {
+  padding: 0.8rem;
+}
+
+.dense-table-shell {
+  overflow-x: auto;
+}
+
+.dense-table th,
+.dense-table td {
+  padding: 0.65rem 0.7rem;
+}
+
+.dense-table td:first-child {
+  font-family: "SFMono-Regular", "Menlo", "Monaco", "Courier New", monospace;
+}
+
 @media (max-width: 900px) {
   .app-header,
   .page-intro,
@@ -1109,6 +1256,15 @@ tbody tr.flagged-review:hover {
   .editor-layout {
     grid-template-columns: 1fr;
     display: grid;
+  }
+
+  .editor-card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .editor-field-prompt,
+  .editor-field-wide {
+    grid-column: auto;
   }
 
   .app-header {
@@ -1124,7 +1280,8 @@ tbody tr.flagged-review:hover {
   }
 
   .admin-stack,
-  .import-panel {
+  .import-panel,
+  .stats-chart-grid {
     grid-template-columns: 1fr;
   }
 

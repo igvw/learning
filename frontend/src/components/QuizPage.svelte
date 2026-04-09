@@ -6,9 +6,11 @@
   export let moduleLabel = 'Selected Module';
   export let moduleInstruction = '';
   export let selectedModuleIsLeaf = false;
+  export let questionCount = 10;
   export let busyItemId: number | null = null;
   export let markingReviewQuestionId: number | null = null;
   export let errorMessage = '';
+  export let onChangeQuestionCount: (value: number) => void = () => {};
   export let onStartQuiz: () => Promise<void> | void = () => {};
   export let onMarkForRevision: (questionId: number) => Promise<void> | void = () => {};
   export let onSubmit: (itemId: number, answers: string[]) => Promise<void> = async () => {};
@@ -17,13 +19,14 @@
   let sessionMarker: number | null = null;
   let focusMarker = '';
   let completionActionButton: HTMLButtonElement | null = null;
+  let reviewMode = false;
 
   function slotCount(item: QuizItem): number {
-    if (item.question_type === 'single_text') {
+    if (item.question_type === 'single_text' || item.question_type === 'computed_text') {
       return 1;
     }
     if (item.question_type === 'multi_text' || item.question_type === 'ordered_multi') {
-      return item.type_config.expected_slots ?? item.type_config.slot_prompts?.length ?? 0;
+      return item.type_config.expected_slots ?? 0;
     }
     return Math.max((item.type_config.segments?.length ?? 1) - 1, 0);
   }
@@ -142,7 +145,7 @@
     }
 
     event.preventDefault();
-    if (item.question_type === 'single_text') {
+    if (item.question_type === 'single_text' || item.question_type === 'computed_text') {
       handleSubmit(item);
       return;
     }
@@ -161,14 +164,21 @@
   $: if (session?.id !== sessionMarker) {
     sessionMarker = session?.id ?? null;
     draftAnswers = buildDrafts(session);
+    reviewMode = false;
   }
 
   $: activeIndex = session ? session.items.findIndex((item) => item.submitted_answer === null) : -1;
   $: revealAll = activeIndex === -1;
   $: completedSession = Boolean(session && session.items.length > 0 && revealAll);
   $: completedCount = session ? session.items.filter((item) => item.submitted_answer !== null).length : 0;
+  $: reviewableCount = session ? session.items.filter((item) => item.is_correct !== true).length : 0;
   $: totalScoreEarned = session ? session.items.reduce((total, item) => total + itemScoreEarned(item), 0) : 0;
   $: totalScorePossible = session ? session.items.reduce((total, item) => total + itemScorePossible(item), 0) : 0;
+  $: visibleItems = session
+    ? session.items
+        .map((item, index) => ({ item, originalIndex: index }))
+        .filter(({ item }) => !(completedSession && reviewMode && item.is_correct === true))
+    : [];
   $: focusKey = `${session?.id ?? 'none'}:${activeIndex}`;
   $: if (focusKey !== focusMarker && activeIndex >= 0) {
     focusMarker = focusKey;
@@ -188,9 +198,25 @@
       <h2>{moduleLabel}</h2>
     </div>
     {#if !completedSession}
-      <button class="primary-button" type="button" on:click={() => void onStartQuiz()}>
-        Start Quiz
-      </button>
+      <div class="quiz-start-controls">
+        <label class="field compact-field">
+          <span class="sr-only">Questions per quiz</span>
+          <input
+            type="number"
+            min="1"
+            step="1"
+            aria-label="Questions per quiz"
+            value={questionCount}
+            on:change={(event) => {
+              const nextValue = Number((event.currentTarget as HTMLInputElement).value);
+              onChangeQuestionCount(Number.isInteger(nextValue) && nextValue > 0 ? nextValue : 10);
+            }}
+          />
+        </label>
+        <button class="primary-button" type="button" on:click={() => void onStartQuiz()}>
+          Start Quiz
+        </button>
+      </div>
     {/if}
   </div>
 
@@ -208,7 +234,7 @@
   {#if !session}
     <div class="panel empty-state">
       <h3>Short bursts, no mouse required.</h3>
-      <p>Start a ten-question quiz for the selected scope. Submitted cards stay on screen so the finished session becomes the review surface.</p>
+      <p>Start a quiz for the selected scope. Submitted cards stay on screen so the finished session becomes the review surface.</p>
       <p class="shortcut-hint">Press <kbd>Enter</kbd> to move through fields. On the last field, <kbd>Enter</kbd> submits the question.</p>
     </div>
   {:else if session.items.length === 0}
@@ -218,52 +244,65 @@
     </div>
   {:else}
     <div class="quiz-stack">
-      {#each session.items as item, index (item.id)}
+      {#each visibleItems as entry (entry.item.id)}
+        {@const item = entry.item}
+        {@const index = entry.originalIndex}
         {#if revealAll || index <= activeIndex}
           {@const answered = item.submitted_answer !== null}
           {@const currentAnswers = ensureDraft(item)}
-          <article class="panel quiz-card" class:correct={item.is_correct === true} class:incorrect={item.is_correct === false}>
-            <div class="quiz-card-header">
-              <div class="quiz-card-header-left">
-                <span class="question-pill">Question {index + 1}</span>
-                {#if answered && displaySlotTotal(item) > 1}
-                  <span class="question-pill score-pill">{displaySlotEarned(item)}/{displaySlotTotal(item)}</span>
-                {/if}
+          {@const showCardHeader = answered && displaySlotTotal(item) > 1}
+          <article
+            class="panel quiz-card"
+            class:correct={item.is_correct === true}
+            class:incorrect={item.is_correct === false}
+            class:flagged-review={item.review_flag}
+          >
+            {#if showCardHeader}
+              <div class="quiz-card-header">
+                <div class="quiz-card-header-left">
+                  {#if answered && displaySlotTotal(item) > 1}
+                    <span class="score-pill">{displaySlotEarned(item)}/{displaySlotTotal(item)}</span>
+                  {/if}
+                </div>
               </div>
-              {#if revealAll && answered}
-                <button
-                  class="ghost-button flag-button"
-                  class:flagged={item.review_flag}
-                  class:loading={markingReviewQuestionId === item.question_id}
-                  type="button"
-                  aria-label={
-                    item.review_flag
-                      ? 'Marked for revision'
-                      : markingReviewQuestionId === item.question_id
-                        ? 'Flagging revision'
-                        : 'Flag for revision'
-                  }
-                  disabled={item.review_flag || markingReviewQuestionId === item.question_id}
-                  on:click={() => void onMarkForRevision(item.question_id)}
-                >
-                  <svg class="flag-icon" viewBox="0 0 16 16" aria-hidden="true">
-                    <path d="M4 2v12" />
-                    <path d="M5 2h7l-2 3 2 3H5z" />
-                  </svg>
-                </button>
-              {/if}
-            </div>
+            {/if}
 
             <div class="quiz-card-body">
               {#if !selectedModuleIsLeaf && item.module_instruction}
                 <p class="eyebrow quiz-item-instruction">{item.module_instruction}</p>
               {/if}
 
-              {#if shouldShowPromptHeading(item)}
-                <h3>{item.prompt}</h3>
-              {/if}
+              <div class="quiz-card-prompt-row">
+                <div class="quiz-card-prompt-content">
+                  {#if shouldShowPromptHeading(item)}
+                    <h3>{index + 1}. {item.prompt}</h3>
+                  {/if}
+                </div>
+                {#if revealAll && answered}
+                  <button
+                    class="ghost-button flag-button"
+                    class:flagged={item.review_flag}
+                    class:loading={markingReviewQuestionId === item.question_id}
+                    type="button"
+                    aria-label={
+                      item.review_flag
+                        ? 'Marked for revision'
+                        : markingReviewQuestionId === item.question_id
+                          ? 'Flagging revision'
+                          : 'Flag for revision'
+                    }
+                    disabled={item.review_flag || markingReviewQuestionId === item.question_id}
+                    on:click={() => void onMarkForRevision(item.question_id)}
+                  >
+                    <svg class="flag-icon" viewBox="0 0 16 16" aria-hidden="true">
+                      <path d="M4 2v12" />
+                      <path d="M5 2h7l-2 3 2 3H5z" />
+                    </svg>
+                  </button>
+                {/if}
+              </div>
 
-              {#if item.question_type === 'single_text'}
+              {#if item.question_type === 'single_text' || item.question_type === 'computed_text'}
                 <input
                   type="text"
                   class="answer-input"
@@ -300,6 +339,9 @@
                 </div>
               {:else}
                 <div class="inline-cloze">
+                  {#if !shouldShowPromptHeading(item)}
+                    <span class="cloze-segment cloze-prefix">{index + 1}.</span>
+                  {/if}
                   {#each item.type_config.segments ?? [] as segment, segmentIndex}
                     <span class="cloze-segment">{segment}</span>
                     {#if segmentIndex < slotCount(item)}
@@ -337,7 +379,7 @@
               {#if answered && item.is_correct !== true}
                 <div class="feedback-block">
                   {#if item.canonical_answers}
-                    {#if item.question_type === 'single_text' && item.canonical_answers.length === 1}
+                    {#if (item.question_type === 'single_text' || item.question_type === 'computed_text') && item.canonical_answers.length === 1}
                       <div class="answer-box plain-answer-box">
                         <p>{item.canonical_answers[0]}</p>
                       </div>
@@ -363,7 +405,7 @@
       <div class="panel completion-panel">
         <p class="eyebrow">Session complete</p>
         <h3>{formatScore(totalScoreEarned)}/{formatScore(totalScorePossible)} points</h3>
-        <p>{completedCount} submissions recorded. Mark any questions above for revision or start another quiz.</p>
+        <p>{completedCount} submissions recorded. Mark any questions above for revision, review mistakes, or start another quiz.</p>
         <div class="completion-actions">
           <button
             bind:this={completionActionButton}
@@ -372,6 +414,14 @@
             on:click={() => void onStartQuiz()}
           >
             Start Another Quiz
+          </button>
+          <button
+            class="review-button"
+            type="button"
+            disabled={reviewableCount === 0}
+            on:click={() => (reviewMode = !reviewMode)}
+          >
+            {reviewMode ? 'Show All Answers' : 'Review Mistakes'}
           </button>
         </div>
       </div>

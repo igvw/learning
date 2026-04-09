@@ -1,11 +1,15 @@
-import type { CreateModulePayload, ModuleNode, ModuleUiCopy } from './types';
+import type { CreateModulePayload, ModuleNode } from './types';
 
 export function normalizeModuleTitleKey(value: string): string {
+  return slugifyModuleSegment(value);
+}
+
+export function slugifyModuleSegment(value: string): string {
   return value
     .trim()
-    .split(/\s+/)
-    .join(' ')
-    .toLocaleLowerCase();
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
 }
 
 export function splitModulePath(value: string): string[] {
@@ -43,7 +47,6 @@ type EnsureModulePathOptions = {
   parentId: number | null;
   titlePath: string;
   instruction: string;
-  uiCopy?: ModuleUiCopy;
   createModule: (payload: CreateModulePayload) => Promise<ModuleNode>;
   reloadModules: () => Promise<ModuleNode[]>;
 };
@@ -53,7 +56,6 @@ export async function ensureModulePath({
   parentId,
   titlePath,
   instruction,
-  uiCopy,
   createModule,
   reloadModules
 }: EnsureModulePathOptions): Promise<ModuleNode> {
@@ -78,8 +80,7 @@ export async function ensureModulePath({
     const created = await createModule({
       title: segment,
       parent_id: currentParentId,
-      instruction: isFinalSegment ? instruction : '',
-      ui_copy: isFinalSegment ? uiCopy : undefined
+      instruction: isFinalSegment ? instruction : ''
     });
     workingModules = await reloadModules();
     finalModule = findModuleNode(workingModules, created.id) ?? created;

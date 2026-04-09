@@ -11,41 +11,39 @@ from fastapi.staticfiles import StaticFiles
 
 from .database import get_connection, initialize_database
 from .schemas import (
+    CommitQuestionImportIn,
     CreateModuleIn,
-    CreateQuestionImportSessionIn,
     ModuleNodeOut,
     QuestionDraftIn,
-    QuestionImportSessionOut,
+    QuestionImportResultOut,
     QuestionMutationOut,
     QuestionReviewFlagIn,
     QuestionReviewFlagOut,
     QuestionRevisionIn,
     QuizSessionCreateIn,
-    QuizSessionOut,
-    RevalidateQuestionImportSessionIn,
     StatsResponseOut,
     SubmitAnswerIn,
     SubmitAnswerOut,
     UserCreateIn,
     UserOut,
+    ValidateQuestionImportIn,
+    QuizSessionOut,
 )
 from .services import (
     ServiceError,
-    commit_question_import_session,
+    commit_question_import,
     create_module,
     create_question,
-    create_question_import_session,
     create_quiz_session,
     create_user,
-    discard_question_import_session_row,
     get_module_tree,
     get_stats,
     list_users,
-    revalidate_question_import_session,
     revise_question,
     set_question_review_flag,
     submit_answer,
     sync_seed_content,
+    validate_question_import,
 )
 from .settings import CONTENT_DIR, FRONTEND_DIST_DIR, cors_origins, resolve_database_url, seed_on_boot
 
@@ -120,7 +118,6 @@ def create_app(
                     title=payload.title,
                     parent_id=payload.parent_id,
                     instruction=payload.instruction,
-                    ui_copy=payload.ui_copy.model_dump(),
                 )
             except ServiceError as error:
                 _handle_service_error(error)
@@ -186,10 +183,13 @@ def create_app(
                 _handle_service_error(error)
 
     @app.post("/api/questions", response_model=QuestionMutationOut)
-    def questions_create(payload: QuestionDraftIn) -> dict:
+    def questions_create(
+        payload: QuestionDraftIn,
+        x_user_id: Optional[int] = Header(default=None, alias="X-User-Id"),
+    ) -> dict:
         with get_connection(app.state.database_url) as connection:
             try:
-                return create_question(connection, payload)
+                return create_question(connection, payload, user_id=x_user_id)
             except ServiceError as error:
                 _handle_service_error(error)
 
@@ -219,39 +219,28 @@ def create_app(
             except ServiceError as error:
                 _handle_service_error(error)
 
-    @app.post("/api/question-import-sessions", response_model=QuestionImportSessionOut)
-    def question_import_sessions_create(payload: CreateQuestionImportSessionIn) -> dict:
+    @app.post("/api/question-imports/validate", response_model=QuestionImportResultOut)
+    def question_imports_validate(payload: ValidateQuestionImportIn) -> dict:
         with get_connection(app.state.database_url) as connection:
             try:
-                return create_question_import_session(connection, module_id=payload.module_id, csv_text=payload.csv_text)
-            except ServiceError as error:
-                _handle_service_error(error)
-
-    @app.post("/api/question-import-sessions/{session_id}/revalidate", response_model=QuestionImportSessionOut)
-    def question_import_sessions_revalidate(session_id: int, payload: RevalidateQuestionImportSessionIn) -> dict:
-        with get_connection(app.state.database_url) as connection:
-            try:
-                return revalidate_question_import_session(
+                return validate_question_import(
                     connection,
-                    session_id=session_id,
-                    rows=[row.model_dump() for row in payload.rows],
+                    module_id=payload.module_id,
+                    qml_text=payload.qml_text,
+                    rows=[row.model_dump() for row in payload.rows] if payload.rows else None,
                 )
             except ServiceError as error:
                 _handle_service_error(error)
 
-    @app.delete("/api/question-import-sessions/{session_id}/rows/{row_number}", response_model=QuestionImportSessionOut)
-    def question_import_sessions_discard_row(session_id: int, row_number: int) -> dict:
+    @app.post("/api/question-imports/commit", response_model=QuestionImportResultOut)
+    def question_imports_commit(payload: CommitQuestionImportIn) -> dict:
         with get_connection(app.state.database_url) as connection:
             try:
-                return discard_question_import_session_row(connection, session_id=session_id, row_number=row_number)
-            except ServiceError as error:
-                _handle_service_error(error)
-
-    @app.post("/api/question-import-sessions/{session_id}/commit", response_model=QuestionImportSessionOut)
-    def question_import_sessions_commit(session_id: int) -> dict:
-        with get_connection(app.state.database_url) as connection:
-            try:
-                return commit_question_import_session(connection, session_id=session_id)
+                return commit_question_import(
+                    connection,
+                    module_id=payload.module_id,
+                    rows=[row.model_dump() for row in payload.rows],
+                )
             except ServiceError as error:
                 _handle_service_error(error)
 

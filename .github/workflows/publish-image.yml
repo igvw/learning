@@ -1,0 +1,107 @@
+name: Publish Docker Image
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-bookworm
+        env:
+          POSTGRES_DB: learning_test
+          POSTGRES_USER: learning
+          POSTGRES_PASSWORD: learning
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U learning -d learning_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      LEARNING_APP_TEST_DATABASE_URL: postgresql://learning:learning@127.0.0.1:5432/learning_test
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONPYCACHEPREFIX: /tmp/learning-pyc
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install backend dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r backend/requirements.txt
+
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci
+
+      - name: Compile backend modules
+        run: python -m py_compile backend/app/database.py backend/app/main.py backend/app/cli.py backend/app/services.py
+
+      - name: Run backend tests
+        run: python -m unittest discover -s tests/backend -v
+
+      - name: Run frontend tests
+        run: npm --prefix frontend test -- --run
+
+      - name: Build frontend
+        run: npm --prefix frontend run build
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/learning-app
+          tags: |
+            type=raw,value=latest
+            type=ref,event=tag
+          labels: |
+            org.opencontainers.image.title=learning-app
+            org.opencontainers.image.description=Local-first study app with FastAPI, Svelte, and PostgreSQL
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

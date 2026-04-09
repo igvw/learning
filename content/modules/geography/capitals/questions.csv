@@ -1,6 +1,0 @@
-source_id,module_source_id,type,ranking,prompt,accepted_answers_json,slot_prompts_json,segments_json
-geography-capitals-001,geography-capitals,single_text,5,What is the capital of Japan?,"[[""tokyo""]]","",""
-geography-capitals-002,geography-capitals,single_text,4,What is the capital of Canada?,"[[""ottawa""]]","",""
-geography-capitals-003,geography-capitals,multi_text,3,Name the capitals of Spain and Portugal.,"[[""madrid""],[""lisbon""]]","[""Spain"",""Portugal""]",""
-geography-capitals-004,geography-capitals,inline_cloze,2,Complete the sentence about Australia.,"[[""canberra""]]","","[""The capital of Australia is "","".""]"
-geography-capitals-005,geography-capitals,single_text,1,What is the capital of Kenya?,"[[""nairobi""]]","",""

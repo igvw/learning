@@ -1,34 +1,39 @@
 export type RouteName = 'quiz' | 'stats' | 'admin';
-export type QuestionType = 'single_text' | 'multi_text' | 'ordered_multi' | 'inline_cloze';
+export type QuestionType = 'single_text' | 'multi_text' | 'ordered_multi' | 'inline_cloze' | 'computed_text';
+export type PriorityMode = 'high' | 'mid' | 'low';
 export type ScheduleBucket =
-  | 'hot'
+  | 'hot0'
+  | 'hot1'
+  | 'hot1_sit_out'
   | 'due_review'
+  | 'cooling'
+  | 'bucket_retry_wait'
   | 'unseen'
-  | 'one_shot_easy'
-  | 'backlog_seen_correct'
-  | 'not_due_recovered';
-
-export interface ModuleUiCopy {
-  question_label: string;
-  answer_label: string;
-  stats_title: string;
-  review_title: string;
-}
+  | 'mastery';
+export type LogicalBucket =
+  | 'review'
+  | 'unseen'
+  | '1h'
+  | '3h'
+  | '6h'
+  | '12h'
+  | '1d'
+  | '3d'
+  | '7d'
+  | '14d'
+  | 'mastery';
 
 export interface ModuleNode {
   id: number;
-  source_id: string | null;
   title: string;
   slug: string;
   full_slug: string;
   instruction: string;
-  ui_copy: ModuleUiCopy;
   children: ModuleNode[];
 }
 
 export interface QuizTypeConfig {
   expected_slots?: number;
-  slot_prompts?: string[];
   segments?: string[];
 }
 
@@ -43,7 +48,6 @@ export interface QuizItem {
   position: number;
   question_id: number;
   module_id: number;
-  module_title: string;
   module_instruction: string;
   review_flag: boolean;
   prompt: string;
@@ -90,21 +94,21 @@ export interface User {
   handle: string;
   display_name: string;
   created_at: string;
-  disabled_at: string | null;
 }
 
 export interface QuestionSchedule {
   bucket: ScheduleBucket;
+  logical_bucket: LogicalBucket;
   recovery_streak: number | null;
   interval_step: number | null;
   last_incorrect_at: string | null;
   next_due_at: string | null;
+  retry_pending: boolean;
 }
 
 export interface QuestionRow {
   question_id: number;
   module_id: number;
-  module_title: string;
   module_full_slug: string;
   prompt: string;
   prompt_preview: string;
@@ -115,11 +119,11 @@ export interface QuestionRow {
   last_asked_at: string | null;
   review_flag: boolean;
   accepted_answers: string[][];
-  slot_prompts: string[];
   segments: string[];
   recent_incorrect_answers: Array<{
-    submitted_answer: string[];
-    answered_at: string;
+    answer_text: string;
+    count: number;
+    latest_answered_at: string;
   }>;
   schedule: QuestionSchedule;
 }
@@ -142,8 +146,8 @@ export interface QuestionDraftPayload {
   prompt: string;
   question_type: QuestionType;
   rank: number;
+  priority_mode?: PriorityMode | null;
   accepted_answers: string[][];
-  slot_prompts: string[];
   segments: string[];
 }
 
@@ -151,21 +155,27 @@ export interface CreateModulePayload {
   title: string;
   parent_id: number | null;
   instruction: string;
-  ui_copy?: ModuleUiCopy;
 }
 
 export interface QuestionImportUnresolvedRow {
   row_number: number;
-  csv_line: string;
+  qml_line: string;
   issues: string[];
   inferred_type?: QuestionType | null;
 }
 
-export interface QuestionImportSession {
-  session_id: number;
-  expires_at: string;
+export interface QuestionImportSkippedRow {
+  row_number: number;
+  qml_line: string;
+  reason: string;
+  inferred_type?: QuestionType | null;
+}
+
+export interface QuestionImportResult {
   ready_to_commit: boolean;
-  staged_valid_count: number;
+  valid_row_count: number;
+  skipped_duplicate_count: number;
+  skipped_rows: QuestionImportSkippedRow[];
   unresolved_rows: QuestionImportUnresolvedRow[];
   report_text: string;
   committed: boolean;
@@ -174,5 +184,5 @@ export interface QuestionImportSession {
 
 export interface QuestionImportRowPayload {
   row_number: number;
-  csv_line: string;
+  qml_line: string;
 }

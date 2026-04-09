@@ -8,28 +8,27 @@
   import QuizPage from './components/QuizPage.svelte';
   import StatsPage from './components/StatsPage.svelte';
   import {
-    commitQuestionImportSession,
+    commitQuestionImport,
     createModule,
     createQuestion,
-    createQuestionImportSession,
     createQuizSession,
     createUser,
-    discardQuestionImportSessionRow,
     getModulesTree,
     getStats,
     getUsers,
-    revalidateQuestionImportSession,
     reviseQuestion,
     setQuestionReviewFlag,
-    submitQuizAnswer
+    submitQuizAnswer,
+    validateQuestionImportRows,
+    validateQuestionImportText
   } from './lib/api';
   import { ensureModulePath, findModuleNode as findModuleNodeInTree } from './lib/module-paths';
   import type {
     CreateModulePayload,
     ModuleNode,
     QuestionDraftPayload,
+    QuestionImportResult,
     QuestionImportRowPayload,
-    QuestionImportSession,
     QuestionRow,
     QuizSession,
     RouteName,
@@ -38,6 +37,7 @@
   } from './lib/types';
 
   const ACTIVE_USER_STORAGE_KEY = 'learning.active-user-id';
+  const ACTIVE_MODULE_STORAGE_KEY = 'learning.selected-module-id';
 
   let currentRoute: RouteName = 'quiz';
   let modules: ModuleNode[] = [];
@@ -51,6 +51,7 @@
   let quizBusyItemId: number | null = null;
   let markingReviewQuestionId: number | null = null;
   let quizError = '';
+  let quizQuestionCount = 10;
 
   let stats: StatsResponse | null = null;
   let statsLoading = false;
@@ -63,7 +64,7 @@
 
   let importDrawerOpen = false;
   let importTargetModuleId: number | null = null;
-  let importSession: QuestionImportSession | null = null;
+  let importResult: QuestionImportResult | null = null;
   let importBusy = false;
   let importError = '';
 
@@ -104,6 +105,14 @@
     window.localStorage.setItem(ACTIVE_USER_STORAGE_KEY, String(userId));
   }
 
+  function persistSelectedModule(moduleId: number | null): void {
+    if (moduleId === null) {
+      window.localStorage.removeItem(ACTIVE_MODULE_STORAGE_KEY);
+      return;
+    }
+    window.localStorage.setItem(ACTIVE_MODULE_STORAGE_KEY, String(moduleId));
+  }
+
   function applyActiveUser(userId: number | null): void {
     activeUserId = userId;
     persistActiveUser(userId);
@@ -113,8 +122,13 @@
     statsError = '';
   }
 
+  function applySelectedModule(moduleId: number | null): void {
+    selectedModuleId = moduleId;
+    persistSelectedModule(moduleId);
+  }
+
   function resetImportState(closeDrawer = false): void {
-    importSession = null;
+    importResult = null;
     importError = '';
     importBusy = false;
     if (closeDrawer) {
@@ -130,11 +144,37 @@
       importTargetModuleId = null;
     }
     if (loadedModules.length === 0) {
-      selectedModuleId = null;
+      applySelectedModule(null);
       return;
     }
-    if (selectedModuleId === null || !moduleIdExists(loadedModules, selectedModuleId)) {
-      selectedModuleId = loadedModules[0].id;
+
+    const savedModuleId = Number(window.localStorage.getItem(ACTIVE_MODULE_STORAGE_KEY));
+    const nextSelectedModuleId =
+      selectedModuleId !== null && moduleIdExists(loadedModules, selectedModuleId)
+        ? selectedModuleId
+        : Number.isFinite(savedModuleId) && moduleIdExists(loadedModules, savedModuleId)
+          ? savedModuleId
+          : loadedModules[0].id;
+
+    applySelectedModule(nextSelectedModuleId);
+  }
+
+  function hasSelectedModuleChanged(moduleId: number | null): boolean {
+    return selectedModuleId !== moduleId;
+  }
+
+  async function handleSelectModule(moduleId: number | null, keepMenuOpen = false): Promise<void> {
+    const moduleChanged = hasSelectedModuleChanged(moduleId);
+    applySelectedModule(moduleId);
+    moduleMenuOpen = keepMenuOpen;
+    if (!moduleChanged) {
+      return;
+    }
+    session = null;
+    quizError = '';
+    resetImportState(true);
+    if (currentRoute === 'stats') {
+      await loadStats();
     }
   }
 
@@ -188,17 +228,6 @@
     }
   }
 
-  async function handleSelectModule(moduleId: number | null, keepMenuOpen = false): Promise<void> {
-    selectedModuleId = moduleId;
-    moduleMenuOpen = keepMenuOpen;
-    session = null;
-    quizError = '';
-    resetImportState(true);
-    if (currentRoute === 'stats') {
-      await loadStats();
-    }
-  }
-
   async function handleSelectUser(userId: number): Promise<void> {
     applyActiveUser(userId);
     if (currentRoute === 'stats') {
@@ -223,7 +252,7 @@
     }
     quizError = '';
     try {
-      session = await createQuizSession(activeUserId, selectedModuleId, 10);
+      session = await createQuizSession(activeUserId, selectedModuleId, quizQuestionCount);
     } catch (error) {
       quizError = error instanceof Error ? error.message : 'Unable to start a quiz.';
     }
@@ -304,7 +333,7 @@
 
   function handleOpenImportForModule(moduleId: number): void {
     importError = '';
-    importSession = null;
+    importResult = null;
     importTargetModuleId = moduleId;
     importDrawerOpen = true;
   }
@@ -315,7 +344,6 @@
       parentId: payload.parent_id ?? null,
       titlePath: payload.title,
       instruction: payload.instruction,
-      uiCopy: payload.ui_copy,
       createModule,
       reloadModules: async () => {
         await loadModules();
@@ -333,7 +361,7 @@
           reset_stats: resetStats
         });
       } else {
-        await createQuestion(payload);
+        await createQuestion(activeUserId, payload);
       }
       editorOpen = false;
       editingQuestion = null;
@@ -348,29 +376,29 @@
     }
   }
 
-  async function handleStartImport(csvText: string): Promise<void> {
+  async function handleStartImport(qmlText: string): Promise<void> {
     if (!importTargetModuleNode) {
       return;
     }
     importBusy = true;
     importError = '';
     try {
-      importSession = await createQuestionImportSession(importTargetModuleNode.id, csvText);
+      importResult = await validateQuestionImportText(importTargetModuleNode.id, qmlText);
     } catch (error) {
-      importError = error instanceof Error ? error.message : 'Unable to start this upload.';
+      importError = error instanceof Error ? error.message : 'Unable to start this import.';
     } finally {
       importBusy = false;
     }
   }
 
   async function handleRevalidateImport(rows: QuestionImportRowPayload[]): Promise<void> {
-    if (!importSession) {
+    if (!importTargetModuleNode) {
       return;
     }
     importBusy = true;
     importError = '';
     try {
-      importSession = await revalidateQuestionImportSession(importSession.session_id, rows);
+      importResult = await validateQuestionImportRows(importTargetModuleNode.id, rows);
     } catch (error) {
       importError = error instanceof Error ? error.message : 'Unable to revalidate this upload.';
     } finally {
@@ -378,29 +406,14 @@
     }
   }
 
-  async function handleDiscardImportRow(rowNumber: number): Promise<void> {
-    if (!importSession) {
+  async function handleCommitImport(rows: QuestionImportRowPayload[]): Promise<void> {
+    if (!importTargetModuleNode) {
       return;
     }
     importBusy = true;
     importError = '';
     try {
-      importSession = await discardQuestionImportSessionRow(importSession.session_id, rowNumber);
-    } catch (error) {
-      importError = error instanceof Error ? error.message : 'Unable to discard this row.';
-    } finally {
-      importBusy = false;
-    }
-  }
-
-  async function handleCommitImport(): Promise<void> {
-    if (!importSession) {
-      return;
-    }
-    importBusy = true;
-    importError = '';
-    try {
-      const nextState = await commitQuestionImportSession(importSession.session_id);
+      const nextState = await commitQuestionImport(importTargetModuleNode.id, rows);
       if (nextState.committed) {
         resetImportState(true);
         session = null;
@@ -409,7 +422,7 @@
         }
         return;
       }
-      importSession = nextState;
+      importResult = nextState;
     } catch (error) {
       importError = error instanceof Error ? error.message : 'Unable to commit this upload.';
     } finally {
@@ -491,9 +504,11 @@
         moduleLabel={selectedModuleLabel}
         moduleInstruction={selectedModuleInstruction}
         selectedModuleIsLeaf={selectedModuleIsLeaf}
+        questionCount={quizQuestionCount}
         busyItemId={quizBusyItemId}
         markingReviewQuestionId={markingReviewQuestionId}
         errorMessage={quizError}
+        onChangeQuestionCount={(value) => (quizQuestionCount = value)}
         onStartQuiz={handleStartQuiz}
         onMarkForRevision={handleMarkForRevision}
         onSubmit={handleSubmitAnswer}
@@ -515,6 +530,7 @@
         modules={modules}
         users={users}
         activeUser={activeUser}
+        selectedModuleId={selectedModuleId}
         onCreateUser={handleCreateUser}
         onCreateModule={handleCreateModule}
         onOpenImport={handleOpenImportForModule}
@@ -525,6 +541,7 @@
   <EditorDrawer
     open={editorOpen}
     modules={modules}
+    defaultModuleId={selectedModuleId}
     editingQuestion={editingQuestion}
     saving={savingQuestion}
     onClose={() => (editorOpen = false)}
@@ -534,13 +551,12 @@
   <ImportDrawer
     open={importDrawerOpen}
     moduleNode={importTargetModuleNode}
-    session={importSession}
+    result={importResult}
     busy={importBusy}
     errorMessage={importError}
     onClose={() => resetImportState(true)}
     onStartImport={handleStartImport}
     onRevalidate={handleRevalidateImport}
-    onDiscardRow={handleDiscardImportRow}
     onCommit={handleCommitImport}
   />
 </div>
