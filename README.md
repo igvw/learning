@@ -29,6 +29,8 @@ docker compose -f docker-compose.deploy.yml pull
 docker compose -f docker-compose.deploy.yml up -d
 ```
 
+Release tagging details are in [docs/deployment.md](docs/deployment.md).
+
 ## Tests
 
 Frontend:
