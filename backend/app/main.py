@@ -13,6 +13,7 @@ from .database import get_connection, initialize_database
 from .schemas import (
     CommitQuestionImportIn,
     CreateModuleIn,
+    HealthOut,
     ModuleNodeOut,
     QuestionDraftIn,
     QuestionImportResultOut,
@@ -45,7 +46,7 @@ from .services import (
     sync_seed_content,
     validate_question_import,
 )
-from .settings import CONTENT_DIR, FRONTEND_DIST_DIR, cors_origins, resolve_database_url, seed_on_boot
+from .settings import CONTENT_DIR, FRONTEND_DIST_DIR, cors_origins, instance_key, resolve_database_url, seed_on_boot
 
 
 def _handle_service_error(error: ServiceError) -> None:
@@ -84,9 +85,9 @@ def create_app(
             allow_headers=["*"],
         )
 
-    @app.get("/api/health")
+    @app.get("/api/health", response_model=HealthOut)
     def health() -> dict[str, str]:
-        return {"status": "ok"}
+        return {"status": "ok", "instance_key": instance_key()}
 
     @app.get("/api/modules/tree", response_model=list[ModuleNodeOut])
     def modules_tree() -> list[dict]:

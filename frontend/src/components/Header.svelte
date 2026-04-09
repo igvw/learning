@@ -105,7 +105,7 @@
       </button>
 
       {#if userMenuOpen}
-        <div class="user-menu" role="menu" aria-label="User menu">
+        <div class="user-menu" role="menu" aria-label="User menu" tabindex="-1">
           {#if users.length > 0}
             <p class="user-menu-title">Switch user</p>
             {#each users as user (user.id)}

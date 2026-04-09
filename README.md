@@ -44,7 +44,7 @@ npm --prefix frontend run build
 Backend:
 
 ```bash
-./.venv/bin/python -m py_compile backend/app/database.py backend/app/main.py backend/app/cli.py backend/app/services.py
+./.venv/bin/python -m py_compile backend/app/database.py backend/app/main.py backend/app/cli.py backend/app/services.py backend/app/service/*.py
 ```
 
 Optional Postgres-backed backend integration tests:

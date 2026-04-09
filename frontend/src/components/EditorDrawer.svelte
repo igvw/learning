@@ -1,5 +1,21 @@
 <script lang="ts">
-  import { buildQmlLine, parseQmlLine, QmlError } from '../lib/qml';
+  import { buildQmlLine, QmlError } from '../lib/qml';
+  import {
+    buildEditorState,
+    buildQuestionPayload,
+    buildStructuredDraft,
+    flattenModules,
+    inlineBlankPlaceholder,
+    inlineSegmentPlaceholder,
+    inlineTailPlaceholder,
+    multiSlotPlaceholder,
+    parseEditorStateFromQml,
+    promptPlaceholder,
+    singleAnswerPlaceholder,
+    type EditorState,
+    type InlineBlank,
+    type MultiSlot
+  } from '../lib/editor-draft';
   import type {
     ModuleNode,
     PriorityMode,
@@ -7,10 +23,6 @@
     QuestionRow,
     QuestionType
   } from '../lib/types';
-
-  type FlatModule = { id: number; label: string; isLeaf: boolean };
-  type MultiSlot = { answersText: string };
-  type InlineBlank = { segmentBefore: string; answersText: string };
 
   export let open = false;
   export let modules: ModuleNode[] = [];
@@ -37,123 +49,40 @@
   let formError = '';
   let localMarker = '';
 
-  function flattenModules(nodes: ModuleNode[]): FlatModule[] {
-    return nodes.flatMap((node) => [
-      { id: node.id, label: node.full_slug, isLeaf: node.children.length === 0 },
-      ...flattenModules(node.children)
-    ]);
-  }
-
-  function splitLines(value: string): string[] {
-    return value
-      .split('\n')
-      .map((entry) => entry.trim())
-      .filter(Boolean);
-  }
-
-  function defaultCreateModuleId(): number {
-    const options = flattenModules(modules);
-    if (defaultModuleId !== null && options.some((option) => option.id === defaultModuleId)) {
-      return defaultModuleId;
-    }
-    return options[0]?.id ?? 0;
-  }
-
-  function structuredDraft() {
-    if (questionType === 'single_text' || questionType === 'computed_text') {
-      return {
-        prompt: prompt.trim(),
-        question_type: questionType,
-        accepted_answers: [splitLines(singleAnswersText)],
-        segments: []
-      };
-    }
-    if (questionType === 'multi_text' || questionType === 'ordered_multi') {
-      return {
-        prompt: prompt.trim(),
-        question_type: questionType,
-        accepted_answers: multiSlots.map((slot) => splitLines(slot.answersText)),
-        segments: []
-      };
-    }
+  function currentState(): EditorState {
     return {
-      prompt: prompt.trim(),
-      question_type: questionType,
-      accepted_answers: inlineBlanks.map((blank) => splitLines(blank.answersText)),
-      segments: [...inlineBlanks.map((blank) => blank.segmentBefore), inlineTail]
+      moduleId: Number(moduleId),
+      prompt,
+      questionType,
+      rank,
+      priorityMode,
+      resetStats,
+      singleAnswersText,
+      multiSlots,
+      inlineBlanks,
+      inlineTail,
+      qmlText
     };
   }
 
-  function syncQmlFromStructured(): void {
-    if (editingQuestion) {
-      return;
-    }
-    qmlText = buildQmlLine(structuredDraft());
-  }
-
-  function applyParsedQml(value: string): void {
-    const parsed = parseQmlLine(value);
-    prompt = parsed.prompt;
-    questionType = parsed.question_type;
-    if (parsed.question_type === 'single_text' || parsed.question_type === 'computed_text') {
-      singleAnswersText = (parsed.accepted_answers[0] ?? []).join('\n');
-      multiSlots = [];
-      inlineBlanks = [];
-      inlineTail = '';
-      return;
-    }
-    if (parsed.question_type === 'multi_text' || parsed.question_type === 'ordered_multi') {
-      singleAnswersText = '';
-      multiSlots = parsed.accepted_answers.map((answers) => ({ answersText: answers.join('\n') }));
-      inlineBlanks = [];
-      inlineTail = '';
-      return;
-    }
-    singleAnswersText = '';
-    multiSlots = [];
-    inlineBlanks = parsed.accepted_answers.map((answers, index) => ({
-      segmentBefore: parsed.segments[index] ?? '',
-      answersText: answers.join('\n')
-    }));
-    inlineTail = parsed.segments[parsed.segments.length - 1] ?? '';
+  function applyEditorState(nextState: EditorState): void {
+    moduleId = nextState.moduleId;
+    prompt = nextState.prompt;
+    questionType = nextState.questionType;
+    rank = nextState.rank;
+    priorityMode = nextState.priorityMode;
+    resetStats = nextState.resetStats;
+    singleAnswersText = nextState.singleAnswersText;
+    multiSlots = nextState.multiSlots;
+    inlineBlanks = nextState.inlineBlanks;
+    inlineTail = nextState.inlineTail;
+    qmlText = nextState.qmlText;
   }
 
   function resetFromQuestion(question: QuestionRow | null): void {
-    moduleId = question?.module_id ?? defaultCreateModuleId();
-    prompt = question?.prompt ?? '';
-    questionType = question?.question_type ?? 'single_text';
-    rank = question?.rank ?? 1;
-    priorityMode = 'mid';
-    resetStats = true;
+    applyEditorState(buildEditorState(question, modules, defaultModuleId));
     qmlError = '';
     formError = '';
-
-    if (questionType === 'single_text' || questionType === 'computed_text') {
-      singleAnswersText = (question?.accepted_answers?.[0] ?? []).join('\n');
-      multiSlots = [];
-      inlineBlanks = [];
-      inlineTail = '';
-    } else if (questionType === 'multi_text' || questionType === 'ordered_multi') {
-      singleAnswersText = '';
-      multiSlots =
-        question?.accepted_answers.map((answers) => ({ answersText: answers.join('\n') })) ?? [
-          { answersText: '' },
-          { answersText: '' }
-        ];
-      inlineBlanks = [];
-      inlineTail = '';
-    } else {
-      singleAnswersText = '';
-      multiSlots = [];
-      inlineBlanks =
-        question?.accepted_answers.map((answers, index) => ({
-          segmentBefore: question.segments[index] ?? '',
-          answersText: answers.join('\n')
-        })) ?? [{ segmentBefore: '', answersText: '' }];
-      inlineTail = question?.segments?.[question.segments.length - 1] ?? '';
-    }
-
-    qmlText = buildQmlLine(structuredDraft());
   }
 
   function setQuestionType(type: QuestionType): void {
@@ -200,84 +129,11 @@
     inlineBlanks = inlineBlanks.filter((_, blankIndex) => blankIndex !== index);
   }
 
-  function createPlaceholder(value: string): string | undefined {
-    return editingQuestion ? undefined : value;
-  }
-
-  function promptPlaceholder(type: QuestionType): string | undefined {
-    switch (type) {
-      case 'single_text':
-        return createPlaceholder('What is the capital of Norway?');
-      case 'multi_text':
-        return createPlaceholder('Name the two rivers that meet at Khartoum.');
-      case 'ordered_multi':
-        return createPlaceholder('Name the stages in order.');
-      case 'computed_text':
-        return createPlaceholder(
-          'Patient needs $m=[1-10]*100$ mg of trycoxigan. The solution has $v=[1-10]*10$ mg/ml. How much solution is needed?'
-        );
-      case 'inline_cloze':
-        return createPlaceholder('The [Amazon | Amazon River] flows through South America.');
-    }
-  }
-
-  function singleAnswerPlaceholder(type: QuestionType): string | undefined {
-    if (type === 'computed_text') {
-      return createPlaceholder('$m/v$ ml');
-    }
-    return createPlaceholder('oslo');
-  }
-
-  function multiSlotPlaceholder(type: QuestionType, index: number): string | undefined {
-    if (editingQuestion) {
-      return undefined;
-    }
-    if (type === 'multi_text') {
-      return index === 0 ? 'white nile' : index === 1 ? 'blue nile' : `answer ${index + 1}`;
-    }
-    return index === 0 ? 'stage one' : index === 1 ? 'stage two' : `stage ${index + 1}`;
-  }
-
-  function inlineSegmentPlaceholder(index: number): string | undefined {
-    return editingQuestion
-      ? undefined
-      : index === 0
-        ? 'The derivative of '
-        : ' is ';
-  }
-
-  function inlineBlankPlaceholder(index: number): string | undefined {
-    return editingQuestion ? undefined : index === 0 ? 'x^2' : '2x';
-  }
-
-  function inlineTailPlaceholder(): string | undefined {
-    return editingQuestion ? undefined : '.';
-  }
-
   function buildPayload(): QuestionDraftPayload {
-    const normalizedModuleId = Number(moduleId);
-    if (!normalizedModuleId) {
-      throw new Error('Select a module before saving.');
-    }
-    if (!selectedModuleIsLeaf) {
-      throw new Error('Questions can only be created in leaf modules.');
-    }
-    const draft = structuredDraft();
-    if (!draft.prompt) {
-      throw new Error('Prompt is required.');
-    }
-    if (draft.accepted_answers.some((answers) => answers.length === 0)) {
-      throw new Error('Every answer slot needs at least one accepted answer.');
-    }
-    return {
-      module_id: normalizedModuleId,
-      prompt: draft.prompt,
-      question_type: draft.question_type,
-      rank,
-      priority_mode: editingQuestion ? null : priorityMode,
-      accepted_answers: draft.accepted_answers,
-      segments: draft.segments
-    };
+    return buildQuestionPayload(currentState(), {
+      selectedModuleIsLeaf,
+      isEditing: Boolean(editingQuestion)
+    });
   }
 
   async function handleSave(): Promise<void> {
@@ -295,7 +151,13 @@
   function handleQmlInput(value: string): void {
     qmlText = value;
     try {
-      applyParsedQml(value);
+      const parsedState = parseEditorStateFromQml(value);
+      prompt = parsedState.prompt;
+      questionType = parsedState.questionType;
+      singleAnswersText = parsedState.singleAnswersText;
+      multiSlots = parsedState.multiSlots;
+      inlineBlanks = parsedState.inlineBlanks;
+      inlineTail = parsedState.inlineTail;
       qmlError = '';
     } catch (error) {
       qmlError = error instanceof QmlError ? error.message : 'Invalid QML.';
@@ -311,7 +173,21 @@
     resetFromQuestion(editingQuestion);
   }
   $: if (open && !editingQuestion) {
-    syncQmlFromStructured();
+    qmlText = buildQmlLine(
+      buildStructuredDraft({
+        prompt,
+        questionType,
+        singleAnswersText,
+        multiSlots,
+        inlineBlanks,
+        inlineTail,
+        moduleId: Number(moduleId),
+        rank,
+        priorityMode,
+        resetStats,
+        qmlText
+      })
+    );
   }
 </script>
 
@@ -398,7 +274,7 @@
 
                 <label class="field editor-field-prompt editor-field-wide">
                   <span>Prompt</span>
-                  <textarea rows="3" bind:value={prompt} placeholder={promptPlaceholder(questionType)}></textarea>
+                  <textarea rows="3" bind:value={prompt} placeholder={promptPlaceholder(questionType, Boolean(editingQuestion))}></textarea>
                 </label>
               </div>
 
@@ -412,7 +288,7 @@
               {#if questionType === 'single_text' || questionType === 'computed_text'}
                 <label class="field">
                   <span>{questionType === 'computed_text' ? 'Answer expression or accepted answers, one per line' : 'Accepted answers, one per line'}</span>
-                  <textarea rows="5" bind:value={singleAnswersText} placeholder={singleAnswerPlaceholder(questionType)}></textarea>
+                  <textarea rows="5" bind:value={singleAnswersText} placeholder={singleAnswerPlaceholder(questionType, Boolean(editingQuestion))}></textarea>
                 </label>
               {:else if questionType === 'multi_text' || questionType === 'ordered_multi'}
                 <div class="dynamic-group compact-dynamic-group">
@@ -428,7 +304,7 @@
                       </div>
                       <label class="field">
                         <span>Accepted answers, one per line</span>
-                        <textarea rows="3" bind:value={slot.answersText} placeholder={multiSlotPlaceholder(questionType, index)}></textarea>
+                        <textarea rows="3" bind:value={slot.answersText} placeholder={multiSlotPlaceholder(questionType, index, Boolean(editingQuestion))}></textarea>
                       </label>
                     </div>
                   {/each}
@@ -448,18 +324,18 @@
                       <div class="editor-card-grid">
                         <label class="field">
                           <span>Text before blank {index + 1}</span>
-                          <input type="text" bind:value={blank.segmentBefore} placeholder={inlineSegmentPlaceholder(index)} />
+                          <input type="text" bind:value={blank.segmentBefore} placeholder={inlineSegmentPlaceholder(index, Boolean(editingQuestion))} />
                         </label>
                         <label class="field editor-field-wide">
                           <span>Accepted answers, one per line</span>
-                          <textarea rows="3" bind:value={blank.answersText} placeholder={inlineBlankPlaceholder(index)}></textarea>
+                          <textarea rows="3" bind:value={blank.answersText} placeholder={inlineBlankPlaceholder(index, Boolean(editingQuestion))}></textarea>
                         </label>
                       </div>
                     </div>
                   {/each}
                   <label class="field">
                     <span>Final trailing text</span>
-                    <input type="text" bind:value={inlineTail} placeholder={inlineTailPlaceholder()} />
+                    <input type="text" bind:value={inlineTail} placeholder={inlineTailPlaceholder(Boolean(editingQuestion))} />
                   </label>
                 </div>
               {/if}

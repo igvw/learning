@@ -128,7 +128,7 @@
               <label class="field">
                 <span>QML text</span>
                 <textarea
-                  class="csv-textarea"
+                  class="qml-textarea"
                   rows="12"
                   bind:value={qmlText}
                   placeholder={'Which river runs through Cairo? [nile | the nile]\n\nName the two rivers that meet in Khartoum. {white nile, blue nile}'}
@@ -161,33 +161,33 @@
               {#if result.report_text}
                 <label class="field">
                   <span>Validation report</span>
-                  <textarea class="csv-report" rows="8" readonly value={result.report_text}></textarea>
+                  <textarea class="qml-report" rows="8" readonly value={result.report_text}></textarea>
                 </label>
               {/if}
 
               {#if result.unresolved_rows.length > 0}
                 <div class="field">
                   <span>Unresolved QML lines</span>
-                  <div class="csv-editor">
+                  <div class="qml-editor">
                     {#each result.unresolved_rows as row (row.row_number)}
-                      <div class="csv-editor-row">
+                      <div class="qml-editor-row">
                         <button
-                          class="csv-line-number"
+                          class="qml-line-number"
                           type="button"
                           aria-label={`Discard row ${row.row_number}`}
                           on:click={() => void handleDiscardRow(row.row_number)}
                         >
-                          <span class="csv-line-index">{row.row_number}</span>
-                          <span class="csv-line-delete">x</span>
+                          <span class="qml-line-index">{row.row_number}</span>
+                          <span class="qml-line-delete">x</span>
                         </button>
-                        <div class="csv-line-body">
+                        <div class="qml-line-body">
                           <input
-                            class="csv-line-input"
+                            class="qml-line-input"
                             type="text"
                             value={unresolvedDrafts[row.row_number] ?? row.qml_line}
                             on:input={(event) => updateQmlLine(row.row_number, (event.currentTarget as HTMLInputElement).value)}
                           />
-                          <p class="csv-row-issues">{row.issues.join(' | ')}</p>
+                          <p class="qml-row-issues">{row.issues.join(' | ')}</p>
                         </div>
                       </div>
                     {/each}

@@ -1,9 +1,13 @@
 import type {
   CreateModulePayload,
+  CreateUserPayload,
+  HealthResponse,
   ModuleNode,
   QuestionDraftPayload,
   QuestionImportResult,
   QuestionImportRowPayload,
+  QuestionMutationResult,
+  QuestionReviewFlagResult,
   QuizSession,
   StatsResponse,
   SubmitAnswerResult,
@@ -44,11 +48,15 @@ export function getModulesTree(): Promise<ModuleNode[]> {
   return request<ModuleNode[]>('/api/modules/tree');
 }
 
+export function getHealth(): Promise<HealthResponse> {
+  return request<HealthResponse>('/api/health');
+}
+
 export function getUsers(): Promise<User[]> {
   return request<User[]>('/api/users');
 }
 
-export function createUser(payload: { handle: string; display_name: string }): Promise<User> {
+export function createUser(payload: CreateUserPayload): Promise<User> {
   return request<User>(
     '/api/users',
     {
@@ -104,8 +112,8 @@ export function getStats(userId: number, moduleId: number | null, reviewOnly: bo
   return request<StatsResponse>(`/api/stats?${params.toString()}`, undefined, userId);
 }
 
-export function createQuestion(userId: number | null, payload: QuestionDraftPayload): Promise<{ question_id: number }> {
-  return request<{ question_id: number }>(
+export function createQuestion(userId: number | null, payload: QuestionDraftPayload): Promise<QuestionMutationResult> {
+  return request<QuestionMutationResult>(
     '/api/questions',
     {
       method: 'POST',
@@ -118,8 +126,8 @@ export function createQuestion(userId: number | null, payload: QuestionDraftPayl
 export function reviseQuestion(
   questionId: number,
   payload: QuestionDraftPayload & { reset_stats: boolean }
-): Promise<{ question_id: number }> {
-  return request<{ question_id: number }>(`/api/questions/${questionId}/revisions`, {
+): Promise<QuestionMutationResult> {
+  return request<QuestionMutationResult>(`/api/questions/${questionId}/revisions`, {
     method: 'POST',
     body: JSON.stringify(payload)
   });
@@ -129,8 +137,8 @@ export function setQuestionReviewFlag(
   userId: number,
   questionId: number,
   reviewFlag: boolean
-): Promise<{ question_id: number; review_flag: boolean }> {
-  return request<{ question_id: number; review_flag: boolean }>(
+): Promise<QuestionReviewFlagResult> {
+  return request<QuestionReviewFlagResult>(
     `/api/questions/${questionId}/review-flag`,
     {
       method: 'PATCH',

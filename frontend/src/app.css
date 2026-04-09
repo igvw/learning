@@ -89,15 +89,19 @@ button {
 .menu-backdrop,
 .drawer-backdrop {
   position: relative;
-  z-index: 1;
 }
 
 .app-header {
+  z-index: 3;
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 1.5rem;
   padding: 1.5rem 1.5rem 1rem;
+}
+
+.page-shell {
+  z-index: 1;
 }
 
 .header-brand {
@@ -116,6 +120,7 @@ button {
 
 .user-menu-shell {
   position: relative;
+  z-index: 4;
 }
 
 .user-avatar {
@@ -142,6 +147,7 @@ button {
   position: absolute;
   top: calc(100% + 0.55rem);
   right: 0;
+  z-index: 10;
   min-width: 14rem;
   display: grid;
   gap: 0.35rem;
@@ -1034,30 +1040,30 @@ tbody tr.hot1-row:hover {
   font-size: 0.9rem;
 }
 
-.csv-textarea,
-.csv-report,
-.csv-line-input,
-.csv-header-text {
+.qml-textarea,
+.qml-report,
+.qml-line-input,
+.qml-header-text {
   font-family: "SFMono-Regular", "Menlo", "Monaco", "Courier New", monospace;
 }
 
-.csv-editor {
+.qml-editor {
   display: grid;
   gap: 0.55rem;
 }
 
-.csv-editor-row {
+.qml-editor-row {
   display: grid;
   grid-template-columns: 3.75rem minmax(0, 1fr);
   gap: 0.85rem;
   align-items: start;
 }
 
-.csv-editor-header {
+.qml-editor-header {
   align-items: center;
 }
 
-.csv-line-number {
+.qml-line-number {
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -1072,17 +1078,17 @@ tbody tr.hot1-row:hover {
   overflow: hidden;
 }
 
-.csv-line-number.header-cell {
+.qml-line-number.header-cell {
   visibility: hidden;
   pointer-events: none;
 }
 
-.csv-line-index,
-.csv-line-delete {
+.qml-line-index,
+.qml-line-delete {
   transition: opacity 140ms ease;
 }
 
-.csv-line-delete {
+.qml-line-delete {
   position: absolute;
   color: #fca5a5;
   opacity: 0;
@@ -1090,23 +1096,23 @@ tbody tr.hot1-row:hover {
   text-transform: uppercase;
 }
 
-.csv-editor-row:hover .csv-line-delete,
-.csv-line-number:focus-visible .csv-line-delete {
+.qml-editor-row:hover .qml-line-delete,
+.qml-line-number:focus-visible .qml-line-delete {
   opacity: 1;
 }
 
-.csv-editor-row:hover .csv-line-index,
-.csv-line-number:focus-visible .csv-line-index {
+.qml-editor-row:hover .qml-line-index,
+.qml-line-number:focus-visible .qml-line-index {
   opacity: 0;
 }
 
-.csv-line-body {
+.qml-line-body {
   display: grid;
   gap: 0.35rem;
 }
 
-.csv-line-input,
-.csv-header-text {
+.qml-line-input,
+.qml-header-text {
   width: 100%;
   min-height: 3rem;
   display: flex;
@@ -1118,7 +1124,7 @@ tbody tr.hot1-row:hover {
   padding: 0.8rem 0.9rem;
 }
 
-.csv-row-issues {
+.qml-row-issues {
   margin: 0;
   color: #fca5a5;
   font-size: 0.88rem;

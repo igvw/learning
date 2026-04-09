@@ -8,11 +8,23 @@
   import QuizPage from './components/QuizPage.svelte';
   import StatsPage from './components/StatsPage.svelte';
   import {
+    clearLegacySelectionStorage,
+    findModuleTitle,
+    findUser,
+    moduleIdExists,
+    persistActiveUser as persistActiveUserSelection,
+    persistSelectedModule as persistSelectedModuleSelection,
+    restoreActiveUserId,
+    restoreSelectedModuleId,
+    routeFromPath
+  } from './lib/app-state';
+  import {
     commitQuestionImport,
     createModule,
     createQuestion,
     createQuizSession,
     createUser,
+    getHealth,
     getModulesTree,
     getStats,
     getUsers,
@@ -25,6 +37,8 @@
   import { ensureModulePath, findModuleNode as findModuleNodeInTree } from './lib/module-paths';
   import type {
     CreateModulePayload,
+    CreateUserPayload,
+    HealthResponse,
     ModuleNode,
     QuestionDraftPayload,
     QuestionImportResult,
@@ -35,9 +49,6 @@
     StatsResponse,
     User
   } from './lib/types';
-
-  const ACTIVE_USER_STORAGE_KEY = 'learning.active-user-id';
-  const ACTIVE_MODULE_STORAGE_KEY = 'learning.selected-module-id';
 
   let currentRoute: RouteName = 'quiz';
   let modules: ModuleNode[] = [];
@@ -67,50 +78,26 @@
   let importResult: QuestionImportResult | null = null;
   let importBusy = false;
   let importError = '';
-
-  function routeFromPath(pathname: string): RouteName {
-    if (pathname.startsWith('/stats')) {
-      return 'stats';
-    }
-    if (pathname.startsWith('/admin')) {
-      return 'admin';
-    }
-    return 'quiz';
-  }
+  let instanceKey = 'default';
 
   function findModuleNode(nodes: ModuleNode[], moduleId: number): ModuleNode | null {
     return findModuleNodeInTree(nodes, moduleId);
   }
 
-  function findModuleTitle(nodes: ModuleNode[], moduleId: number): string | null {
-    return findModuleNode(nodes, moduleId)?.title ?? null;
-  }
-
-  function moduleIdExists(nodes: ModuleNode[], moduleId: number): boolean {
-    return findModuleNode(nodes, moduleId) !== null;
-  }
-
-  function findUser(usersList: User[], userId: number | null): User | null {
-    if (userId === null) {
-      return null;
-    }
-    return usersList.find((user) => user.id === userId) ?? null;
-  }
-
   function persistActiveUser(userId: number | null): void {
-    if (userId === null) {
-      window.localStorage.removeItem(ACTIVE_USER_STORAGE_KEY);
-      return;
-    }
-    window.localStorage.setItem(ACTIVE_USER_STORAGE_KEY, String(userId));
+    persistActiveUserSelection(window.localStorage, {
+      instanceKey,
+      users,
+      userId
+    });
   }
 
   function persistSelectedModule(moduleId: number | null): void {
-    if (moduleId === null) {
-      window.localStorage.removeItem(ACTIVE_MODULE_STORAGE_KEY);
-      return;
-    }
-    window.localStorage.setItem(ACTIVE_MODULE_STORAGE_KEY, String(moduleId));
+    persistSelectedModuleSelection(window.localStorage, {
+      instanceKey,
+      modules,
+      moduleId
+    });
   }
 
   function applyActiveUser(userId: number | null): void {
@@ -147,16 +134,13 @@
       applySelectedModule(null);
       return;
     }
-
-    const savedModuleId = Number(window.localStorage.getItem(ACTIVE_MODULE_STORAGE_KEY));
-    const nextSelectedModuleId =
-      selectedModuleId !== null && moduleIdExists(loadedModules, selectedModuleId)
-        ? selectedModuleId
-        : Number.isFinite(savedModuleId) && moduleIdExists(loadedModules, savedModuleId)
-          ? savedModuleId
-          : loadedModules[0].id;
-
-    applySelectedModule(nextSelectedModuleId);
+    applySelectedModule(
+      restoreSelectedModuleId(window.localStorage, {
+        instanceKey,
+        modules: loadedModules,
+        selectedModuleId
+      })
+    );
   }
 
   function hasSelectedModuleChanged(moduleId: number | null): boolean {
@@ -181,24 +165,13 @@
   async function loadUsersAndRestoreSelection(): Promise<void> {
     const loadedUsers = await getUsers();
     users = loadedUsers;
-
-    const currentUser = findUser(loadedUsers, activeUserId);
-    if (currentUser) {
-      return;
-    }
-
-    const savedUserId = Number(window.localStorage.getItem(ACTIVE_USER_STORAGE_KEY));
-    if (Number.isFinite(savedUserId) && findUser(loadedUsers, savedUserId)) {
-      applyActiveUser(savedUserId);
-      return;
-    }
-
-    if (loadedUsers.length > 0) {
-      applyActiveUser(loadedUsers[0].id);
-      return;
-    }
-
-    applyActiveUser(null);
+    applyActiveUser(
+      restoreActiveUserId(window.localStorage, {
+        instanceKey,
+        users: loadedUsers,
+        activeUserId
+      })
+    );
   }
 
   async function loadStats(): Promise<void> {
@@ -235,7 +208,7 @@
     }
   }
 
-  async function handleCreateUser(payload: { handle: string; display_name: string }): Promise<User> {
+  async function handleCreateUser(payload: CreateUserPayload): Promise<User> {
     const createdUser = await createUser(payload);
     await loadUsersAndRestoreSelection();
     applyActiveUser(createdUser.id);
@@ -433,6 +406,14 @@
   onMount(() => {
     currentRoute = routeFromPath(window.location.pathname);
     void (async () => {
+      let health: HealthResponse | null = null;
+      try {
+        health = await getHealth();
+      } catch (error) {
+        console.error(error);
+      }
+      instanceKey = health?.instance_key?.trim() || 'default';
+      clearLegacySelectionStorage(window.localStorage);
       await loadModules();
       await loadUsersAndRestoreSelection();
       if (currentRoute === 'stats') {

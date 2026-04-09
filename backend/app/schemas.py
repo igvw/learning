@@ -46,6 +46,11 @@ class UserOut(BaseModel):
     created_at: str
 
 
+class HealthOut(BaseModel):
+    status: str
+    instance_key: str
+
+
 class QuizSessionCreateIn(BaseModel):
     module_id: Optional[int] = None
     count: int = Field(default=10, ge=1, le=50)

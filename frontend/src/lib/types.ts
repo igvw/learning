@@ -96,6 +96,16 @@ export interface User {
   created_at: string;
 }
 
+export interface CreateUserPayload {
+  handle: string;
+  display_name: string;
+}
+
+export interface HealthResponse {
+  status: string;
+  instance_key: string;
+}
+
 export interface QuestionSchedule {
   bucket: ScheduleBucket;
   logical_bucket: LogicalBucket;
@@ -149,6 +159,15 @@ export interface QuestionDraftPayload {
   priority_mode?: PriorityMode | null;
   accepted_answers: string[][];
   segments: string[];
+}
+
+export interface QuestionMutationResult {
+  question_id: number;
+}
+
+export interface QuestionReviewFlagResult {
+  question_id: number;
+  review_flag: boolean;
 }
 
 export interface CreateModulePayload {

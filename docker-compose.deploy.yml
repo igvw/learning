@@ -24,6 +24,7 @@ services:
         condition: service_healthy
     environment:
       LEARNING_APP_ENV: production
+      LEARNING_APP_INSTANCE_KEY: published
       LEARNING_APP_DATABASE_URL: postgresql://${POSTGRES_USER:-learning}:${POSTGRES_PASSWORD:-learning}@postgres:5432/${POSTGRES_DB:-learning}
       LEARNING_APP_SEED_ON_BOOT: ${LEARNING_APP_SEED_ON_BOOT:-true}
       LEARNING_APP_CORS_ORIGINS: ${LEARNING_APP_CORS_ORIGINS:-}

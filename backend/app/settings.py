@@ -36,6 +36,11 @@ def seed_on_boot() -> bool:
     return env_flag("LEARNING_APP_SEED_ON_BOOT", True)
 
 
+def instance_key() -> str:
+    raw_value = os.environ.get("LEARNING_APP_INSTANCE_KEY", "default").strip()
+    return raw_value or "default"
+
+
 def resolve_database_url(explicit: Optional[Union[str, Path]] = None) -> str:
     raw_value = explicit or os.environ.get("LEARNING_APP_DATABASE_URL")
     if raw_value is None:
