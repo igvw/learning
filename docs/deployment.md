@@ -45,6 +45,30 @@ docker compose up -d --build
 
 This is the standard workflow inside a cloned repo.
 
+## Test The Published Image Safely
+
+To validate the published GHCR image without touching the normal `learning` Compose data, use the helper script from the repo root:
+
+```bash
+bash ./tests/published.sh up
+```
+
+This test flow is safe because:
+
+- the normal local `learning` stack is only stopped, not removed
+- the published-image test runs under a separate Compose project name: `learning-published`
+- that separate project gets its own containers, network, and PostgreSQL volume
+- the script pulls the latest published image before starting the test stack
+
+When you are done testing:
+
+```bash
+bash ./tests/published.sh down
+docker compose up -d
+```
+
+The `down` command removes only the isolated `learning-published_*` resources, including its test database volume.
+
 ## Install For Another User
 
 This is the laptop-first flow for someone who just wants to study locally.
@@ -60,6 +84,7 @@ Published image policy:
 - each tagged release publishes:
   - `ghcr.io/igvw/learning-app:v1.2.3`
   - `ghcr.io/igvw/learning-app:latest`
+- published tags are intended to work on both `amd64` and `arm64` hosts, including Apple Silicon, ARM64 VPS machines, and 64-bit Raspberry Pi systems
 - branch pushes do not publish images
 - the tag workflow runs backend tests, frontend tests, and a frontend build before publishing
 
