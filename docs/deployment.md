@@ -63,6 +63,22 @@ Published image policy:
 - branch pushes do not publish images
 - the tag workflow runs backend tests, frontend tests, and a frontend build before publishing
 
+## Release Tagging
+
+When you want to publish a new image, tag the current `HEAD` on `main`:
+
+```bash
+git checkout main
+git pull origin main
+git tag -a v1.0.0 -m "Release v1.0.0"
+git push origin v1.0.0
+```
+
+Pushing the tag starts the release workflow. It runs the verification checks first, then publishes:
+
+- `ghcr.io/igvw/learning-app:v1.0.0`
+- `ghcr.io/igvw/learning-app:latest`
+
 First install:
 
 ```bash
