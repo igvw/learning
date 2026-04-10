@@ -1,9 +1,7 @@
-from __future__ import annotations
-
 import ast
 import random
 import re
-from typing import Any, Optional
+from typing import Any
 
 
 class QMLError(ValueError):
@@ -55,7 +53,7 @@ def _split_answer_group(text: str) -> list[str]:
     return answers
 
 
-def _find_trailing_box(line: str) -> Optional[tuple[int, int, str, str]]:
+def _find_trailing_box(line: str) -> tuple[int, int, str, str] | None:
     stripped = line.rstrip()
     if not stripped:
         return None
@@ -65,7 +63,7 @@ def _find_trailing_box(line: str) -> Optional[tuple[int, int, str, str]]:
     opening = "[" if closing == "]" else "{"
     depth = 0
     escape = False
-    start_index: Optional[int] = None
+    start_index: int | None = None
     for index, char in enumerate(stripped):
         if escape:
             escape = False
@@ -90,7 +88,7 @@ def _parse_inline_cloze(line: str) -> tuple[str, list[list[str]], list[str]]:
     segments: list[str] = []
     accepted_answers: list[list[str]] = []
     current_segment: list[str] = []
-    current_group: Optional[list[str]] = None
+    current_group: list[str] | None = None
     escape = False
     saw_group = False
 
@@ -248,7 +246,7 @@ def render_prompt_and_answers(
     *,
     prompt: str,
     accepted_answers: list[list[str]],
-    rng: Optional[random.Random] = None,
+    rng: random.Random | None = None,
 ) -> tuple[str, list[list[str]]]:
     generator = rng or random.Random()
     env: dict[str, float] = {}

@@ -1,7 +1,5 @@
-from __future__ import annotations
-
 import json
-from typing import Any, Optional
+from typing import Any
 
 from ..database import DatabaseConnection, utc_now
 from .catalog import ensure_user_exists, get_scope_module_ids
@@ -22,7 +20,7 @@ def get_stats(
     connection: DatabaseConnection,
     *,
     user_id: int,
-    module_id: Optional[int],
+    module_id: int | None,
     review_only: bool,
 ) -> dict[str, Any]:
     ensure_user_exists(connection, user_id)

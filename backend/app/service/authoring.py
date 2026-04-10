@@ -1,8 +1,6 @@
-from __future__ import annotations
-
 import json
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from ..config import FORCED_UNORDERED_PROMPTS
 from ..database import DatabaseConnection, execute_insert_returning_id, utc_now
@@ -43,7 +41,7 @@ def _shift_ranks_for_insert(
     *,
     module_id: int,
     insert_rank: int,
-    exclude_question_id: Optional[int] = None,
+    exclude_question_id: int | None = None,
 ) -> None:
     rows = _module_question_rank_rows(connection, module_id)
     next_rank = 1
@@ -72,7 +70,7 @@ def _clamp_insert_rank(
     *,
     module_id: int,
     rank: int,
-    exclude_question_id: Optional[int] = None,
+    exclude_question_id: int | None = None,
 ) -> int:
     rows = [
         row
@@ -82,7 +80,7 @@ def _clamp_insert_rank(
     return max(1, min(int(rank), len(rows) + 1))
 
 
-def _priority_insert_rank(connection: DatabaseConnection, *, user_id: Optional[int], module_id: int, priority_mode: str) -> int:
+def _priority_insert_rank(connection: DatabaseConnection, *, user_id: int | None, module_id: int, priority_mode: str) -> int:
     if user_id is None:
         return _append_rank(connection, module_id)
 
@@ -126,7 +124,7 @@ def ensure_unique_question_prompt(
     question_type: str,
     prompt: str,
     type_config: dict[str, Any],
-    exclude_question_id: Optional[int] = None,
+    exclude_question_id: int | None = None,
 ) -> None:
     candidate_key = question_prompt_key(question_type, prompt, type_config)
     for row in _module_question_rows(connection, module_id):
@@ -137,7 +135,7 @@ def ensure_unique_question_prompt(
             raise ValidationError("Prompt already exists in this leaf module.")
 
 
-def create_question(connection: DatabaseConnection, payload: QuestionDraftIn, *, user_id: Optional[int] = None) -> dict[str, int]:
+def create_question(connection: DatabaseConnection, payload: QuestionDraftIn, *, user_id: int | None = None) -> dict[str, int]:
     ensure_leaf_module(connection, payload.module_id)
     type_config = serialize_type_config(payload)
     ensure_unique_question_prompt(

@@ -1,10 +1,8 @@
-from __future__ import annotations
-
 import json
 import random
 import re
 from datetime import datetime, timedelta
-from typing import Any, Optional
+from typing import Any
 
 from ..config import FULL_CREDIT_TOLERANCE
 from ..qml import render_prompt_and_answers
@@ -45,7 +43,7 @@ def add_interval_to_timestamp(value: str, interval: timedelta) -> str:
     return (parse_iso_timestamp(value) + interval).isoformat()
 
 
-def is_full_credit(score_earned: Optional[float], score_possible: Optional[float]) -> bool:
+def is_full_credit(score_earned: float | None, score_possible: float | None) -> bool:
     if score_earned is None or score_possible is None or score_possible <= 0:
         return False
     return score_earned >= (score_possible - FULL_CREDIT_TOLERANCE)
@@ -100,7 +98,7 @@ def resolved_runtime(
     prompt: str,
     type_config: dict[str, Any],
     *,
-    rng: Optional[random.Random] = None,
+    rng: random.Random | None = None,
 ) -> tuple[str, dict[str, Any]]:
     if question_type != "computed_text":
         return prompt, type_config

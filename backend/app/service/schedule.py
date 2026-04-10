@@ -1,8 +1,6 @@
-from __future__ import annotations
-
 import json
 import random
-from typing import Any, Optional
+from typing import Any
 
 from ..config import FULL_CREDIT_TOLERANCE, SCHEDULE_INTERVALS
 from ..database import DatabaseConnection
@@ -13,7 +11,7 @@ def _review_flags_by_question(
     connection: DatabaseConnection,
     *,
     user_id: int,
-    question_ids: Optional[list[int]] = None,
+    question_ids: list[int] | None = None,
 ) -> dict[int, bool]:
     if question_ids is not None and not question_ids:
         return {}
@@ -40,7 +38,7 @@ def _question_attempt_history(
     connection: DatabaseConnection,
     *,
     user_id: int,
-    question_ids: Optional[list[int]] = None,
+    question_ids: list[int] | None = None,
 ) -> dict[int, list[dict[str, Any]]]:
     if question_ids is not None and not question_ids:
         return {}
@@ -81,7 +79,7 @@ def _question_attempt_history(
     return history
 
 
-def _latest_scored_session_id(connection: DatabaseConnection, *, user_id: int) -> Optional[int]:
+def _latest_scored_session_id(connection: DatabaseConnection, *, user_id: int) -> int | None:
     row = connection.execute(
         """
         SELECT qs.id
@@ -97,7 +95,7 @@ def _latest_scored_session_id(connection: DatabaseConnection, *, user_id: int) -
     return int(row["id"]) if row is not None else None
 
 
-def _bucket_step_after_hot_recovery(origin_step: Optional[int], failures_after_bucket_retry: int) -> int:
+def _bucket_step_after_hot_recovery(origin_step: int | None, failures_after_bucket_retry: int) -> int:
     if origin_step is None:
         return 0
     if failures_after_bucket_retry > 1:
@@ -324,7 +322,7 @@ def _schedule_snapshot_from_attempts(
     attempts: list[dict[str, Any]],
     *,
     now: str,
-    latest_scored_session_id: Optional[int] = None,
+    latest_scored_session_id: int | None = None,
 ) -> dict[str, Any]:
     if not attempts:
         return {
@@ -363,7 +361,7 @@ def _question_stats_by_question(
     connection: DatabaseConnection,
     *,
     user_id: int,
-    question_ids: Optional[list[int]] = None,
+    question_ids: list[int] | None = None,
 ) -> dict[int, dict[str, Any]]:
     if question_ids is not None and not question_ids:
         return {}
@@ -463,8 +461,8 @@ def _recent_incorrect_answers_by_question(
 def _logical_bucket_label(
     *,
     bucket: str,
-    interval_step: Optional[int],
-    bucket_origin_step: Optional[int],
+    interval_step: int | None,
+    bucket_origin_step: int | None,
     review_flag: bool,
 ) -> str:
     if review_flag:
@@ -481,7 +479,7 @@ def _logical_bucket_label(
     return SCHEDULE_INTERVALS[step][0]
 
 
-def _iso_timestamp_sort_value(value: Optional[str], *, descending: bool = False) -> float:
+def _iso_timestamp_sort_value(value: str | None, *, descending: bool = False) -> float:
     if not value:
         return float("-inf") if descending else float("inf")
     timestamp = parse_iso_timestamp(value).timestamp()
@@ -555,7 +553,7 @@ def _eligible_quiz_candidates(candidates: list[dict[str, Any]]) -> list[dict[str
     return [candidate for candidate in candidates if not candidate.get("review_flag", False)]
 
 
-def _randomize_quiz_order(rows: list[dict[str, Any]], *, rng: Optional[random.Random] = None) -> list[dict[str, Any]]:
+def _randomize_quiz_order(rows: list[dict[str, Any]], *, rng: random.Random | None = None) -> list[dict[str, Any]]:
     shuffled = list(rows)
     (rng or random).shuffle(shuffled)
     return shuffled

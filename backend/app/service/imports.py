@@ -1,6 +1,4 @@
-from __future__ import annotations
-
-from typing import Any, Optional
+from typing import Any
 
 from ..qml import QMLError, parse_qml_line, qml_lines_from_text
 from ..schemas import QuestionDraftIn
@@ -92,8 +90,8 @@ def _validate_question_import_rows(
         row_number = row["row_number"]
         qml_line = row["qml_line"]
         issues: list[str] = []
-        inferred_type: Optional[str] = None
-        payload: Optional[dict[str, Any]] = None
+        inferred_type: str | None = None
+        payload: dict[str, Any] | None = None
         try:
             payload = parse_qml_line(line=qml_line, module_id=module_id, rank=row_number)
             draft = QuestionDraftIn(**payload)
@@ -154,8 +152,8 @@ def validate_question_import(
     connection: Any,
     *,
     module_id: int,
-    qml_text: Optional[str] = None,
-    rows: Optional[list[dict[str, Any]]] = None,
+    qml_text: str | None = None,
+    rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     try:
         normalized_rows = qml_lines_from_text(qml_text) if qml_text is not None else _normalize_import_rows(rows or [])

@@ -1,8 +1,6 @@
-from __future__ import annotations
-
 import json
 import random
-from typing import Any, Optional
+from typing import Any
 
 from ..database import DatabaseConnection, execute_insert_returning_id, utc_now
 from .catalog import ensure_user_exists, get_scope_module_ids
@@ -32,9 +30,9 @@ def create_quiz_session(
     connection: DatabaseConnection,
     *,
     user_id: int,
-    module_id: Optional[int],
+    module_id: int | None,
     count: int,
-    rng: Optional[random.Random] = None,
+    rng: random.Random | None = None,
 ) -> dict[str, Any]:
     ensure_user_exists(connection, user_id)
     scope_module_ids = get_scope_module_ids(connection, module_id)
@@ -159,11 +157,11 @@ def create_quiz_session(
     }
 
 
-def _unordered_multi_alignment(expected_groups: list[list[str]], normalized_inputs: list[str]) -> list[Optional[int]]:
+def _unordered_multi_alignment(expected_groups: list[list[str]], normalized_inputs: list[str]) -> list[int | None]:
     normalized_expected_groups = [{normalize_text(answer) for answer in group} for group in expected_groups]
     padded_inputs = normalized_inputs[: len(expected_groups)] + [""] * max(0, len(expected_groups) - len(normalized_inputs))
 
-    def match_slots(input_index: int, remaining_indices: list[int]) -> list[Optional[int]]:
+    def match_slots(input_index: int, remaining_indices: list[int]) -> list[int | None]:
         if input_index >= len(padded_inputs):
             return []
 

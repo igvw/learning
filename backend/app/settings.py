@@ -1,8 +1,5 @@
-from __future__ import annotations
-
 import os
 from pathlib import Path
-from typing import Optional, Union
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -41,7 +38,7 @@ def instance_key() -> str:
     return raw_value or "default"
 
 
-def resolve_database_url(explicit: Optional[Union[str, Path]] = None) -> str:
+def resolve_database_url(explicit: str | Path | None = None) -> str:
     raw_value = explicit or os.environ.get("LEARNING_APP_DATABASE_URL")
     if raw_value is None:
         return DEFAULT_DATABASE_URL

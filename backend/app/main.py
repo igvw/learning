@@ -1,8 +1,5 @@
-from __future__ import annotations
-
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Optional, Union
 
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -53,15 +50,15 @@ def _handle_service_error(error: ServiceError) -> None:
     raise HTTPException(status_code=error.status_code, detail=str(error)) from error
 
 
-def _require_user_id(x_user_id: Optional[int]) -> int:
+def _require_user_id(x_user_id: int | None) -> int:
     if x_user_id is None:
         raise HTTPException(status_code=400, detail="X-User-Id header is required.")
     return x_user_id
 
 
 def create_app(
-    database_url: Optional[Union[str, Path]] = None,
-    content_root: Optional[Union[str, Path]] = None,
+    database_url: str | Path | None = None,
+    content_root: str | Path | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -134,7 +131,7 @@ def create_app(
     @app.post("/api/quiz-sessions", response_model=QuizSessionOut)
     def quiz_sessions_create(
         payload: QuizSessionCreateIn,
-        x_user_id: Optional[int] = Header(default=None, alias="X-User-Id"),
+        x_user_id: int | None = Header(default=None, alias="X-User-Id"),
     ) -> dict:
         with get_connection(app.state.database_url) as connection:
             try:
@@ -152,7 +149,7 @@ def create_app(
         session_id: int,
         item_id: int,
         payload: SubmitAnswerIn,
-        x_user_id: Optional[int] = Header(default=None, alias="X-User-Id"),
+        x_user_id: int | None = Header(default=None, alias="X-User-Id"),
     ) -> dict:
         with get_connection(app.state.database_url) as connection:
             try:
@@ -168,9 +165,9 @@ def create_app(
 
     @app.get("/api/stats", response_model=StatsResponseOut)
     def stats(
-        module_id: Optional[int] = None,
+        module_id: int | None = None,
         review_only: bool = Query(default=False),
-        x_user_id: Optional[int] = Header(default=None, alias="X-User-Id"),
+        x_user_id: int | None = Header(default=None, alias="X-User-Id"),
     ) -> dict:
         with get_connection(app.state.database_url) as connection:
             try:
@@ -186,7 +183,7 @@ def create_app(
     @app.post("/api/questions", response_model=QuestionMutationOut)
     def questions_create(
         payload: QuestionDraftIn,
-        x_user_id: Optional[int] = Header(default=None, alias="X-User-Id"),
+        x_user_id: int | None = Header(default=None, alias="X-User-Id"),
     ) -> dict:
         with get_connection(app.state.database_url) as connection:
             try:
@@ -207,7 +204,7 @@ def create_app(
     def questions_review_flag(
         question_id: int,
         payload: QuestionReviewFlagIn,
-        x_user_id: Optional[int] = Header(default=None, alias="X-User-Id"),
+        x_user_id: int | None = Header(default=None, alias="X-User-Id"),
     ) -> dict:
         with get_connection(app.state.database_url) as connection:
             try:

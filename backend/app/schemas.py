@@ -1,13 +1,11 @@
-from __future__ import annotations
-
-from typing import Any, List, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
 
-QuestionType = Literal["single_text", "multi_text", "ordered_multi", "inline_cloze", "computed_text"]
-PriorityMode = Literal["high", "mid", "low"]
-ScheduleBucket = Literal[
+type QuestionType = Literal["single_text", "multi_text", "ordered_multi", "inline_cloze", "computed_text"]
+type PriorityMode = Literal["high", "mid", "low"]
+type ScheduleBucket = Literal[
     "hot0",
     "hot1",
     "hot1_sit_out",
@@ -17,7 +15,7 @@ ScheduleBucket = Literal[
     "unseen",
     "mastery",
 ]
-LogicalBucket = Literal["review", "unseen", "1h", "3h", "6h", "12h", "1d", "3d", "7d", "14d", "mastery"]
+type LogicalBucket = Literal["review", "unseen", "1h", "3h", "6h", "12h", "1d", "3d", "7d", "14d", "mastery"]
 
 class ModuleNodeOut(BaseModel):
     id: int
@@ -30,7 +28,7 @@ class ModuleNodeOut(BaseModel):
 
 class CreateModuleIn(BaseModel):
     title: str = Field(min_length=1, max_length=120)
-    parent_id: Optional[int] = None
+    parent_id: int | None = None
     instruction: str = ""
 
 
@@ -52,7 +50,7 @@ class HealthOut(BaseModel):
 
 
 class QuizSessionCreateIn(BaseModel):
-    module_id: Optional[int] = None
+    module_id: int | None = None
     count: int = Field(default=10, ge=1, le=50)
 
 
@@ -67,16 +65,16 @@ class QuizItemOut(BaseModel):
     question_type: QuestionType
     rank: int
     type_config: dict[str, Any]
-    submitted_answer: Optional[List[str]] = None
-    is_correct: Optional[bool] = None
-    score_earned: Optional[float] = None
+    submitted_answer: list[str] | None = None
+    is_correct: bool | None = None
+    score_earned: float | None = None
     score_possible: float = 1.0
 
 
 class QuizSessionOut(BaseModel):
     id: int
-    module_id: Optional[int] = None
-    completed_at: Optional[str] = None
+    module_id: int | None = None
+    completed_at: str | None = None
     items: list[QuizItemOut]
 
 
@@ -106,7 +104,7 @@ class QuestionDraftIn(BaseModel):
     prompt: str = Field(min_length=1)
     question_type: QuestionType
     rank: int = Field(default=1, ge=1)
-    priority_mode: Optional[PriorityMode] = None
+    priority_mode: PriorityMode | None = None
     accepted_answers: list[list[str]] = Field(min_length=1)
     segments: list[str] = Field(default_factory=list)
 
@@ -172,10 +170,10 @@ class StatsSummaryOut(BaseModel):
 class QuestionScheduleOut(BaseModel):
     bucket: ScheduleBucket
     logical_bucket: LogicalBucket
-    recovery_streak: Optional[int] = None
-    interval_step: Optional[int] = None
-    last_incorrect_at: Optional[str] = None
-    next_due_at: Optional[str] = None
+    recovery_streak: int | None = None
+    interval_step: int | None = None
+    last_incorrect_at: str | None = None
+    next_due_at: str | None = None
     retry_pending: bool = False
 
 
@@ -189,7 +187,7 @@ class QuestionRowOut(BaseModel):
     rank: int
     attempts: int
     correct_percentage: float
-    last_asked_at: Optional[str] = None
+    last_asked_at: str | None = None
     review_flag: bool
     accepted_answers: list[list[str]]
     segments: list[str]
@@ -210,7 +208,7 @@ class QuestionImportRowIn(BaseModel):
 
 class ValidateQuestionImportIn(BaseModel):
     module_id: int
-    qml_text: Optional[str] = None
+    qml_text: str | None = None
     rows: list[QuestionImportRowIn] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -231,14 +229,14 @@ class QuestionImportUnresolvedRowOut(BaseModel):
     row_number: int
     qml_line: str
     issues: list[str]
-    inferred_type: Optional[QuestionType] = None
+    inferred_type: QuestionType | None = None
 
 
 class QuestionImportSkippedRowOut(BaseModel):
     row_number: int
     qml_line: str
     reason: str
-    inferred_type: Optional[QuestionType] = None
+    inferred_type: QuestionType | None = None
 
 
 class QuestionImportResultOut(BaseModel):

@@ -1,12 +1,10 @@
-from __future__ import annotations
-
-from typing import Any, Optional
+from typing import Any
 
 from ..database import DatabaseConnection, execute_insert_returning_id, utc_now
 from .common import NotFoundError, ValidationError, slugify_title, title_from_slug
 
 
-def ensure_module_exists(connection: DatabaseConnection, module_id: Optional[int]) -> Optional[Any]:
+def ensure_module_exists(connection: DatabaseConnection, module_id: int | None) -> Any | None:
     if module_id is None:
         return None
     row = connection.execute(
@@ -43,9 +41,9 @@ def ensure_module_can_accept_children(connection: DatabaseConnection, module_id:
 def ensure_unique_module_slug(
     connection: DatabaseConnection,
     slug: str,
-    parent_id: Optional[int],
+    parent_id: int | None,
     *,
-    exclude_module_id: Optional[int] = None,
+    exclude_module_id: int | None = None,
 ) -> None:
     sibling_rows = connection.execute(
         "SELECT id, slug FROM modules WHERE parent_id IS ?",
@@ -58,7 +56,7 @@ def ensure_unique_module_slug(
             raise ValidationError("A sibling module with this title already exists.")
 
 
-def build_full_slug(connection: DatabaseConnection, slug: str, parent_id: Optional[int]) -> str:
+def build_full_slug(connection: DatabaseConnection, slug: str, parent_id: int | None) -> str:
     if parent_id is None:
         return slug
 
@@ -70,7 +68,7 @@ def create_module(
     connection: DatabaseConnection,
     *,
     title: str,
-    parent_id: Optional[int],
+    parent_id: int | None,
     instruction: str,
 ) -> dict[str, Any]:
     if parent_id is not None:
@@ -126,7 +124,7 @@ def get_module_tree(connection: DatabaseConnection) -> list[dict[str, Any]]:
     return roots
 
 
-def get_scope_module_ids(connection: DatabaseConnection, module_id: Optional[int]) -> list[int]:
+def get_scope_module_ids(connection: DatabaseConnection, module_id: int | None) -> list[int]:
     if module_id is None:
         rows = connection.execute("SELECT id FROM modules ORDER BY id").fetchall()
         return [row["id"] for row in rows]
