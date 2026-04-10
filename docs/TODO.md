@@ -14,8 +14,7 @@
 
 ## Priority 2: Runtime And Deployment
 
-- Upgrade the runtime and tooling from Python 3.12 to Python 3.14
-- Refactor backend code to make good use of newer Python features once the upgrade lands
+- Refactor backend code to make good use of newer Python features now that the 3.14 baseline is in place
 - Host the app on a public URL with HTTPS and production deployment hardening
 - Add backup and restore guidance for hosted deployments
 
@@ -26,7 +25,8 @@
 - Export bundles
 - QML v2: ghost-text syntax for authoring hints and richer examples
 
-## Priority 4: Eternal Slimdown 
+## Priority 4: Eternal Slimdown
+
 Do this after any major piece of feature additions
 
 - Slim down data model further

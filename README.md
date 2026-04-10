@@ -41,18 +41,7 @@ npm --prefix frontend test -- --run
 npm --prefix frontend run build
 ```
 
-Backend:
-
-```bash
-./.venv/bin/python -m py_compile backend/app/database.py backend/app/main.py backend/app/cli.py backend/app/services.py backend/app/service/*.py
-```
-
-Optional Postgres-backed backend integration tests:
-
-```bash
-LEARNING_APP_TEST_DATABASE_URL=postgresql://learning:learning@127.0.0.1:5432/learning_test \
-  ./.venv/bin/python -m unittest discover -s tests/backend -v
-```
+Backend local dev/test instructions are in [docs/development.md](docs/development.md).
 
 ## Runtime Notes
 
@@ -60,6 +49,7 @@ LEARNING_APP_TEST_DATABASE_URL=postgresql://learning:learning@127.0.0.1:5432/lea
 - The release/install flow uses `docker-compose.deploy.yml` and pulls `ghcr.io/igvw/learning-app`.
 - The app image serves the built frontend from FastAPI.
 - The app uses PostgreSQL only.
+- Python 3.14 is enforced through Docker and CI.
 - Seed content is imported on boot by default.
 - Set `LEARNING_APP_SEED_ON_BOOT=false` if you want to manage seed import manually.
 - Set `LEARNING_APP_CORS_ORIGINS` only when the frontend is hosted on a different origin.
@@ -73,5 +63,6 @@ Supporting docs:
 - [docs/question-markup.md](docs/question-markup.md)
 - [docs/question-markup-llm-prompt.md](docs/question-markup-llm-prompt.md)
 - [docs/spaced-repetition.md](docs/spaced-repetition.md)
+- [docs/development.md](docs/development.md)
 - [docs/deployment.md](docs/deployment.md)
 - [docs/TODO.md](docs/TODO.md)

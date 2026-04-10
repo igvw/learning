@@ -13,6 +13,7 @@ For supporting docs, see:
 - [Spaced Repetition](spaced-repetition.md)
 - [Question Markup DSL](question-markup.md)
 - [Question Markup LLM Prompt](question-markup-llm-prompt.md)
+- [Development](development.md)
 - [Deployment](deployment.md)
 - [TODO](TODO.md)
 
