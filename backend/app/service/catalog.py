@@ -93,6 +93,47 @@ def create_module(
     }
 
 
+def update_module(
+    connection: DatabaseConnection,
+    *,
+    module_id: int,
+    title: str,
+    instruction: str,
+) -> dict[str, Any]:
+    module = ensure_module_exists(connection, module_id)
+    child_count = connection.execute(
+        "SELECT COUNT(*) AS child_count FROM modules WHERE parent_id = ?",
+        (module_id,),
+    ).fetchone()["child_count"]
+    if child_count:
+        raise ValidationError("Only leaf modules can be renamed.")
+
+    slug = slugify_title(title)
+    parent_row = connection.execute(
+        "SELECT parent_id FROM modules WHERE id = ?",
+        (module_id,),
+    ).fetchone()
+    parent_id = parent_row["parent_id"]
+    ensure_unique_module_slug(connection, slug, parent_id, exclude_module_id=module_id)
+    full_slug = build_full_slug(connection, slug, parent_id)
+    cleaned_instruction = instruction.strip()
+    connection.execute(
+        """
+        UPDATE modules
+        SET slug = ?, full_slug = ?, instruction = ?
+        WHERE id = ?
+        """,
+        (slug, full_slug, cleaned_instruction, module_id),
+    )
+    return {
+        "id": module_id,
+        "title": title_from_slug(slug),
+        "slug": slug,
+        "full_slug": full_slug,
+        "instruction": cleaned_instruction,
+    }
+
+
 def get_module_tree(connection: DatabaseConnection) -> list[dict[str, Any]]:
     rows = connection.execute(
         """

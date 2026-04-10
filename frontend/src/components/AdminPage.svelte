@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { CreateModulePayload, ModuleNode, User } from '../lib/types';
+  import type { CreateModulePayload, ModuleNode, UpdateModulePayload, User } from '../lib/types';
 
   type FlatModule = {
     id: number;
@@ -20,6 +20,9 @@
   export let onCreateModule: (payload: CreateModulePayload) => Promise<ModuleNode> = async () => {
     throw new Error('Module creation handler is not configured.');
   };
+  export let onUpdateModule: (moduleId: number, payload: UpdateModulePayload) => Promise<ModuleNode> = async () => {
+    throw new Error('Module update handler is not configured.');
+  };
   export let onOpenImport: (moduleId: number) => void = () => {};
 
   let userHandle = '';
@@ -28,13 +31,20 @@
   let userError = '';
   let userSuccess = '';
 
-  let title = '';
-  let parentId = '';
+  let createTitle = '';
+  let createParentId = '';
   let importModuleId: number | string | null = null;
-  let instruction = '';
-  let saving = false;
-  let formError = '';
-  let formSuccess = '';
+  let createInstruction = '';
+  let createSaving = false;
+  let createError = '';
+  let createSuccess = '';
+
+  let editTitle = '';
+  let editInstruction = '';
+  let editSaving = false;
+  let editError = '';
+  let editSuccess = '';
+  let syncedLeafSignature = '';
 
   function flattenModules(nodes: ModuleNode[], depth = 0): FlatModule[] {
     return nodes.flatMap((node) => [
@@ -76,39 +86,66 @@
   }
 
   async function handleCreateModule(): Promise<void> {
-    formError = '';
-    formSuccess = '';
-    saving = true;
+    createError = '';
+    createSuccess = '';
+    createSaving = true;
     try {
-      if (!title.trim()) {
+      if (!createTitle.trim()) {
         throw new Error('Module title is required.');
       }
       const created = await onCreateModule({
-        title: title.trim(),
-        parent_id: parentId ? Number(parentId) : null,
-        instruction: instruction.trim()
+        title: createTitle.trim(),
+        parent_id: createParentId ? Number(createParentId) : null,
+        instruction: createInstruction.trim()
       });
-      formSuccess = `Module path ready: ${created.full_slug}.`;
-      title = '';
-      instruction = '';
+      createSuccess = `Module path ready: ${created.full_slug}.`;
+      createTitle = '';
+      createInstruction = '';
     } catch (error) {
-      formError = error instanceof Error ? error.message : 'Unable to create this module.';
+      createError = error instanceof Error ? error.message : 'Unable to create this module.';
     } finally {
-      saving = false;
+      createSaving = false;
+    }
+  }
+
+  async function handleUpdateModule(): Promise<void> {
+    editError = '';
+    editSuccess = '';
+    editSaving = true;
+    try {
+      if (!selectedLeafModule) {
+        throw new Error('Select a leaf module before updating it.');
+      }
+      if (!editTitle.trim()) {
+        throw new Error('Module title is required.');
+      }
+      const updated = await onUpdateModule(selectedLeafModule.id, {
+        title: editTitle.trim(),
+        instruction: editInstruction.trim()
+      });
+      editSuccess = `Module ready: ${updated.full_slug}.`;
+    } catch (error) {
+      editError = error instanceof Error ? error.message : 'Unable to update this module.';
+    } finally {
+      editSaving = false;
     }
   }
 
   function handleOpenImport(): void {
-    formError = '';
-    formSuccess = '';
+    createError = '';
+    createSuccess = '';
+    editError = '';
+    editSuccess = '';
     if (importModuleId === null) {
-      formError = 'Select a leaf module before importing.';
+      createError = 'Select a leaf module before importing.';
       return;
     }
     onOpenImport(Number(importModuleId));
   }
 
   $: flatModules = flattenModules(modules);
+  $: selectedModule = flatModules.find((module) => module.id === selectedModuleId) ?? null;
+  $: selectedLeafModule = selectedModule?.isLeaf ? selectedModule : null;
   $: selectedImportModule = flatModules.find((module) => module.id === Number(importModuleId)) ?? null;
   $: if (flatModules.length > 0 && !flatModules.some((module) => module.id === Number(importModuleId))) {
     importModuleId =
@@ -118,6 +155,18 @@
   }
   $: if (flatModules.length === 0) {
     importModuleId = null;
+  }
+  $: {
+    const nextLeafSignature = selectedLeafModule
+      ? `${selectedLeafModule.id}:${selectedLeafModule.title}:${selectedLeafModule.instruction}`
+      : '';
+    if (nextLeafSignature !== syncedLeafSignature) {
+      syncedLeafSignature = nextLeafSignature;
+      editTitle = selectedLeafModule?.title ?? '';
+      editInstruction = selectedLeafModule?.instruction ?? '';
+      editError = '';
+      editSuccess = '';
+    }
   }
 </script>
 
@@ -129,29 +178,89 @@
     </div>
   </div>
 
-  {#if formError}
-    <div class="banner error">{formError}</div>
-  {/if}
-
-  {#if formSuccess}
-    <div class="banner success">{formSuccess}</div>
-  {/if}
-
   <div class="admin-stack">
     <article class="panel admin-bar-panel">
       <div class="panel-header">
-        <div><h3>Create Module Path</h3></div>
+        <div><h3>Module</h3></div>
       </div>
 
+      {#if editError}
+        <div class="banner error">{editError}</div>
+      {/if}
+
+      {#if editSuccess}
+        <div class="banner success">{editSuccess}</div>
+      {/if}
+
       <div class="admin-bar-form module-bar-form">
+        <div class="admin-wide-field">
+          <h4>Selected Leaf Module</h4>
+          {#if selectedLeafModule}
+            <p class="muted-copy">
+              Renaming this leaf keeps its questions and progress in place. Current path:
+              <code>{selectedLeafModule.full_slug}</code>
+            </p>
+          {:else if selectedModule}
+            <p class="muted-copy">
+              <code>{selectedModule.full_slug}</code> has child modules. Select a leaf module from the menu before renaming it.
+            </p>
+          {:else}
+            <p class="muted-copy">Select a leaf module from the module menu before renaming it or updating its instruction.</p>
+          {/if}
+        </div>
+
+        <label class="field">
+          <span>Module title</span>
+          <input type="text" bind:value={editTitle} placeholder="nouns_to_english" disabled={!selectedLeafModule || editSaving} />
+        </label>
+
+        <label class="field admin-wide-field">
+          <span>Module instruction</span>
+          <textarea
+            rows="4"
+            bind:value={editInstruction}
+            placeholder="Translate each Norwegian noun into English."
+            disabled={!selectedLeafModule || editSaving}
+          ></textarea>
+        </label>
+
+        <div class="admin-action-slot">
+          <button
+            class="primary-button"
+            type="button"
+            disabled={!selectedLeafModule || editSaving}
+            on:click={() => void handleUpdateModule()}
+          >
+            {editSaving ? 'Saving...' : 'Save Module'}
+          </button>
+        </div>
+      </div>
+
+      <div class="admin-bar-notes">
+        <p class="muted-copy">Leaf module edits only rename the selected leaf segment. Parent paths stay unchanged.</p>
+      </div>
+
+      {#if createError}
+        <div class="banner error">{createError}</div>
+      {/if}
+
+      {#if createSuccess}
+        <div class="banner success">{createSuccess}</div>
+      {/if}
+
+      <div class="admin-bar-form module-bar-form">
+        <div class="admin-wide-field">
+          <h4>Create Module</h4>
+        </div>
+
         <label class="field">
           <span>Module path</span>
-          <input type="text" bind:value={title} placeholder="norwegian/vocabulary/nouns_to_english" />
+          <input type="text" bind:value={createTitle} placeholder="norwegian/vocabulary/nouns_to_english" />
         </label>
 
         <label class="field">
           <span>Parent module</span>
-          <select bind:value={parentId}>
+          <select bind:value={createParentId}>
             <option value="">Top level</option>
             {#each flatModules as module}
               <option value={module.id}>
@@ -162,17 +271,22 @@
         </label>
 
         <label class="field admin-wide-field">
-          <span>Instruction</span>
+          <span>Create instruction</span>
           <textarea
             rows="4"
-            bind:value={instruction}
+            bind:value={createInstruction}
             placeholder="Translate each Norwegian noun into English."
           ></textarea>
         </label>
 
         <div class="admin-action-slot">
-          <button class="primary-button" type="button" disabled={saving} on:click={() => void handleCreateModule()}>
-            {saving ? 'Creating...' : 'Create Module'}
+          <button
+            class="primary-button"
+            type="button"
+            disabled={createSaving}
+            on:click={() => void handleCreateModule()}
+          >
+            {createSaving ? 'Creating...' : 'Create Module'}
           </button>
         </div>
       </div>

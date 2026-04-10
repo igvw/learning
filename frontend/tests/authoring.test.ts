@@ -1,6 +1,6 @@
 import './test-support';
 
-import { render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -149,7 +149,7 @@ describe('EditorDrawer', () => {
 });
 
 describe('AdminPage', () => {
-  it('creates users from admin, creates a module, and offers leaf-module import', async () => {
+  it('creates users from admin, updates the selected leaf module, creates a module, and offers leaf-module import', async () => {
     const user = userEvent.setup();
     const createUserSpy = vi.fn().mockResolvedValue({
       id: 9,
@@ -163,6 +163,14 @@ describe('AdminPage', () => {
       slug: 'norwegian',
       full_slug: 'norwegian',
       instruction: 'Translate the Norwegian term into English.',
+      children: []
+    });
+    const updateSpy = vi.fn().mockResolvedValue({
+      id: 2,
+      title: 'Safety Checks',
+      slug: 'safety_checks',
+      full_slug: 'nursing/safety_checks',
+      instruction: 'List each safety check before continuing.',
       children: []
     });
     const openImportSpy = vi.fn();
@@ -202,21 +210,39 @@ describe('AdminPage', () => {
         selectedModuleId: 2,
         onCreateUser: createUserSpy,
         onCreateModule: createSpy,
+        onUpdateModule: updateSpy,
         onOpenImport: openImportSpy
       }
     });
 
     expect(screen.queryByText('Current modules')).toBeNull();
-    expect(screen.getByRole('heading', { name: 'Create Module Path' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Module' })).toBeTruthy();
+    expect(screen.getByText('Selected Leaf Module')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Create Module' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Create User' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Import QML' })).toBeTruthy();
     expect(screen.queryByText('Users')).toBeNull();
     expect(screen.queryByText('Question import')).toBeNull();
     expect(screen.getAllByText(/Imports will create questions directly in/).length).toBeGreaterThan(0);
 
+    expect(screen.getByRole('button', { name: 'Save Module' }).className).toContain('primary-button');
     expect(screen.getByRole('button', { name: 'Create Module' }).className).toContain('primary-button');
     expect(screen.getByRole('button', { name: 'Create User' }).className).toContain('primary-button');
     expect(screen.getByRole('button', { name: 'Import QML' }).className).toContain('primary-button');
+
+    const titleInput = screen.getByDisplayValue('Checks');
+    await user.clear(titleInput);
+    await user.type(titleInput, 'Safety Checks');
+    const editInstruction = screen.getByDisplayValue('List the safety checks in order.');
+    await user.clear(editInstruction);
+    await user.type(editInstruction, 'List each safety check before continuing.');
+    await user.click(screen.getByRole('button', { name: 'Save Module' }));
+
+    expect(updateSpy).toHaveBeenCalledWith(2, {
+      title: 'Safety Checks',
+      instruction: 'List each safety check before continuing.'
+    });
+    expect(await screen.findByText('Module ready: nursing/safety_checks.')).toBeTruthy();
 
     await user.type(screen.getByPlaceholderText('ignazio'), 'ignazio');
     await user.type(screen.getByPlaceholderText('Ignazio'), 'Ignazio');
@@ -234,10 +260,7 @@ describe('AdminPage', () => {
 
     await user.type(screen.getByPlaceholderText('norwegian/vocabulary/nouns_to_english'), 'Vocabulary');
     await user.selectOptions(selects[0], '1');
-    await user.type(
-      screen.getByPlaceholderText('Translate each Norwegian noun into English.'),
-      'Use the Norwegian term as the prompt.'
-    );
+    await user.type(screen.getByLabelText('Create instruction'), 'Use the Norwegian term as the prompt.');
     await user.click(screen.getByRole('button', { name: 'Create Module' }));
 
     expect(createSpy).toHaveBeenCalledWith({
@@ -265,6 +288,11 @@ describe('ImportDrawer', () => {
     };
     const result: QuestionImportResult = {
       ready_to_commit: false,
+      rows: [
+        { row_number: 1, qml_line: 'hund [dog]' },
+        { row_number: 2, qml_line: 'ordered: stage one' },
+        { row_number: 4, qml_line: 'ordered: stage alpha' }
+      ],
       valid_row_count: 2,
       skipped_duplicate_count: 1,
       skipped_rows: [
@@ -278,6 +306,7 @@ describe('ImportDrawer', () => {
       report_text: 'row 2 | needs fix | Question lines cannot be blank. | ',
       committed: false,
       committed_count: 0,
+      relocation_rows: [],
       unresolved_rows: [
         {
           row_number: 2,
@@ -336,6 +365,10 @@ describe('ImportDrawer', () => {
       result: {
         ...result,
         ready_to_commit: true,
+        rows: [
+          { row_number: 1, qml_line: 'hund [dog]' },
+          { row_number: 2, qml_line: 'ordered: stage one ; stage two' }
+        ],
         valid_row_count: 3,
         skipped_duplicate_count: 1,
         skipped_rows: result.skipped_rows,
@@ -368,5 +401,83 @@ describe('ImportDrawer', () => {
     });
 
     expect(screen.getByRole('button', { name: 'Start Import' })).toBeTruthy();
+  });
+
+  it('shows relocation review rows and requires revalidation after editing merge QML', async () => {
+    const user = userEvent.setup();
+    const revalidateSpy = vi.fn().mockResolvedValue(undefined);
+    const commitSpy = vi.fn().mockResolvedValue(undefined);
+    const moduleNode: ModuleNode = {
+      id: 20,
+      title: 'target',
+      slug: 'target',
+      full_slug: 'norwegian/vocabulary/target',
+      instruction: 'Target module.',
+      children: []
+    };
+    const result: QuestionImportResult = {
+      ready_to_commit: true,
+      rows: [{ row_number: 3, qml_line: 'hund [dog | canine | pooch]' }],
+      valid_row_count: 1,
+      skipped_duplicate_count: 0,
+      skipped_rows: [],
+      unresolved_rows: [],
+      relocation_rows: [
+        {
+          row_number: 3,
+          qml_line: 'hund [dog | canine | pooch]',
+          target_module_full_slug: 'norwegian/vocabulary/target',
+          status: 'merge',
+          requires_edit: true,
+          ready_without_edit: false,
+          imported_answer_blocks: ['dog | canine | pooch'],
+          matched_questions: [
+            {
+              question_id: 7,
+              module_id: 4,
+              module_full_slug: 'norwegian/vocabulary/source_a',
+              qml_line: 'hund [dog]',
+              answer_blocks: ['dog']
+            },
+            {
+              question_id: 8,
+              module_id: 5,
+              module_full_slug: 'norwegian/vocabulary/source_b',
+              qml_line: 'hund [canine]',
+              answer_blocks: ['canine']
+            }
+          ]
+        }
+      ],
+      report_text: 'row 3 | merge | norwegian/vocabulary/source_a -> norwegian/vocabulary/source_b -> norwegian/vocabulary/target | hund [dog | canine | pooch]',
+      committed: false,
+      committed_count: 0
+    };
+
+    render(ImportDrawer, {
+      props: {
+        open: true,
+        moduleNode,
+        result,
+        busy: false,
+        onClose: vi.fn(),
+        onStartImport: vi.fn(),
+        onRevalidate: revalidateSpy,
+        onCommit: commitSpy
+      }
+    });
+
+    expect(screen.getByText('Relocations and merge review')).toBeTruthy();
+    expect(screen.getByText('Merge duplicates')).toBeTruthy();
+    expect(screen.getByText('dog')).toBeTruthy();
+    expect(screen.getByText('canine')).toBeTruthy();
+
+    const mergeInput = screen.getByDisplayValue('hund [dog | canine | pooch]') as HTMLInputElement;
+    await fireEvent.input(mergeInput, { target: { value: 'hund [dog | canine]' } });
+
+    expect((screen.getByRole('button', { name: 'Commit Import' }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(screen.getByRole('button', { name: 'Revalidate Rows' }));
+    expect(revalidateSpy).toHaveBeenCalledWith([{ row_number: 3, qml_line: 'hund [dog | canine]' }]);
+    expect(commitSpy).not.toHaveBeenCalled();
   });
 });

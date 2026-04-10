@@ -11,6 +11,7 @@ import type {
   QuizSession,
   StatsResponse,
   SubmitAnswerResult,
+  UpdateModulePayload,
   User
 } from './types';
 
@@ -69,6 +70,13 @@ export function createUser(payload: CreateUserPayload): Promise<User> {
 export function createModule(payload: CreateModulePayload): Promise<ModuleNode> {
   return request<ModuleNode>('/api/modules', {
     method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateModule(moduleId: number, payload: UpdateModulePayload): Promise<ModuleNode> {
+  return request<ModuleNode>(`/api/modules/${moduleId}`, {
+    method: 'PATCH',
     body: JSON.stringify(payload)
   });
 }

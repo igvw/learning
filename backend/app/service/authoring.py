@@ -254,6 +254,126 @@ def set_question_review_flag(
     return {"question_id": question_id, "review_flag": review_flag}
 
 
+def _question_row(connection: DatabaseConnection, question_id: int) -> Any:
+    return connection.execute(
+        """
+        SELECT id, module_id, rank
+        FROM questions
+        WHERE id = ?
+        """,
+        (question_id,),
+    ).fetchone()
+
+
+def _session_item_merge_priority(row: dict[str, Any]) -> tuple[int, float, int]:
+    answered = row["score_earned"] is not None and row["score_possible"] is not None
+    if answered and row["score_possible"]:
+        accuracy = float(row["score_earned"]) / float(row["score_possible"])
+    else:
+        accuracy = 1.0
+    return (
+        0 if answered else 1,
+        accuracy,
+        0 if row.get("submitted_answer_json") else 1,
+    )
+
+
+def _merge_session_item_rows(existing_row: dict[str, Any], incoming_row: dict[str, Any]) -> dict[str, Any]:
+    preferred = min((existing_row, incoming_row), key=_session_item_merge_priority)
+    merged = dict(preferred)
+    for key in ("resolved_prompt", "resolved_type_config_json", "submitted_answer_json"):
+        if not merged.get(key):
+            merged[key] = existing_row.get(key) or incoming_row.get(key)
+    return merged
+
+
+def merge_question_progress(
+    connection: DatabaseConnection,
+    *,
+    survivor_question_id: int,
+    merged_question_ids: list[int],
+) -> None:
+    for merged_question_id in merged_question_ids:
+        session_rows = connection.execute(
+            """
+            SELECT
+                session_id,
+                question_id,
+                score_earned,
+                score_possible,
+                resolved_prompt,
+                resolved_type_config_json,
+                submitted_answer_json
+            FROM quiz_session_items
+            WHERE question_id = ?
+            ORDER BY session_id ASC
+            """,
+            (merged_question_id,),
+        ).fetchall()
+        for row in session_rows:
+            existing = connection.execute(
+                """
+                SELECT
+                    session_id,
+                    question_id,
+                    score_earned,
+                    score_possible,
+                    resolved_prompt,
+                    resolved_type_config_json,
+                    submitted_answer_json
+                FROM quiz_session_items
+                WHERE session_id = ? AND question_id = ?
+                """,
+                (row["session_id"], survivor_question_id),
+            ).fetchone()
+            if existing is None:
+                connection.execute(
+                    """
+                    UPDATE quiz_session_items
+                    SET question_id = ?
+                    WHERE session_id = ? AND question_id = ?
+                    """,
+                    (survivor_question_id, row["session_id"], merged_question_id),
+                )
+                continue
+
+            merged_item = _merge_session_item_rows(dict(existing), dict(row))
+            connection.execute(
+                """
+                UPDATE quiz_session_items
+                SET
+                    score_earned = ?,
+                    score_possible = ?,
+                    resolved_prompt = ?,
+                    resolved_type_config_json = ?,
+                    submitted_answer_json = ?
+                WHERE session_id = ? AND question_id = ?
+                """,
+                (
+                    merged_item["score_earned"],
+                    merged_item["score_possible"],
+                    merged_item["resolved_prompt"],
+                    merged_item["resolved_type_config_json"],
+                    merged_item["submitted_answer_json"],
+                    row["session_id"],
+                    survivor_question_id,
+                ),
+            )
+            connection.execute(
+                "DELETE FROM quiz_session_items WHERE session_id = ? AND question_id = ?",
+                (row["session_id"], merged_question_id),
+            )
+
+
+def delete_question_and_close_rank_gap(connection: DatabaseConnection, question_id: int) -> None:
+    row = _question_row(connection, question_id)
+    if row is None:
+        return
+    module_id = int(row["module_id"])
+    connection.execute("DELETE FROM questions WHERE id = ?", (question_id,))
+    _remove_rank_gap(connection, module_id=module_id, exclude_question_id=question_id)
+
+
 def _existing_prompt_keys(connection: DatabaseConnection, module_id: int) -> set[str]:
     existing_rows = _module_question_rows(connection, module_id)
     return {

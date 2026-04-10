@@ -95,4 +95,5 @@ class PostgresBackendTestCase(unittest.TestCase):
         reset_test_database(TEST_DATABASE_URL)
         with get_connection(TEST_DATABASE_URL) as connection:
             sync_seed_content(connection, Path(CONTENT_DIR))
+        self.database_url = TEST_DATABASE_URL
         self.client = TestClient(create_app(database_url=TEST_DATABASE_URL, content_root=CONTENT_DIR))

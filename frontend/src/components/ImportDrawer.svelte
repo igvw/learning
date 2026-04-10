@@ -17,7 +17,7 @@
 
   let qmlText = '';
   let pendingRows: QuestionImportRowPayload[] = [];
-  let unresolvedDrafts: Record<number, string> = {};
+  let rowDrafts: Record<number, string> = {};
   let localMarker = '';
 
   function isLeaf(node: ModuleNode | null): boolean {
@@ -42,8 +42,8 @@
   }
 
   function updateQmlLine(rowNumber: number, value: string): void {
-    unresolvedDrafts = {
-      ...unresolvedDrafts,
+    rowDrafts = {
+      ...rowDrafts,
       [rowNumber]: value
     };
     pendingRows = pendingRows.map((row) => (row.row_number === rowNumber ? { ...row, qml_line: value } : row));
@@ -56,9 +56,9 @@
 
   async function handleDiscardRow(rowNumber: number): Promise<void> {
     pendingRows = pendingRows.filter((row) => row.row_number !== rowNumber);
-    const nextDrafts = { ...unresolvedDrafts };
+    const nextDrafts = { ...rowDrafts };
     delete nextDrafts[rowNumber];
-    unresolvedDrafts = nextDrafts;
+    rowDrafts = nextDrafts;
     await onRevalidate(pendingRows);
   }
 
@@ -66,26 +66,45 @@
     await onRevalidate(pendingRows);
   }
 
-  $: marker = `${open}:${result?.unresolved_rows.map((row) => `${row.row_number}:${row.qml_line}`).join('|') ?? 'new'}`;
+  function isEditableRelocationRow(row: QuestionImportResult['relocation_rows'][number]): boolean {
+    return row.requires_edit || row.status === 'merge';
+  }
+
+  function currentRowValue(rowNumber: number, fallback: string): string {
+    return rowDrafts[rowNumber] ?? fallback;
+  }
+
+  function sameRows(left: QuestionImportRowPayload[], right: QuestionImportRowPayload[]): boolean {
+    if (left.length !== right.length) {
+      return false;
+    }
+    return left.every((row, index) => row.row_number === right[index].row_number && row.qml_line === right[index].qml_line);
+  }
+
+  $: marker =
+    `${open}:${result?.rows.map((row) => `${row.row_number}:${row.qml_line}`).join('|') ?? 'new'}:${result?.relocation_rows
+      .map((row) => `${row.row_number}:${row.status}`)
+      .join('|') ?? 'none'}`;
   $: if (marker !== localMarker && open) {
     localMarker = marker;
-    unresolvedDrafts = Object.fromEntries((result?.unresolved_rows ?? []).map((row) => [row.row_number, row.qml_line]));
     if (!result) {
       qmlText = '';
       pendingRows = [];
+      rowDrafts = {};
     } else if (pendingRows.length === 0) {
-      pendingRows = [
-        ...result.skipped_rows.map((row) => ({
-          row_number: row.row_number,
-          qml_line: row.qml_line
-        })),
-        ...result.unresolved_rows.map((row) => ({
-          row_number: row.row_number,
-          qml_line: row.qml_line
-        }))
-      ].sort((left, right) => left.row_number - right.row_number);
+      pendingRows = [...result.rows].sort((left, right) => left.row_number - right.row_number);
     }
+    rowDrafts = Object.fromEntries(
+      [
+        ...(result?.unresolved_rows ?? []),
+        ...(result?.relocation_rows ?? [])
+      ].map((row) => [row.row_number, row.qml_line])
+    );
   }
+  $: hasPendingEdits = Boolean(result && !sameRows(pendingRows, result.rows));
+  $: showRevalidateButton =
+    Boolean(result) &&
+    (result.unresolved_rows.length > 0 || result.relocation_rows.some((row) => isEditableRelocationRow(row)) || hasPendingEdits);
 </script>
 
 {#if open}
@@ -184,7 +203,7 @@
                           <input
                             class="qml-line-input"
                             type="text"
-                            value={unresolvedDrafts[row.row_number] ?? row.qml_line}
+                            value={currentRowValue(row.row_number, row.qml_line)}
                             on:input={(event) => updateQmlLine(row.row_number, (event.currentTarget as HTMLInputElement).value)}
                           />
                           <p class="qml-row-issues">{row.issues.join(' | ')}</p>
@@ -197,13 +216,75 @@
                 <p class="muted-copy">No unresolved rows remain. Commit when you are ready.</p>
               {/if}
 
+              {#if result.relocation_rows.length > 0}
+                <div class="field relocation-field">
+                  <span>Relocations and merge review</span>
+                  <div class="relocation-list">
+                    {#each result.relocation_rows as row (row.row_number)}
+                      <section class="relocation-card">
+                        <div class="relocation-header">
+                          <div>
+                            <p class="eyebrow">Row {row.row_number}</p>
+                            <h4>{row.status === 'move' ? 'Pure move' : row.status === 'revise' ? 'Move and revise' : 'Merge duplicates'}</h4>
+                          </div>
+                          <span class={`relocation-badge status-${row.status}`}>
+                            {row.status === 'move' ? 'Move' : row.status === 'revise' ? 'Revise' : 'Merge'}
+                          </span>
+                        </div>
+
+                        <div class="relocation-columns">
+                          <div class="relocation-column">
+                            <p class="muted-copy">Existing question{row.matched_questions.length === 1 ? '' : 's'}</p>
+                            {#each row.matched_questions as matched (matched.question_id)}
+                              <article class="relocation-detail-card">
+                                <p class="muted-copy"><code>{matched.module_full_slug}</code></p>
+                                <code class="qml-line-preview">{matched.qml_line}</code>
+                                <div class="answer-block-list">
+                                  {#each matched.answer_blocks as block}
+                                    <span class="answer-block-chip">{block}</span>
+                                  {/each}
+                                </div>
+                              </article>
+                            {/each}
+                          </div>
+
+                          <div class="relocation-column">
+                            <p class="muted-copy">Imported / final target in <code>{row.target_module_full_slug}</code></p>
+                            {#if isEditableRelocationRow(row)}
+                              <input
+                                class="qml-line-input"
+                                type="text"
+                                value={currentRowValue(row.row_number, row.qml_line)}
+                                on:input={(event) => updateQmlLine(row.row_number, (event.currentTarget as HTMLInputElement).value)}
+                              />
+                            {:else}
+                              <code class="qml-line-preview">{row.qml_line}</code>
+                            {/if}
+                            <div class="answer-block-list">
+                              {#each row.imported_answer_blocks as block}
+                                <span class="answer-block-chip new">{block}</span>
+                              {/each}
+                            </div>
+                            {#if row.ready_without_edit}
+                              <p class="muted-copy">Reported for visibility only. No edit is required.</p>
+                            {:else if isEditableRelocationRow(row)}
+                              <p class="muted-copy">Edit the final QML here if you want to refine the imported answer block before commit.</p>
+                            {/if}
+                          </div>
+                        </div>
+                      </section>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+
               <div class="drawer-actions">
-                {#if result.unresolved_rows.length > 0}
+                {#if showRevalidateButton}
                   <button class="secondary-button" type="button" disabled={busy} on:click={() => void handleRevalidate()}>
                     {busy ? 'Checking...' : 'Revalidate Rows'}
                   </button>
                 {/if}
-                <button class="primary-button" type="button" disabled={busy || !result.ready_to_commit} on:click={() => void onCommit(pendingRows)}>
+                <button class="primary-button" type="button" disabled={busy || !result.ready_to_commit || hasPendingEdits} on:click={() => void onCommit(pendingRows)}>
                   {busy ? 'Saving...' : 'Commit Import'}
                 </button>
               </div>

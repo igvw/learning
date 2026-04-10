@@ -23,6 +23,7 @@ class ServiceFacadeUnitTests(unittest.TestCase):
             "set_question_review_flag",
             "submit_answer",
             "sync_seed_content",
+            "update_module",
             "validate_question_import",
         }
 

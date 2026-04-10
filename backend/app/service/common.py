@@ -31,8 +31,8 @@ def normalize_text(value: str) -> str:
 
 
 def title_from_slug(slug: str) -> str:
-    value = slug.replace("_", " ").strip()
-    return value[:1].upper() + value[1:] if value else ""
+    words = [word for word in slug.replace("_", " ").strip().split() if word]
+    return " ".join(word[:1].upper() + word[1:] for word in words)
 
 
 def parse_iso_timestamp(value: str) -> datetime:
@@ -51,6 +51,10 @@ def is_full_credit(score_earned: float | None, score_possible: float | None) -> 
 
 def json_dumps(value: Any) -> str:
     return json.dumps(value, separators=(",", ":"), sort_keys=True)
+
+
+def escape_qml_text(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]").replace("{", "\\{").replace("}", "\\}").replace("|", "\\|").replace(",", "\\,")
 
 
 def render_inline_segments(segments: list[str]) -> str:
@@ -76,6 +80,10 @@ def canonical_answers(type_config: dict[str, Any]) -> list[str]:
     return [" / ".join(group) for group in type_config.get("accepted_answers", [])]
 
 
+def answer_blocks(type_config: dict[str, Any]) -> list[str]:
+    return [" | ".join(group) for group in type_config.get("accepted_answers", [])]
+
+
 def score_possible(type_config: dict[str, Any]) -> float:
     return 1.0
 
@@ -91,6 +99,32 @@ def question_prompt_key(question_type: str, prompt: str, type_config: dict[str, 
     if question_type == "inline_cloze":
         return normalize_text(render_inline_segments(type_config.get("segments", [])))
     return normalize_text(prompt)
+
+
+def question_identity_key(question_type: str, prompt: str, type_config: dict[str, Any]) -> tuple[str, str]:
+    return question_type, question_prompt_key(question_type, prompt, type_config)
+
+
+def build_qml_line(question_type: str, prompt: str, type_config: dict[str, Any]) -> str:
+    accepted_answers = type_config.get("accepted_answers", [])
+    if question_type in {"single_text", "computed_text"}:
+        content = " | ".join(escape_qml_text(value) for value in accepted_answers[0])
+        return f"{escape_qml_text(prompt.strip())} [{content}]"
+    if question_type == "multi_text":
+        content = ", ".join(" | ".join(escape_qml_text(value) for value in group) for group in accepted_answers)
+        return f"{escape_qml_text(prompt.strip())} {{{content}}}"
+    if question_type == "ordered_multi":
+        content = ", ".join(" | ".join(escape_qml_text(value) for value in group) for group in accepted_answers)
+        return f"{escape_qml_text(prompt.strip())} [{content}]"
+
+    segments = type_config.get("segments", [])
+    line_parts: list[str] = []
+    for index, group in enumerate(accepted_answers):
+        line_parts.append(escape_qml_text(segments[index] if index < len(segments) else ""))
+        line_parts.append(f"[{' | '.join(escape_qml_text(value) for value in group)}]")
+    if len(segments) > len(accepted_answers):
+        line_parts.append(escape_qml_text(segments[-1]))
+    return "".join(line_parts)
 
 
 def resolved_runtime(

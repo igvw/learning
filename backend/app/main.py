@@ -22,6 +22,7 @@ from .schemas import (
     StatsResponseOut,
     SubmitAnswerIn,
     SubmitAnswerOut,
+    UpdateModuleIn,
     UserCreateIn,
     UserOut,
     ValidateQuestionImportIn,
@@ -41,6 +42,7 @@ from .services import (
     set_question_review_flag,
     submit_answer,
     sync_seed_content,
+    update_module,
     validate_question_import,
 )
 from .settings import CONTENT_DIR, FRONTEND_DIST_DIR, cors_origins, instance_key, resolve_database_url, seed_on_boot
@@ -54,6 +56,16 @@ def _require_user_id(x_user_id: int | None) -> int:
     if x_user_id is None:
         raise HTTPException(status_code=400, detail="X-User-Id header is required.")
     return x_user_id
+
+
+def _find_module_node(module_tree: list[dict], module_id: int) -> dict | None:
+    stack = list(module_tree)
+    while stack:
+        node = stack.pop()
+        if node["id"] == module_id:
+            return node
+        stack.extend(node["children"])
+    return None
 
 
 def create_app(
@@ -119,14 +131,27 @@ def create_app(
                 )
             except ServiceError as error:
                 _handle_service_error(error)
-            tree = get_module_tree(connection)
-            stack = list(tree)
-            while stack:
-                node = stack.pop()
-                if node["id"] == module["id"]:
-                    return node
-                stack.extend(node["children"])
+            created_node = _find_module_node(get_module_tree(connection), module["id"])
+            if created_node is not None:
+                return created_node
         raise HTTPException(status_code=500, detail="Module creation did not return a created node.")
+
+    @app.patch("/api/modules/{module_id}", response_model=ModuleNodeOut)
+    def modules_update(module_id: int, payload: UpdateModuleIn) -> dict:
+        with get_connection(app.state.database_url) as connection:
+            try:
+                module = update_module(
+                    connection,
+                    module_id=module_id,
+                    title=payload.title,
+                    instruction=payload.instruction,
+                )
+            except ServiceError as error:
+                _handle_service_error(error)
+            updated_node = _find_module_node(get_module_tree(connection), module["id"])
+            if updated_node is not None:
+                return updated_node
+        raise HTTPException(status_code=500, detail="Module update did not return an updated node.")
 
     @app.post("/api/quiz-sessions", response_model=QuizSessionOut)
     def quiz_sessions_create(

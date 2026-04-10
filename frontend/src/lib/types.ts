@@ -176,6 +176,11 @@ export interface CreateModulePayload {
   instruction: string;
 }
 
+export interface UpdateModulePayload {
+  title: string;
+  instruction: string;
+}
+
 export interface QuestionImportUnresolvedRow {
   row_number: number;
   qml_line: string;
@@ -190,12 +195,33 @@ export interface QuestionImportSkippedRow {
   inferred_type?: QuestionType | null;
 }
 
+export interface QuestionImportMatchedQuestion {
+  question_id: number;
+  module_id: number;
+  module_full_slug: string;
+  qml_line: string;
+  answer_blocks: string[];
+}
+
+export interface QuestionImportRelocationRow {
+  row_number: number;
+  qml_line: string;
+  target_module_full_slug: string;
+  status: 'move' | 'revise' | 'merge';
+  requires_edit: boolean;
+  ready_without_edit: boolean;
+  imported_answer_blocks: string[];
+  matched_questions: QuestionImportMatchedQuestion[];
+}
+
 export interface QuestionImportResult {
   ready_to_commit: boolean;
+  rows: QuestionImportRowPayload[];
   valid_row_count: number;
   skipped_duplicate_count: number;
   skipped_rows: QuestionImportSkippedRow[];
   unresolved_rows: QuestionImportUnresolvedRow[];
+  relocation_rows: QuestionImportRelocationRow[];
   report_text: string;
   committed: boolean;
   committed_count: number;

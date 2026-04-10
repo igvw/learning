@@ -10,7 +10,7 @@ from .service.authoring import (
     set_question_review_flag,
     sync_seed_content,
 )
-from .service.catalog import create_module, create_user, get_module_tree, list_users
+from .service.catalog import create_module, create_user, get_module_tree, list_users, update_module
 from .service.common import NotFoundError, ServiceError, ValidationError
 from .service.imports import commit_question_import, validate_question_import
 from .service.quiz import create_quiz_session, submit_answer
@@ -33,5 +33,6 @@ __all__ = [
     "set_question_review_flag",
     "submit_answer",
     "sync_seed_content",
+    "update_module",
     "validate_question_import",
 ]

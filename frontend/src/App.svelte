@@ -31,6 +31,7 @@
     reviseQuestion,
     setQuestionReviewFlag,
     submitQuizAnswer,
+    updateModule,
     validateQuestionImportRows,
     validateQuestionImportText
   } from './lib/api';
@@ -47,6 +48,7 @@
     QuizSession,
     RouteName,
     StatsResponse,
+    UpdateModulePayload,
     User
   } from './lib/types';
 
@@ -325,6 +327,12 @@
     });
   }
 
+  async function handleUpdateModule(moduleId: number, payload: UpdateModulePayload): Promise<ModuleNode> {
+    const updated = await updateModule(moduleId, payload);
+    await loadModules();
+    return findModuleNode(modules, updated.id) ?? updated;
+  }
+
   async function handleSaveQuestion(payload: QuestionDraftPayload, resetStats: boolean): Promise<void> {
     savingQuestion = true;
     try {
@@ -514,6 +522,7 @@
         selectedModuleId={selectedModuleId}
         onCreateUser={handleCreateUser}
         onCreateModule={handleCreateModule}
+        onUpdateModule={handleUpdateModule}
         onOpenImport={handleOpenImportForModule}
       />
     {/if}

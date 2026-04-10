@@ -4,6 +4,7 @@ import random
 import unittest
 
 from backend.app.qml import parse_qml_line, render_prompt_and_answers
+from backend.app.service.common import title_from_slug
 from backend.app.service.schedule import (
     _bucketed_question_selection,
     _eligible_quiz_candidates,
@@ -14,6 +15,10 @@ from backend.app.service.schedule import (
 
 
 class SchedulerUnitTests(unittest.TestCase):
+    def test_title_from_slug_capitalizes_each_word(self) -> None:
+        self.assertEqual(title_from_slug("animals_to_english"), "Animals To English")
+        self.assertEqual(title_from_slug("iv_med_calc"), "Iv Med Calc")
+
     def test_qml_single_and_computed_questions_parse(self) -> None:
         single = parse_qml_line(
             line="What is the capital of Norway? [oslo | christiania]",

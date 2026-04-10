@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field, model_validator
 
 type QuestionType = Literal["single_text", "multi_text", "ordered_multi", "inline_cloze", "computed_text"]
 type PriorityMode = Literal["high", "mid", "low"]
+type QuestionImportRelocationStatus = Literal["move", "revise", "merge"]
 type ScheduleBucket = Literal[
     "hot0",
     "hot1",
@@ -29,6 +30,11 @@ class ModuleNodeOut(BaseModel):
 class CreateModuleIn(BaseModel):
     title: str = Field(min_length=1, max_length=120)
     parent_id: int | None = None
+    instruction: str = ""
+
+
+class UpdateModuleIn(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
     instruction: str = ""
 
 
@@ -206,6 +212,11 @@ class QuestionImportRowIn(BaseModel):
     qml_line: str
 
 
+class QuestionImportRowOut(BaseModel):
+    row_number: int
+    qml_line: str
+
+
 class ValidateQuestionImportIn(BaseModel):
     module_id: int
     qml_text: str | None = None
@@ -239,12 +250,33 @@ class QuestionImportSkippedRowOut(BaseModel):
     inferred_type: QuestionType | None = None
 
 
+class QuestionImportMatchedQuestionOut(BaseModel):
+    question_id: int
+    module_id: int
+    module_full_slug: str
+    qml_line: str
+    answer_blocks: list[str] = Field(default_factory=list)
+
+
+class QuestionImportRelocationRowOut(BaseModel):
+    row_number: int
+    qml_line: str
+    target_module_full_slug: str
+    status: QuestionImportRelocationStatus
+    requires_edit: bool = False
+    ready_without_edit: bool = False
+    imported_answer_blocks: list[str] = Field(default_factory=list)
+    matched_questions: list[QuestionImportMatchedQuestionOut] = Field(default_factory=list)
+
+
 class QuestionImportResultOut(BaseModel):
     ready_to_commit: bool
+    rows: list[QuestionImportRowOut] = Field(default_factory=list)
     valid_row_count: int
     skipped_duplicate_count: int
     skipped_rows: list[QuestionImportSkippedRowOut] = Field(default_factory=list)
     unresolved_rows: list[QuestionImportUnresolvedRowOut]
+    relocation_rows: list[QuestionImportRelocationRowOut] = Field(default_factory=list)
     report_text: str
     committed: bool = False
     committed_count: int = 0
