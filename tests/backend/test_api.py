@@ -76,6 +76,7 @@ class PostgresBackendIntegrationTests(PostgresBackendTestCase):
             json={"module_id": 5, "count": 2},
         )
         self.assertEqual(unauthenticated.status_code, 400)
+        self.assertEqual(unauthenticated.json()["detail"], "X-User-Id header is required.")
 
         session_response = self.client.post(
             "/api/quiz-sessions",
