@@ -52,7 +52,8 @@ Important choices:
 
 - only current question state is stored
 - question content is shared, not user-specific
-- duplicate prompt checks happen per leaf module in app logic
+- ordinary create/revise duplicate checks happen per leaf module in app logic
+- import review can also match same-prompt questions elsewhere in the same top-level module tree
 
 ## Users And Review Flags
 

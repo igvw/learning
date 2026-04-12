@@ -46,6 +46,25 @@ Practical request shape:
 
 The frontend builds slash-path `mkdir -p` behavior by making repeated calls.
 
+### `PATCH /api/modules/{module_id}`
+
+Updates one existing leaf module.
+
+Practical request shape:
+
+```json
+{
+  "title": "verbs_to_english",
+  "instruction": "Translate each Norwegian verb into English."
+}
+```
+
+Current behavior:
+
+- leaf-module rename keeps the same module id
+- only the selected leaf segment is renamed
+- parent paths remain unchanged
+
 ## Users
 
 ### `GET /api/users`
@@ -181,6 +200,10 @@ If `priority_mode` is used, the frontend also sends `X-User-Id` so the backend c
 
 Updates an existing question in place and can optionally reset history-derived stats.
 
+### `DELETE /api/questions/{question_id}`
+
+Deletes one question and closes the rank gap in its leaf module.
+
 ### `PATCH /api/questions/{question_id}/review-flag`
 
 Sets the current user’s review flag for a question.
@@ -206,9 +229,11 @@ Uploads use one question per line in `questions.dsl` / QML syntax.
 Important behavior:
 
 - one upload targets one leaf module
-- uploads may overlap existing questions
-- duplicate prompts are skipped automatically
-- malformed lines are returned for repair
+- repo seed authoring still uses `questions.dsl`, but Admin uploads use pasted QML or `.qml` files
+- exact duplicate rows are omitted and summarized
+- same-leaf duplicate rows can revise the existing question in place
+- same-tree prompt matches can move an existing question into a different leaf while keeping question-linked progress
+- malformed or conflicting rows are returned for review
 - nothing is saved until commit succeeds
 
 Type inference:
@@ -220,19 +245,70 @@ Type inference:
 
 ### `POST /api/question-imports/validate`
 
-Validates pasted QML text or edited unresolved lines.
+Validates pasted QML text or an edited row list.
 
-Returns:
+Request shape:
+
+```json
+{
+  "module_id": 12,
+  "qml_text": "l\u00f8rdag [Saturday]"
+}
+```
+
+or:
+
+```json
+{
+  "module_id": 12,
+  "rows": [
+    { "row_number": 35, "qml_line": "mot [against|toward]" }
+  ]
+}
+```
+
+Result fields:
 
 - `ready_to_commit`
+- `rows`
 - `valid_row_count`
-- `skipped_duplicate_count`
-- `skipped_rows`
-- `unresolved_rows`
+- `committable_row_numbers`
+- `exact_duplicate_count`
+- `review_rows`
 - `report_text`
+- `committed`
+- `committed_count`
+
+Each `review_row` includes:
+
+- `row_number`
+- `qml_line`
+- `status`
+- `status_text`
+- `editable`
+- `blocking`
+- `target_module_full_slug`
+- `current_answer_blocks`
+- `imported_answer_blocks`
+- `matched_questions`
+
+Current review statuses:
+
+- `invalid`
+- `duplicate`
+- `relocation`
+- `info`
+- `conflict`
 
 ### `POST /api/question-imports/commit`
 
-Commits the current kept rows in one transaction.
+Commits the submitted row list after revalidation.
 
-The backend revalidates before insert and returns commit counts in the same result shape.
+Current behavior:
+
+- blocking review rows prevent commit
+- exact duplicates commit nothing and report `committed: false`
+- successful commits return the same result shape with:
+  - `committed: true`
+  - `committed_count`
+- the frontend currently uses this endpoint in 10-row chunks to show determinate save progress

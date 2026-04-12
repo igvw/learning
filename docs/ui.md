@@ -100,6 +100,7 @@ Current behavior:
 - create mode defaults the module selector to the current hamburger-selected scope
 - create mode uses a `Priority` selector (`High`, `Mid`, `Low`) instead of raw rank
 - create mode keeps a live editable QML box in sync with the structured fields
+- revision mode can delete the current question after confirmation
 
 Incorrect-answer history currently shows:
 
@@ -113,6 +114,8 @@ The Admin page owns shared-content administration.
 
 Current behavior:
 
+- one `Module` section for selected-leaf edits and slash-path creation
+- leaf-module rename and instruction updates for the currently selected leaf
 - slash-path module creation with `mkdir -p` behavior
 - module instruction entry
 - user creation
@@ -121,14 +124,27 @@ Current behavior:
 
 ## Import Drawer
 
-The import drawer is a stateless repair-and-commit flow.
+The import drawer is a review-and-commit drawer for one leaf module.
 
 Current behavior:
 
 - paste or load QML text
-- validate lines
-- fix only malformed lines
-- duplicates are skipped automatically
-- commit only the kept valid rows
+- validate rows into one review table
+- show exact duplicate counts in the summary instead of cluttering the table
+- show duplicate, relocation, invalid, and conflict rows together in the same table
+- keep original physical line numbers visible and color-coded
+- let editable rows change QML directly in the table
+- show answer chips grouped by answer slot
+- color-code answer chips by source:
+  - current answer
+  - imported answer
+  - manually added answer
+- persist the import session in `sessionStorage` so refresh restores the drawer state
+- save with one button and determinate chunk progress
 
-The UI keeps original physical line numbers locally so import repair can stay stateless.
+Current import-save behavior:
+
+- save submits the current edited rows
+- the frontend saves committable rows in 10-row chunks
+- partial success keeps the drawer open, removes already committed rows, and revalidates the remainder
+- blocking rows stay highlighted red until edited or removed

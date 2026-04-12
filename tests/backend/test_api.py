@@ -252,8 +252,9 @@ class PostgresBackendIntegrationTests(PostgresBackendTestCase):
         )
         self.assertEqual(validate_response.status_code, 200)
         validate_payload = validate_response.json()
-        self.assertEqual(validate_payload["relocation_rows"][0]["status"], "move")
-        self.assertTrue(validate_payload["relocation_rows"][0]["ready_without_edit"])
+        self.assertEqual(validate_payload["review_rows"][0]["status"], "info")
+        self.assertFalse(validate_payload["review_rows"][0]["blocking"])
+        self.assertEqual(validate_payload["committable_row_numbers"], [1])
 
         commit_response = self.client.post(
             "/api/question-imports/commit",
@@ -282,7 +283,332 @@ class PostgresBackendIntegrationTests(PostgresBackendTestCase):
         self.assertEqual(target_stats["questions"][0]["attempts"], 1)
         self.assertFalse(target_stats["questions"][0]["review_flag"])
 
-    def test_same_tree_merge_keeps_one_question_and_resets_review_flags(self) -> None:
+    def test_question_delete_removes_question_and_closes_rank_gap(self) -> None:
+        with get_connection(self.database_url) as connection:
+            norwegian = create_module(connection, title="Norwegian", parent_id=None, instruction="")
+            weekdays = create_module(connection, title="Weekdays", parent_id=norwegian["id"], instruction="")
+            first_question_id = create_question(
+                connection,
+                QuestionDraftIn(
+                    module_id=weekdays["id"],
+                    prompt="mandag",
+                    question_type="single_text",
+                    rank=1,
+                    accepted_answers=[["Monday"]],
+                    segments=[],
+                ),
+            )["question_id"]
+            second_question_id = create_question(
+                connection,
+                QuestionDraftIn(
+                    module_id=weekdays["id"],
+                    prompt="tirsdag",
+                    question_type="single_text",
+                    rank=2,
+                    accepted_answers=[["Tuesday"]],
+                    segments=[],
+                ),
+            )["question_id"]
+
+        user = self.client.post(
+            "/api/users",
+            json={"handle": "alice", "display_name": "Alice"},
+        ).json()
+        session_response = self.client.post(
+            "/api/quiz-sessions",
+            json={"module_id": weekdays["id"], "count": 2},
+            headers={"X-User-Id": str(user["id"])},
+        )
+        self.assertEqual(session_response.status_code, 200)
+        first_item = next(item for item in session_response.json()["items"] if item["question_id"] == first_question_id)
+        self.client.post(
+            f"/api/quiz-sessions/{session_response.json()['id']}/items/{first_item['id']}/submit",
+            json={"answers": ["Monday"]},
+            headers={"X-User-Id": str(user["id"])},
+        )
+        self.client.patch(
+            f"/api/questions/{first_question_id}/review-flag",
+            json={"review_flag": True},
+            headers={"X-User-Id": str(user["id"])},
+        )
+
+        delete_response = self.client.delete(f"/api/questions/{first_question_id}")
+        self.assertEqual(delete_response.status_code, 200)
+        self.assertEqual(delete_response.json(), {"question_id": first_question_id})
+
+        stats_response = self.client.get(
+            "/api/stats",
+            params={"module_id": weekdays["id"]},
+            headers={"X-User-Id": str(user["id"])},
+        )
+        self.assertEqual(stats_response.status_code, 200)
+        remaining_questions = stats_response.json()["questions"]
+        self.assertEqual(len(remaining_questions), 1)
+        self.assertEqual(remaining_questions[0]["question_id"], second_question_id)
+        self.assertEqual(remaining_questions[0]["rank"], 1)
+
+        missing_response = self.client.delete(f"/api/questions/{first_question_id}")
+        self.assertEqual(missing_response.status_code, 404)
+        self.assertEqual(missing_response.json()["detail"], f"Question {first_question_id} was not found.")
+
+    def test_answer_checking_is_case_insensitive(self) -> None:
+        with get_connection(self.database_url) as connection:
+            norwegian = create_module(connection, title="Norwegian", parent_id=None, instruction="")
+            weekdays = create_module(connection, title="Weekdays", parent_id=norwegian["id"], instruction="")
+            question_id = create_question(
+                connection,
+                QuestionDraftIn(
+                    module_id=weekdays["id"],
+                    prompt="lørdag",
+                    question_type="single_text",
+                    rank=1,
+                    accepted_answers=[["Saturday"]],
+                    segments=[],
+                ),
+            )["question_id"]
+
+        user = self.client.post(
+            "/api/users",
+            json={"handle": "alice", "display_name": "Alice"},
+        ).json()
+
+        session_response = self.client.post(
+            "/api/quiz-sessions",
+            json={"module_id": weekdays["id"], "count": 1},
+            headers={"X-User-Id": str(user["id"])},
+        )
+        self.assertEqual(session_response.status_code, 200)
+        item = session_response.json()["items"][0]
+        self.assertEqual(item["question_id"], question_id)
+
+        submit_response = self.client.post(
+            f"/api/quiz-sessions/{session_response.json()['id']}/items/{item['id']}/submit",
+            json={"answers": ["saturday"]},
+            headers={"X-User-Id": str(user["id"])},
+        )
+        self.assertEqual(submit_response.status_code, 200)
+        submit_payload = submit_response.json()
+        self.assertTrue(submit_payload["is_correct"])
+        self.assertEqual(submit_payload["score_earned"], 1.0)
+        self.assertEqual(submit_payload["canonical_answers"], ["Saturday"])
+
+        stats_response = self.client.get(
+            "/api/stats",
+            params={"module_id": weekdays["id"]},
+            headers={"X-User-Id": str(user["id"])},
+        )
+        self.assertEqual(stats_response.status_code, 200)
+        stats_payload = stats_response.json()
+        self.assertEqual(len(stats_payload["questions"]), 1)
+        self.assertEqual(stats_payload["questions"][0]["question_id"], question_id)
+        self.assertEqual(stats_payload["questions"][0]["attempts"], 1)
+        self.assertEqual(stats_payload["questions"][0]["correct_percentage"], 1.0)
+
+    def test_exact_duplicate_in_target_leaf_is_omitted_from_review_rows(self) -> None:
+        with get_connection(self.database_url) as connection:
+            norwegian = create_module(connection, title="Norwegian", parent_id=None, instruction="")
+            target = create_module(connection, title="Target", parent_id=norwegian["id"], instruction="")
+            create_question(
+                connection,
+                QuestionDraftIn(
+                    module_id=target["id"],
+                    prompt="år",
+                    question_type="single_text",
+                    rank=1,
+                    accepted_answers=[["year"]],
+                    segments=[],
+                ),
+            )
+
+        validate_response = self.client.post(
+            "/api/question-imports/validate",
+            json={"module_id": target["id"], "qml_text": "år [year]"},
+        )
+        self.assertEqual(validate_response.status_code, 200)
+        validate_payload = validate_response.json()
+        self.assertEqual(validate_payload["exact_duplicate_count"], 1)
+        self.assertEqual(validate_payload["committable_row_numbers"], [])
+        self.assertEqual(validate_payload["review_rows"], [])
+        self.assertFalse(validate_payload["ready_to_commit"])
+
+        commit_response = self.client.post(
+            "/api/question-imports/commit",
+            json={
+                "module_id": target["id"],
+                "rows": [{"row_number": 1, "qml_line": "år [year]"}],
+            },
+        )
+        self.assertEqual(commit_response.status_code, 200)
+        self.assertFalse(commit_response.json()["committed"])
+        self.assertEqual(commit_response.json()["exact_duplicate_count"], 1)
+        self.assertEqual(commit_response.json()["committable_row_numbers"], [])
+
+    def test_same_leaf_duplicate_with_changed_answers_revises_existing_question(self) -> None:
+        with get_connection(self.database_url) as connection:
+            norwegian = create_module(connection, title="Norwegian", parent_id=None, instruction="")
+            target = create_module(connection, title="Target", parent_id=norwegian["id"], instruction="")
+            question_id = create_question(
+                connection,
+                QuestionDraftIn(
+                    module_id=target["id"],
+                    prompt="mot",
+                    question_type="single_text",
+                    rank=1,
+                    accepted_answers=[["against"]],
+                    segments=[],
+                ),
+            )["question_id"]
+
+        user = self.client.post(
+            "/api/users",
+            json={"handle": "alice", "display_name": "Alice"},
+        ).json()
+        session_response = self.client.post(
+            "/api/quiz-sessions",
+            json={"module_id": target["id"], "count": 1},
+            headers={"X-User-Id": str(user["id"])},
+        )
+        item = session_response.json()["items"][0]
+        self.client.post(
+            f"/api/quiz-sessions/{session_response.json()['id']}/items/{item['id']}/submit",
+            json={"answers": ["against"]},
+            headers={"X-User-Id": str(user["id"])},
+        )
+        self.client.patch(
+            f"/api/questions/{question_id}/review-flag",
+            json={"review_flag": True},
+            headers={"X-User-Id": str(user["id"])},
+        )
+
+        validate_response = self.client.post(
+            "/api/question-imports/validate",
+            json={"module_id": target["id"], "qml_text": "mot [against | toward]"},
+        )
+        self.assertEqual(validate_response.status_code, 200)
+        validate_payload = validate_response.json()
+        self.assertEqual(validate_payload["review_rows"][0]["status"], "duplicate")
+        self.assertFalse(validate_payload["review_rows"][0]["blocking"])
+        self.assertEqual(validate_payload["review_rows"][0]["matched_questions"][0]["question_id"], question_id)
+
+        commit_response = self.client.post(
+            "/api/question-imports/commit",
+            json={
+                "module_id": target["id"],
+                "rows": [{"row_number": 1, "qml_line": "mot [against | toward]"}],
+            },
+        )
+        self.assertEqual(commit_response.status_code, 200)
+        self.assertTrue(commit_response.json()["committed"])
+
+        target_stats = self.client.get(
+            "/api/stats",
+            params={"module_id": target["id"]},
+            headers={"X-User-Id": str(user["id"])},
+        ).json()
+        self.assertEqual(len(target_stats["questions"]), 1)
+        self.assertEqual(target_stats["questions"][0]["question_id"], question_id)
+        self.assertEqual(target_stats["questions"][0]["attempts"], 1)
+        self.assertFalse(target_stats["questions"][0]["review_flag"])
+        self.assertEqual(target_stats["questions"][0]["accepted_answers"], [["against", "toward"]])
+
+    def test_same_leaf_exact_noop_duplicate_has_no_side_effects(self) -> None:
+        with get_connection(self.database_url) as connection:
+            norwegian = create_module(connection, title="Norwegian", parent_id=None, instruction="")
+            target = create_module(connection, title="Target", parent_id=norwegian["id"], instruction="")
+            question_id = create_question(
+                connection,
+                QuestionDraftIn(
+                    module_id=target["id"],
+                    prompt="mot",
+                    question_type="single_text",
+                    rank=1,
+                    accepted_answers=[["against"]],
+                    segments=[],
+                ),
+            )["question_id"]
+
+        user = self.client.post(
+            "/api/users",
+            json={"handle": "alice", "display_name": "Alice"},
+        ).json()
+        session_response = self.client.post(
+            "/api/quiz-sessions",
+            json={"module_id": target["id"], "count": 1},
+            headers={"X-User-Id": str(user["id"])},
+        )
+        item = session_response.json()["items"][0]
+        self.client.post(
+            f"/api/quiz-sessions/{session_response.json()['id']}/items/{item['id']}/submit",
+            json={"answers": ["against"]},
+            headers={"X-User-Id": str(user["id"])},
+        )
+        self.client.patch(
+            f"/api/questions/{question_id}/review-flag",
+            json={"review_flag": True},
+            headers={"X-User-Id": str(user["id"])},
+        )
+
+        commit_response = self.client.post(
+            "/api/question-imports/commit",
+            json={
+                "module_id": target["id"],
+                "rows": [{"row_number": 1, "qml_line": "mot [against]"}],
+            },
+        )
+        self.assertEqual(commit_response.status_code, 200)
+        self.assertFalse(commit_response.json()["committed"])
+        self.assertEqual(commit_response.json()["exact_duplicate_count"], 1)
+        self.assertEqual(commit_response.json()["committed_count"], 0)
+
+        target_stats = self.client.get(
+            "/api/stats",
+            params={"module_id": target["id"]},
+            headers={"X-User-Id": str(user["id"])},
+        ).json()
+        self.assertEqual(len(target_stats["questions"]), 1)
+        self.assertEqual(target_stats["questions"][0]["question_id"], question_id)
+        self.assertEqual(target_stats["questions"][0]["attempts"], 1)
+        self.assertTrue(target_stats["questions"][0]["review_flag"])
+        self.assertEqual(target_stats["questions"][0]["accepted_answers"], [["against"]])
+
+    def test_same_upload_changed_duplicate_blocks_commit_until_resolved(self) -> None:
+        with get_connection(self.database_url) as connection:
+            norwegian = create_module(connection, title="Norwegian", parent_id=None, instruction="")
+            target = create_module(connection, title="Target", parent_id=norwegian["id"], instruction="")
+
+        validate_response = self.client.post(
+            "/api/question-imports/validate",
+            json={
+                "module_id": target["id"],
+                "rows": [
+                    {"row_number": 1, "qml_line": "selv [self]"},
+                    {"row_number": 2, "qml_line": "selv [self | even]"},
+                ],
+            },
+        )
+        self.assertEqual(validate_response.status_code, 200)
+        validate_payload = validate_response.json()
+        self.assertFalse(validate_payload["ready_to_commit"])
+        self.assertEqual(validate_payload["exact_duplicate_count"], 0)
+        self.assertEqual(len(validate_payload["review_rows"]), 1)
+        self.assertEqual(validate_payload["review_rows"][0]["status"], "duplicate")
+        self.assertTrue(validate_payload["review_rows"][0]["blocking"])
+        self.assertEqual(validate_payload["review_rows"][0]["matched_questions"][0]["module_full_slug"], "Earlier upload row 1")
+
+        commit_response = self.client.post(
+            "/api/question-imports/commit",
+            json={
+                "module_id": target["id"],
+                "rows": [
+                    {"row_number": 1, "qml_line": "selv [self]"},
+                    {"row_number": 2, "qml_line": "selv [self | even]"},
+                ],
+            },
+        )
+        self.assertEqual(commit_response.status_code, 200)
+        self.assertFalse(commit_response.json()["committed"])
+
+    def test_same_tree_multi_match_returns_blocking_conflict(self) -> None:
         module_ids = self._create_module_tree()
         with get_connection(self.database_url) as connection:
             first_question_id = create_question(
@@ -341,8 +667,10 @@ class PostgresBackendIntegrationTests(PostgresBackendTestCase):
         )
         self.assertEqual(validate_response.status_code, 200)
         validate_payload = validate_response.json()
-        self.assertEqual(validate_payload["relocation_rows"][0]["status"], "merge")
-        self.assertEqual(len(validate_payload["relocation_rows"][0]["matched_questions"]), 2)
+        self.assertEqual(validate_payload["review_rows"][0]["status"], "conflict")
+        self.assertTrue(validate_payload["review_rows"][0]["blocking"])
+        self.assertEqual(len(validate_payload["review_rows"][0]["matched_questions"]), 2)
+        self.assertFalse(validate_payload["ready_to_commit"])
 
         commit_response = self.client.post(
             "/api/question-imports/commit",
@@ -352,18 +680,14 @@ class PostgresBackendIntegrationTests(PostgresBackendTestCase):
             },
         )
         self.assertEqual(commit_response.status_code, 200)
-        self.assertTrue(commit_response.json()["committed"])
+        self.assertFalse(commit_response.json()["committed"])
 
         target_stats = self.client.get(
             "/api/stats",
             params={"module_id": module_ids["target"]},
             headers={"X-User-Id": str(user["id"])},
         ).json()
-        self.assertEqual(len(target_stats["questions"]), 1)
-        self.assertEqual(target_stats["questions"][0]["question_id"], min(first_question_id, second_question_id))
-        self.assertEqual(target_stats["questions"][0]["attempts"], 1)
-        self.assertFalse(target_stats["questions"][0]["review_flag"])
-        self.assertEqual(target_stats["questions"][0]["accepted_answers"], [["dog", "canine", "pooch"]])
+        self.assertEqual(target_stats["questions"], [])
 
         with get_connection(self.database_url) as connection:
             question_ids = [
@@ -373,4 +697,4 @@ class PostgresBackendIntegrationTests(PostgresBackendTestCase):
                     ("hund",),
                 ).fetchall()
             ]
-        self.assertEqual(question_ids, [min(first_question_id, second_question_id)])
+        self.assertEqual(question_ids, [first_question_id, second_question_id])

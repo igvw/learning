@@ -29,9 +29,13 @@
   export let defaultModuleId: number | null = null;
   export let editingQuestion: QuestionRow | null = null;
   export let saving = false;
+  export let deleting = false;
   export let onClose: () => void = () => {};
   export let onSave: (payload: QuestionDraftPayload, resetStats: boolean) => Promise<void> = async () => {
     throw new Error('Question save handler is not configured.');
+  };
+  export let onDelete: (questionId: number) => Promise<void> = async () => {
+    throw new Error('Question delete handler is not configured.');
   };
 
   let prompt = '';
@@ -148,6 +152,25 @@
     }
   }
 
+  async function handleDelete(): Promise<void> {
+    if (!editingQuestion) {
+      return;
+    }
+    if (typeof window !== 'undefined') {
+      const confirmed = window.confirm('Delete this question and its progress history?');
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    formError = '';
+    try {
+      await onDelete(editingQuestion.question_id);
+    } catch (error) {
+      formError = error instanceof Error ? error.message : 'Unable to delete this question.';
+    }
+  }
+
   function handleQmlInput(value: string): void {
     qmlText = value;
     try {
@@ -167,6 +190,9 @@
   $: moduleOptions = flattenModules(modules);
   $: selectedModuleOption = moduleOptions.find((option) => option.id === Number(moduleId)) ?? null;
   $: selectedModuleIsLeaf = selectedModuleOption?.isLeaf ?? false;
+  $: editorBusy = saving || deleting;
+  $: showDeleteAction = Boolean(editingQuestion);
+  $: primaryActionLabel = saving ? 'Saving...' : editingQuestion ? 'Save Revision' : 'Create Question';
   $: marker = `${open}:${editingQuestion?.question_id ?? 'new'}:${defaultModuleId ?? 'none'}:${moduleOptions.map((option) => option.id).join(',')}`;
   $: if (open && marker !== localMarker) {
     localMarker = marker;
@@ -349,13 +375,23 @@
             </div>
 
             <div class="drawer-actions">
+              {#if showDeleteAction}
+                <button
+                  class="danger-button"
+                  type="button"
+                  disabled={editorBusy}
+                  on:click={() => void handleDelete()}
+                >
+                  {deleting ? 'Deleting...' : 'Delete Question'}
+                </button>
+              {/if}
               <button
                 class="primary-button"
                 type="button"
-                disabled={saving || (!editingQuestion && (!!qmlError || !selectedModuleIsLeaf))}
+                disabled={editorBusy || (!editingQuestion && (!!qmlError || !selectedModuleIsLeaf))}
                 on:click={() => void handleSave()}
               >
-                {saving ? 'Saving...' : editingQuestion ? 'Save Revision' : 'Create Question'}
+                {primaryActionLabel}
               </button>
             </div>
 

@@ -1,24 +1,40 @@
 <script lang="ts">
-  import type {
-    ModuleNode,
-    QuestionImportResult,
-    QuestionImportRowPayload,
-  } from '../lib/types';
+  import {
+    answerChoiceSourceClass,
+    answerChoiceSourceLabel,
+    answerChoicesByBlock,
+    answerSelectedInQmlLine,
+    currentImportRowValue,
+    effectiveImportRowsFromResult,
+    parsePendingImportRows,
+    reviewRowsForPendingRows,
+    toggleAnswerInQmlLine,
+    type AnswerChoice
+  } from '../lib/import-review';
+  import { cloneImportRows } from '../lib/import-session';
+  import type { ModuleNode, QuestionImportResult, QuestionImportReviewRow, QuestionImportRowPayload } from '../lib/types';
 
   export let open = false;
   export let moduleNode: ModuleNode | null = null;
   export let result: QuestionImportResult | null = null;
   export let busy = false;
   export let errorMessage = '';
+  export let draftText = '';
+  export let draftRows: QuestionImportRowPayload[] = [];
+  export let saveStatusMessageOverride = '';
+  export let saveStatusToneOverride: 'error' | 'info' | '' = '';
+  export let saveProgressTotal = 0;
+  export let saveProgressCompleted = 0;
   export let onClose: () => void = () => {};
+  export let onDraftChange: (qmlText: string, rows: QuestionImportRowPayload[]) => void = () => {};
   export let onStartImport: (qmlText: string) => Promise<void> | void = () => {};
-  export let onRevalidate: (rows: QuestionImportRowPayload[]) => Promise<void> | void = () => {};
   export let onCommit: (rows: QuestionImportRowPayload[]) => Promise<void> | void = () => {};
 
   let qmlText = '';
   let pendingRows: QuestionImportRowPayload[] = [];
-  let rowDrafts: Record<number, string> = {};
   let localMarker = '';
+  let publishMarker = '';
+  let saveAttempted = false;
 
   function isLeaf(node: ModuleNode | null): boolean {
     return Boolean(node && node.children.length === 0);
@@ -34,82 +50,116 @@
     input.value = '';
   }
 
-  function parsePendingRows(value: string): QuestionImportRowPayload[] {
-    return value
-      .split(/\r?\n/)
-      .map((qmlLine, index) => ({ row_number: index + 1, qml_line: qmlLine }))
-      .filter((row) => row.qml_line.trim());
-  }
-
   function updateQmlLine(rowNumber: number, value: string): void {
-    rowDrafts = {
-      ...rowDrafts,
-      [rowNumber]: value
-    };
+    saveAttempted = false;
     pendingRows = pendingRows.map((row) => (row.row_number === rowNumber ? { ...row, qml_line: value } : row));
   }
 
   async function handleStartValidate(): Promise<void> {
-    pendingRows = parsePendingRows(qmlText);
+    saveAttempted = false;
+    pendingRows = parsePendingImportRows(qmlText);
     await onStartImport(qmlText);
   }
 
   async function handleDiscardRow(rowNumber: number): Promise<void> {
+    saveAttempted = false;
     pendingRows = pendingRows.filter((row) => row.row_number !== rowNumber);
-    const nextDrafts = { ...rowDrafts };
-    delete nextDrafts[rowNumber];
-    rowDrafts = nextDrafts;
-    await onRevalidate(pendingRows);
   }
 
-  async function handleRevalidate(): Promise<void> {
-    await onRevalidate(pendingRows);
-  }
-
-  function isEditableRelocationRow(row: QuestionImportResult['relocation_rows'][number]): boolean {
-    return row.requires_edit || row.status === 'merge';
+  async function handleSave(): Promise<void> {
+    saveAttempted = true;
+    await onCommit(pendingRows);
   }
 
   function currentRowValue(rowNumber: number, fallback: string): string {
-    return rowDrafts[rowNumber] ?? fallback;
+    return currentImportRowValue(pendingRows, rowNumber, fallback);
   }
 
-  function sameRows(left: QuestionImportRowPayload[], right: QuestionImportRowPayload[]): boolean {
-    if (left.length !== right.length) {
-      return false;
+  function answerSelected(row: QuestionImportReviewRow, choice: AnswerChoice): boolean {
+    return answerSelectedInQmlLine(currentRowValue(row.row_number, row.qml_line), choice.blockIndex, choice.text);
+  }
+
+  function handleToggleAnswer(row: QuestionImportReviewRow, choice: AnswerChoice): void {
+    if (!row.editable) {
+      return;
     }
-    return left.every((row, index) => row.row_number === right[index].row_number && row.qml_line === right[index].qml_line);
+    updateQmlLine(
+      row.row_number,
+      toggleAnswerInQmlLine(currentRowValue(row.row_number, row.qml_line), choice.blockIndex, choice.text)
+    );
   }
 
   $: marker =
-    `${open}:${result?.rows.map((row) => `${row.row_number}:${row.qml_line}`).join('|') ?? 'new'}:${result?.relocation_rows
-      .map((row) => `${row.row_number}:${row.status}`)
-      .join('|') ?? 'none'}`;
+    result
+      ? `${open}:${moduleNode?.id ?? 'none'}:${result.rows.map((row) => `${row.row_number}:${row.qml_line}`).join('|')}:${result.review_rows
+          .map((row) => `${row.row_number}:${row.status}:${row.qml_line}`)
+          .join('|')}:${result.valid_row_count}:${result.exact_duplicate_count}`
+      : `${open}:${moduleNode?.id ?? 'none'}:${draftText}:${draftRows.map((row) => `${row.row_number}:${row.qml_line}`).join('|')}`;
   $: if (marker !== localMarker && open) {
     localMarker = marker;
     if (!result) {
-      qmlText = '';
-      pendingRows = [];
-      rowDrafts = {};
-    } else if (pendingRows.length === 0) {
-      pendingRows = [...result.rows].sort((left, right) => left.row_number - right.row_number);
+      qmlText = draftText;
+      pendingRows = cloneImportRows(draftRows).sort((left, right) => left.row_number - right.row_number);
+      if (!draftText.trim() && draftRows.length === 0) {
+        saveAttempted = false;
+      }
+    } else {
+      qmlText = draftText;
+      pendingRows =
+        draftRows.length > 0
+          ? cloneImportRows(draftRows).sort((left, right) => left.row_number - right.row_number)
+          : effectiveImportRowsFromResult(result);
     }
-    rowDrafts = Object.fromEntries(
-      [
-        ...(result?.unresolved_rows ?? []),
-        ...(result?.relocation_rows ?? [])
-      ].map((row) => [row.row_number, row.qml_line])
+  } else if (!open && localMarker) {
+    localMarker = '';
+    publishMarker = '';
+    qmlText = '';
+    pendingRows = [];
+    saveAttempted = false;
+  }
+  $: displayReviewRows = reviewRowsForPendingRows(result, pendingRows);
+  $: draftStateMarker = `${open}:${qmlText}:${pendingRows.map((row) => `${row.row_number}:${row.qml_line}`).join('|')}`;
+  $: if (open && draftStateMarker !== publishMarker) {
+    publishMarker = draftStateMarker;
+    onDraftChange(
+      qmlText,
+      pendingRows.map((row) => ({
+        row_number: row.row_number,
+        qml_line: row.qml_line
+      }))
     );
   }
-  $: hasPendingEdits = Boolean(result && !sameRows(pendingRows, result.rows));
-  $: showRevalidateButton =
-    Boolean(result) &&
-    (result.unresolved_rows.length > 0 || result.relocation_rows.some((row) => isEditableRelocationRow(row)) || hasPendingEdits);
+  $: saveStatusMessage = (() => {
+    if (saveStatusMessageOverride) {
+      return saveStatusMessageOverride;
+    }
+    if (!saveAttempted || errorMessage || !result) {
+      return '';
+    }
+    if (displayReviewRows.some((row) => row.blocking)) {
+      return 'Fix the highlighted rows before saving.';
+    }
+    if (result.valid_row_count === 0 && result.exact_duplicate_count > 0 && displayReviewRows.length === 0) {
+      return 'Nothing new to save.';
+    }
+    if (result.valid_row_count === 0) {
+      return 'No importable rows remain.';
+    }
+    return '';
+  })();
+  $: saveStatusTone = (() => {
+    if (saveStatusMessageOverride) {
+      return saveStatusToneOverride;
+    }
+    return saveStatusMessage === 'Nothing new to save.' ? 'info' : saveStatusMessage ? 'error' : '';
+  })();
+  $: saveProgressRatio = saveProgressTotal > 0 ? Math.min(1, saveProgressCompleted / saveProgressTotal) : 0;
+  $: saveButtonLabel = busy && saveProgressTotal > 0 ? `Saving ${saveProgressCompleted}/${saveProgressTotal}` : busy ? 'Saving...' : 'Save';
 </script>
 
 {#if open}
   <div class="drawer-backdrop" role="presentation" on:click={onClose}>
-    <div class="drawer-panel-shell" role="presentation" on:click|stopPropagation>
+    <div class="drawer-panel-shell import-drawer-shell" role="presentation" on:click|stopPropagation>
       <aside class="drawer-panel import-drawer" aria-label="Question import">
         <div class="panel-header sticky">
           <div>
@@ -125,13 +175,18 @@
 
         <div class="import-panel">
           <div class="import-summary panel">
-            <p class="eyebrow">Target module</p>
-            <h3>{moduleNode?.title ?? 'No module selected'}</h3>
+            <div class="import-summary-head">
+              <p class="eyebrow">Target module</p>
+              <h3>{moduleNode?.title ?? 'No module selected'}</h3>
+              {#if moduleNode?.full_slug}
+                <p class="module-path"><code>{moduleNode.full_slug}</code></p>
+              {/if}
+            </div>
             {#if moduleNode?.instruction}
-              <p class="muted-copy">{moduleNode.instruction}</p>
+              <p class="muted-copy import-summary-copy">{moduleNode.instruction}</p>
             {/if}
             {#if !isLeaf(moduleNode)}
-              <p class="muted-copy">Select a leaf module before importing questions.</p>
+              <p class="muted-copy import-summary-note">Select a leaf module before importing questions.</p>
             {/if}
           </div>
 
@@ -140,7 +195,7 @@
               <div class="subsection-header">
                 <h3>Import QML</h3>
                 <label class="secondary-button file-trigger">
-                  <input type="file" accept=".dsl,.txt,text/plain" on:change={handleFileChange} />
+                  <input type="file" accept=".qml,.dsl,.txt,text/plain" on:change={handleFileChange} />
                   Choose file
                 </label>
               </div>
@@ -166,126 +221,132 @@
             </div>
           {:else}
             <div class="panel import-session-panel">
-              <div class="subsection-header">
+              <div class="subsection-header import-review-header">
                 <div>
-                  <p class="eyebrow">Validation state</p>
-                  <h3>{result.valid_row_count} valid rows</h3>
+                  <p class="eyebrow">Import summary</p>
+                  <h3>{result.valid_row_count} rows ready</h3>
                 </div>
                 <div class="import-session-meta">
-                  <span>{result.unresolved_rows.length} unresolved</span>
-                  <span>{result.skipped_duplicate_count} skipped</span>
+                  <span>{displayReviewRows.length} review rows</span>
+                  <span>{result.exact_duplicate_count} exact duplicates omitted</span>
                 </div>
               </div>
 
-              {#if result.report_text}
-                <label class="field">
-                  <span>Validation report</span>
-                  <textarea class="qml-report" rows="8" readonly value={result.report_text}></textarea>
-                </label>
-              {/if}
-
-              {#if result.unresolved_rows.length > 0}
+              {#if displayReviewRows.length > 0}
                 <div class="field">
-                  <span>Unresolved QML lines</span>
-                  <div class="qml-editor">
-                    {#each result.unresolved_rows as row (row.row_number)}
-                      <div class="qml-editor-row">
-                        <button
-                          class="qml-line-number"
-                          type="button"
-                          aria-label={`Discard row ${row.row_number}`}
-                          on:click={() => void handleDiscardRow(row.row_number)}
-                        >
-                          <span class="qml-line-index">{row.row_number}</span>
-                          <span class="qml-line-delete">x</span>
-                        </button>
-                        <div class="qml-line-body">
-                          <input
-                            class="qml-line-input"
-                            type="text"
-                            value={currentRowValue(row.row_number, row.qml_line)}
-                            on:input={(event) => updateQmlLine(row.row_number, (event.currentTarget as HTMLInputElement).value)}
-                          />
-                          <p class="qml-row-issues">{row.issues.join(' | ')}</p>
-                        </div>
-                      </div>
-                    {/each}
+                  <span>Review rows</span>
+                  <div class="table-shell import-review-shell">
+                    <table class="dense-table import-review-table">
+                      <colgroup>
+                        <col class="import-review-col-line" />
+                        <col class="import-review-col-qml" />
+                        <col class="import-review-col-answers" />
+                      </colgroup>
+                      <thead>
+                        <tr>
+                          <th>Line</th>
+                          <th>QML</th>
+                          <th>Answers</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {#each displayReviewRows as row (row.row_number)}
+                          {@const blockChoicesList = answerChoicesByBlock(row, currentRowValue(row.row_number, row.qml_line))}
+                          <tr class:review-row-blocking={row.blocking}>
+                            <td>
+                              <div
+                                class={`import-review-line status-${row.status}`}
+                                title={row.status_text}
+                                aria-label={row.status_text}
+                              >
+                                {row.row_number}
+                              </div>
+                            </td>
+                            <td>
+                              <div class="import-review-cell import-review-qml-cell">
+                                <div class="import-review-qml-field">
+                                  {#if row.editable}
+                                    <input
+                                      class="qml-line-input"
+                                      type="text"
+                                      value={currentRowValue(row.row_number, row.qml_line)}
+                                      on:input={(event) => updateQmlLine(row.row_number, (event.currentTarget as HTMLInputElement).value)}
+                                    />
+                                  {:else}
+                                    <code class="qml-line-preview qml-line-preview-compact">{row.qml_line}</code>
+                                  {/if}
+                                </div>
+                                <button
+                                  class="import-remove-button"
+                                  type="button"
+                                  aria-label={`Remove row ${row.row_number}`}
+                                  on:click={() => void handleDiscardRow(row.row_number)}
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            </td>
+                            <td>
+                              <div class="import-review-cell">
+                                {#if blockChoicesList.length > 0}
+                                  <div class="answer-block-stack">
+                                    {#each blockChoicesList as blockChoices, blockIndex}
+                                      <div class="answer-block-group">
+                                        {#if blockChoicesList.length > 1}
+                                          <p class="answer-block-label">Answer {blockIndex + 1}</p>
+                                        {/if}
+                                        {#if blockChoices.length > 0}
+                                          <div class="answer-chip-row">
+                                            {#each blockChoices as choice (choice.key)}
+                                              <button
+                                                class={`answer-block-chip answer-choice-button ${answerChoiceSourceClass(choice)}`}
+                                                class:selected-answer-choice={answerSelected(row, choice)}
+                                                type="button"
+                                                disabled={!row.editable}
+                                                title={answerChoiceSourceLabel(choice)}
+                                                aria-label={`Toggle ${answerChoiceSourceLabel(choice).toLowerCase()} ${choice.text} in QML row ${row.row_number}`}
+                                                on:click={() => handleToggleAnswer(row, choice)}
+                                              >
+                                                {choice.text}
+                                              </button>
+                                            {/each}
+                                          </div>
+                                        {:else}
+                                          <p class="muted-copy">No answers for this field yet.</p>
+                                        {/if}
+                                      </div>
+                                    {/each}
+                                  </div>
+                                {:else}
+                                  <p class="muted-copy">No answers parsed yet.</p>
+                                {/if}
+                              </div>
+                            </td>
+                          </tr>
+                        {/each}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               {:else}
-                <p class="muted-copy">No unresolved rows remain. Commit when you are ready.</p>
-              {/if}
-
-              {#if result.relocation_rows.length > 0}
-                <div class="field relocation-field">
-                  <span>Relocations and merge review</span>
-                  <div class="relocation-list">
-                    {#each result.relocation_rows as row (row.row_number)}
-                      <section class="relocation-card">
-                        <div class="relocation-header">
-                          <div>
-                            <p class="eyebrow">Row {row.row_number}</p>
-                            <h4>{row.status === 'move' ? 'Pure move' : row.status === 'revise' ? 'Move and revise' : 'Merge duplicates'}</h4>
-                          </div>
-                          <span class={`relocation-badge status-${row.status}`}>
-                            {row.status === 'move' ? 'Move' : row.status === 'revise' ? 'Revise' : 'Merge'}
-                          </span>
-                        </div>
-
-                        <div class="relocation-columns">
-                          <div class="relocation-column">
-                            <p class="muted-copy">Existing question{row.matched_questions.length === 1 ? '' : 's'}</p>
-                            {#each row.matched_questions as matched (matched.question_id)}
-                              <article class="relocation-detail-card">
-                                <p class="muted-copy"><code>{matched.module_full_slug}</code></p>
-                                <code class="qml-line-preview">{matched.qml_line}</code>
-                                <div class="answer-block-list">
-                                  {#each matched.answer_blocks as block}
-                                    <span class="answer-block-chip">{block}</span>
-                                  {/each}
-                                </div>
-                              </article>
-                            {/each}
-                          </div>
-
-                          <div class="relocation-column">
-                            <p class="muted-copy">Imported / final target in <code>{row.target_module_full_slug}</code></p>
-                            {#if isEditableRelocationRow(row)}
-                              <input
-                                class="qml-line-input"
-                                type="text"
-                                value={currentRowValue(row.row_number, row.qml_line)}
-                                on:input={(event) => updateQmlLine(row.row_number, (event.currentTarget as HTMLInputElement).value)}
-                              />
-                            {:else}
-                              <code class="qml-line-preview">{row.qml_line}</code>
-                            {/if}
-                            <div class="answer-block-list">
-                              {#each row.imported_answer_blocks as block}
-                                <span class="answer-block-chip new">{block}</span>
-                              {/each}
-                            </div>
-                            {#if row.ready_without_edit}
-                              <p class="muted-copy">Reported for visibility only. No edit is required.</p>
-                            {:else if isEditableRelocationRow(row)}
-                              <p class="muted-copy">Edit the final QML here if you want to refine the imported answer block before commit.</p>
-                            {/if}
-                          </div>
-                        </div>
-                      </section>
-                    {/each}
-                  </div>
-                </div>
+                <p class="muted-copy">No review rows remain. Save when you are ready.</p>
               {/if}
 
               <div class="drawer-actions">
-                {#if showRevalidateButton}
-                  <button class="secondary-button" type="button" disabled={busy} on:click={() => void handleRevalidate()}>
-                    {busy ? 'Checking...' : 'Revalidate Rows'}
-                  </button>
+                {#if saveStatusMessage}
+                  <p class={`import-save-status ${saveStatusTone}`}>{saveStatusMessage}</p>
                 {/if}
-                <button class="primary-button" type="button" disabled={busy || !result.ready_to_commit || hasPendingEdits} on:click={() => void onCommit(pendingRows)}>
-                  {busy ? 'Saving...' : 'Commit Import'}
+                <button
+                  class="primary-button"
+                  class:button-with-progress={busy}
+                  type="button"
+                  disabled={busy || !isLeaf(moduleNode) || pendingRows.length === 0}
+                  on:click={() => void handleSave()}
+                >
+                  {#if busy}
+                    <span class="button-progress-ring" style={`--progress-ratio: ${saveProgressRatio};`} aria-hidden="true"></span>
+                  {/if}
+                  {saveButtonLabel}
                 </button>
               </div>
             </div>

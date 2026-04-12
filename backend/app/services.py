@@ -6,6 +6,7 @@ Private helpers belong in ``backend.app.service.*`` and should not be re-exporte
 
 from .service.authoring import (
     create_question,
+    delete_question,
     revise_question,
     set_question_review_flag,
     sync_seed_content,
@@ -26,6 +27,7 @@ __all__ = [
     "create_question",
     "create_quiz_session",
     "create_user",
+    "delete_question",
     "get_module_tree",
     "get_stats",
     "list_users",

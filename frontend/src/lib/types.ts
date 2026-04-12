@@ -181,35 +181,25 @@ export interface UpdateModulePayload {
   instruction: string;
 }
 
-export interface QuestionImportUnresolvedRow {
-  row_number: number;
-  qml_line: string;
-  issues: string[];
-  inferred_type?: QuestionType | null;
-}
-
-export interface QuestionImportSkippedRow {
-  row_number: number;
-  qml_line: string;
-  reason: string;
-  inferred_type?: QuestionType | null;
-}
+export type QuestionImportReviewStatus = 'invalid' | 'duplicate' | 'relocation' | 'info' | 'conflict';
 
 export interface QuestionImportMatchedQuestion {
-  question_id: number;
-  module_id: number;
+  question_id?: number | null;
+  module_id?: number | null;
   module_full_slug: string;
   qml_line: string;
   answer_blocks: string[];
 }
 
-export interface QuestionImportRelocationRow {
+export interface QuestionImportReviewRow {
   row_number: number;
   qml_line: string;
-  target_module_full_slug: string;
-  status: 'move' | 'revise' | 'merge';
-  requires_edit: boolean;
-  ready_without_edit: boolean;
+  status: QuestionImportReviewStatus;
+  status_text: string;
+  editable: boolean;
+  blocking: boolean;
+  target_module_full_slug?: string | null;
+  current_answer_blocks: string[];
   imported_answer_blocks: string[];
   matched_questions: QuestionImportMatchedQuestion[];
 }
@@ -218,10 +208,9 @@ export interface QuestionImportResult {
   ready_to_commit: boolean;
   rows: QuestionImportRowPayload[];
   valid_row_count: number;
-  skipped_duplicate_count: number;
-  skipped_rows: QuestionImportSkippedRow[];
-  unresolved_rows: QuestionImportUnresolvedRow[];
-  relocation_rows: QuestionImportRelocationRow[];
+  committable_row_numbers?: number[];
+  exact_duplicate_count: number;
+  review_rows: QuestionImportReviewRow[];
   report_text: string;
   committed: boolean;
   committed_count: number;

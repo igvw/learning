@@ -16,6 +16,7 @@ class ServiceFacadeUnitTests(unittest.TestCase):
             "create_question",
             "create_quiz_session",
             "create_user",
+            "delete_question",
             "get_module_tree",
             "get_stats",
             "list_users",

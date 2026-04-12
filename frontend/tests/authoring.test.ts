@@ -1,6 +1,6 @@
 import './test-support';
 
-import { fireEvent, render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -31,7 +31,8 @@ describe('EditorDrawer', () => {
         editingQuestion: null,
         saving: false,
         onClose: vi.fn(),
-        onSave: vi.fn()
+        onSave: vi.fn(),
+        onDelete: vi.fn()
       }
     });
 
@@ -132,7 +133,8 @@ describe('EditorDrawer', () => {
         },
         saving: false,
         onClose: vi.fn(),
-        onSave: vi.fn()
+        onSave: vi.fn(),
+        onDelete: vi.fn()
       }
     });
 
@@ -145,6 +147,84 @@ describe('EditorDrawer', () => {
     expect(screen.queryByText('Module path')).toBeNull();
     expect(screen.queryByText('Create module inline')).toBeNull();
     expect(screen.queryByText('Flag this question for manual review')).toBeNull();
+  });
+
+  it('offers question deletion in revision mode and confirms before calling the handler', async () => {
+    const user = userEvent.setup();
+    const deleteSpy = vi.fn().mockResolvedValue(undefined);
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const modules: ModuleNode[] = [
+      {
+        id: 1,
+        title: 'Norwegian',
+        slug: 'norwegian',
+        full_slug: 'norwegian',
+        instruction: '',
+        children: [
+          {
+            id: 2,
+            title: 'Vocabulary',
+            slug: 'vocabulary',
+            full_slug: 'norwegian/vocabulary',
+            instruction: '',
+            children: [
+              {
+                id: 3,
+                title: 'weekday2en',
+                slug: 'weekday2en',
+                full_slug: 'norwegian/vocabulary/weekday2en',
+                instruction: 'Translate the weekday into English.',
+                children: []
+              }
+            ]
+          }
+        ]
+      }
+    ];
+
+    render(EditorDrawer, {
+      props: {
+        open: true,
+        modules,
+        editingQuestion: {
+          question_id: 41,
+          module_id: 3,
+          module_full_slug: 'norwegian/vocabulary/weekday2en',
+          prompt: 'lørdag',
+          prompt_preview: 'lørdag',
+          question_type: 'single_text',
+          rank: 1,
+          attempts: 2,
+          correct_percentage: 0.5,
+          last_asked_at: '2026-04-05T09:00:00Z',
+          review_flag: false,
+          accepted_answers: [['Saturday']],
+          segments: [],
+          schedule: {
+            bucket: 'hot0',
+            logical_bucket: 'unseen',
+            recovery_streak: 0,
+            interval_step: 0,
+            last_incorrect_at: '2026-04-05T08:00:00Z',
+            next_due_at: null,
+            retry_pending: false
+          },
+          recent_incorrect_answers: []
+        },
+        saving: false,
+        deleting: false,
+        onClose: vi.fn(),
+        onSave: vi.fn(),
+        onDelete: deleteSpy
+      }
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Delete Question' }));
+
+    expect(confirmSpy).toHaveBeenCalledWith('Delete this question and its progress history?');
+    expect(deleteSpy).toHaveBeenCalledWith(41);
+
+    confirmSpy.mockRestore();
   });
 });
 
@@ -274,9 +354,8 @@ describe('AdminPage', () => {
 });
 
 describe('ImportDrawer', () => {
-  it('revalidates edited unresolved rows, supports discard, and returns to the start state after commit', async () => {
+  it('submits edited rows through Save, shows blocking status, and removes rows locally', async () => {
     const user = userEvent.setup();
-    const revalidateSpy = vi.fn().mockResolvedValue(undefined);
     const commitSpy = vi.fn().mockResolvedValue(undefined);
     const moduleNode: ModuleNode = {
       id: 12,
@@ -291,36 +370,45 @@ describe('ImportDrawer', () => {
       rows: [
         { row_number: 1, qml_line: 'hund [dog]' },
         { row_number: 2, qml_line: 'ordered: stage one' },
-        { row_number: 4, qml_line: 'ordered: stage alpha' }
+        { row_number: 4, qml_line: 'mot [against | toward]' }
       ],
       valid_row_count: 2,
-      skipped_duplicate_count: 1,
-      skipped_rows: [
-        {
-          row_number: 1,
-          qml_line: 'hund [dog]',
-          reason: 'Prompt already exists in this leaf module.',
-          inferred_type: 'single_text'
-        }
-      ],
-      report_text: 'row 2 | needs fix | Question lines cannot be blank. | ',
-      committed: false,
-      committed_count: 0,
-      relocation_rows: [],
-      unresolved_rows: [
+      exact_duplicate_count: 1,
+      review_rows: [
         {
           row_number: 2,
           qml_line: 'ordered: stage one',
-          issues: ['Question lines cannot be blank.'],
-          inferred_type: null
+          status: 'invalid',
+          status_text: 'Invalid QML: Question lines cannot be blank.',
+          editable: true,
+          blocking: true,
+          current_answer_blocks: [],
+          imported_answer_blocks: [],
+          matched_questions: []
         },
         {
           row_number: 4,
-          qml_line: 'ordered: stage alpha',
-          issues: ['Question lines cannot be blank.'],
-          inferred_type: null
+          qml_line: 'mot [toward]',
+          status: 'duplicate',
+          status_text: 'This prompt already exists in the target leaf. Commit will revise the existing question in place unless you edit the row first.',
+          editable: true,
+          blocking: false,
+          current_answer_blocks: ['against'],
+          imported_answer_blocks: ['toward'],
+          matched_questions: [
+            {
+              question_id: 8,
+              module_id: 12,
+              module_full_slug: 'norwegian/vocabulary/noun2en',
+              qml_line: 'mot [against]',
+              answer_blocks: ['against']
+            }
+          ]
         }
-      ]
+      ],
+      report_text: '2 ready to commit | 2 rows need review | 1 exact duplicates omitted',
+      committed: false,
+      committed_count: 0
     };
 
     const view = render(ImportDrawer, {
@@ -331,13 +419,47 @@ describe('ImportDrawer', () => {
         busy: false,
         onClose: vi.fn(),
         onStartImport: vi.fn(),
-        onRevalidate: revalidateSpy,
         onCommit: commitSpy
       }
     });
 
+    expect(document.querySelector('.import-drawer-shell')).toBeTruthy();
+    expect(screen.getAllByText('norwegian/vocabulary/noun2en').length).toBeGreaterThan(0);
+    expect(screen.getByText('2 review rows')).toBeTruthy();
+    expect(screen.getByText('1 exact duplicates omitted')).toBeTruthy();
+    expect(screen.getByText('Answers')).toBeTruthy();
     expect(screen.getByDisplayValue('ordered: stage one')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Discard row 2' })).toBeTruthy();
+    expect(screen.getByDisplayValue('mot [against]')).toBeTruthy();
+    const invalidLine = screen.getByText('2');
+    expect(invalidLine.className).toContain('status-invalid');
+    expect(invalidLine.getAttribute('title')).toContain('Invalid QML');
+    const currentAgainst = screen.getByRole('button', { name: 'Toggle current answer against in QML row 4' });
+    const newToward = screen.getByRole('button', { name: 'Toggle imported answer toward in QML row 4' });
+    expect(currentAgainst).toBeTruthy();
+    expect(newToward).toBeTruthy();
+    expect(currentAgainst.className).toContain('selected-answer-choice');
+    expect(currentAgainst.className).toContain('source-current');
+    expect(newToward.className).not.toContain('selected-answer-choice');
+    expect(newToward.className).toContain('source-new');
+
+    await user.click(newToward);
+    expect((screen.getByDisplayValue('mot [against | toward]') as HTMLInputElement).value).toBe('mot [against | toward]');
+    expect(screen.getByRole('button', { name: 'Toggle imported answer toward in QML row 4' }).className).toContain(
+      'selected-answer-choice'
+    );
+    await user.click(screen.getByRole('button', { name: 'Toggle current answer against in QML row 4' }));
+    expect((screen.getByDisplayValue('mot [toward]') as HTMLInputElement).value).toBe('mot [toward]');
+    expect(screen.getByRole('button', { name: 'Toggle current answer against in QML row 4' }).className).not.toContain(
+      'selected-answer-choice'
+    );
+
+    await fireEvent.input(screen.getByDisplayValue('mot [toward]'), { target: { value: 'mot [toward | opposite]' } });
+    const manualOpposite = screen.getByRole('button', { name: 'Toggle manual answer opposite in QML row 4' });
+    expect(manualOpposite).toBeTruthy();
+    expect(manualOpposite.className).toContain('source-manual');
+    expect(manualOpposite.className).toContain('selected-answer-choice');
+    await user.click(manualOpposite);
+    expect((screen.getByDisplayValue('mot [toward]') as HTMLInputElement).value).toBe('mot [toward]');
 
     const rowInputs = view.getAllByRole('textbox');
     const unresolvedInput = rowInputs.find(
@@ -345,19 +467,28 @@ describe('ImportDrawer', () => {
     ) as HTMLInputElement;
     await user.clear(unresolvedInput);
     await user.type(unresolvedInput, 'ordered: stage one ; stage two');
-    await user.click(screen.getByRole('button', { name: 'Revalidate Rows' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
 
-    expect(revalidateSpy).toHaveBeenCalledWith([
+    expect(commitSpy).toHaveBeenCalledWith([
       { row_number: 1, qml_line: 'hund [dog]' },
       { row_number: 2, qml_line: 'ordered: stage one ; stage two' },
-      { row_number: 4, qml_line: 'ordered: stage alpha' }
+      { row_number: 4, qml_line: 'mot [toward]' }
     ]);
 
-    await user.click(screen.getByRole('button', { name: 'Discard row 4' }));
-    expect(revalidateSpy).toHaveBeenLastCalledWith([
-      { row_number: 1, qml_line: 'hund [dog]' },
-      { row_number: 2, qml_line: 'ordered: stage one ; stage two' }
-    ]);
+    await view.rerender({
+      open: true,
+      moduleNode,
+      result,
+      busy: false,
+      onClose: vi.fn(),
+      onStartImport: vi.fn(),
+      onCommit: commitSpy
+    });
+
+    expect(screen.getByText('Fix the highlighted rows before saving.')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Remove row 4' }));
+    expect(screen.queryByRole('button', { name: 'Remove row 4' })).toBeNull();
+    expect(screen.queryByText('Fix the highlighted rows before saving.')).toBeNull();
 
     await view.rerender({
       open: true,
@@ -370,20 +501,18 @@ describe('ImportDrawer', () => {
           { row_number: 2, qml_line: 'ordered: stage one ; stage two' }
         ],
         valid_row_count: 3,
-        skipped_duplicate_count: 1,
-        skipped_rows: result.skipped_rows,
-        report_text: 'All remaining rows are valid. Commit to save them.',
-        unresolved_rows: []
+        exact_duplicate_count: 1,
+        review_rows: [],
+        report_text: '3 ready to commit | 1 exact duplicates omitted'
       },
       busy: false,
       onClose: vi.fn(),
       onStartImport: vi.fn(),
-      onRevalidate: revalidateSpy,
       onCommit: commitSpy
     });
 
-    expect(screen.queryByRole('button', { name: 'Discard row 2' })).toBeNull();
-    await user.click(screen.getByRole('button', { name: 'Commit Import' }));
+    expect(screen.queryByRole('button', { name: 'Remove row 2' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Save' }));
     expect(commitSpy).toHaveBeenCalledWith([
       { row_number: 1, qml_line: 'hund [dog]' },
       { row_number: 2, qml_line: 'ordered: stage one ; stage two' }
@@ -396,16 +525,15 @@ describe('ImportDrawer', () => {
       busy: false,
       onClose: vi.fn(),
       onStartImport: vi.fn(),
-      onRevalidate: revalidateSpy,
       onCommit: commitSpy
     });
 
     expect(screen.getByRole('button', { name: 'Start Import' })).toBeTruthy();
+    expect((screen.getByLabelText('Choose file') as HTMLInputElement).accept).toContain('.qml');
   });
 
-  it('shows relocation review rows and requires revalidation after editing merge QML', async () => {
+  it('saves edited relocation rows directly without a separate revalidate step', async () => {
     const user = userEvent.setup();
-    const revalidateSpy = vi.fn().mockResolvedValue(undefined);
     const commitSpy = vi.fn().mockResolvedValue(undefined);
     const moduleNode: ModuleNode = {
       id: 20,
@@ -419,17 +547,18 @@ describe('ImportDrawer', () => {
       ready_to_commit: true,
       rows: [{ row_number: 3, qml_line: 'hund [dog | canine | pooch]' }],
       valid_row_count: 1,
-      skipped_duplicate_count: 0,
-      skipped_rows: [],
-      unresolved_rows: [],
-      relocation_rows: [
+      exact_duplicate_count: 0,
+      review_rows: [
         {
           row_number: 3,
           qml_line: 'hund [dog | canine | pooch]',
           target_module_full_slug: 'norwegian/vocabulary/target',
-          status: 'merge',
-          requires_edit: true,
-          ready_without_edit: false,
+          status: 'relocation',
+          status_text:
+            'This prompt already exists in norwegian/vocabulary/source_a. Commit will move and revise that question in norwegian/vocabulary/target.',
+          editable: true,
+          blocking: false,
+          current_answer_blocks: ['dog'],
           imported_answer_blocks: ['dog | canine | pooch'],
           matched_questions: [
             {
@@ -438,18 +567,11 @@ describe('ImportDrawer', () => {
               module_full_slug: 'norwegian/vocabulary/source_a',
               qml_line: 'hund [dog]',
               answer_blocks: ['dog']
-            },
-            {
-              question_id: 8,
-              module_id: 5,
-              module_full_slug: 'norwegian/vocabulary/source_b',
-              qml_line: 'hund [canine]',
-              answer_blocks: ['canine']
             }
           ]
         }
       ],
-      report_text: 'row 3 | merge | norwegian/vocabulary/source_a -> norwegian/vocabulary/source_b -> norwegian/vocabulary/target | hund [dog | canine | pooch]',
+      report_text: '1 ready to commit | 1 rows need review',
       committed: false,
       committed_count: 0
     };
@@ -462,22 +584,251 @@ describe('ImportDrawer', () => {
         busy: false,
         onClose: vi.fn(),
         onStartImport: vi.fn(),
-        onRevalidate: revalidateSpy,
         onCommit: commitSpy
       }
     });
 
-    expect(screen.getByText('Relocations and merge review')).toBeTruthy();
-    expect(screen.getByText('Merge duplicates')).toBeTruthy();
-    expect(screen.getByText('dog')).toBeTruthy();
-    expect(screen.getByText('canine')).toBeTruthy();
+    const currentAndNewDog = screen.getByRole('button', { name: 'Toggle current and imported answer dog in QML row 3' });
+    expect(currentAndNewDog).toBeTruthy();
+    expect(currentAndNewDog.className).toContain('selected-answer-choice');
+    expect(currentAndNewDog.className).toContain('source-current-new');
+    const relocationLine = screen.getByText('3');
+    expect(relocationLine.getAttribute('title')).toContain('Commit will move and revise');
 
-    const mergeInput = screen.getByDisplayValue('hund [dog | canine | pooch]') as HTMLInputElement;
+    const mergeInput = screen.getByDisplayValue('hund [dog]') as HTMLInputElement;
     await fireEvent.input(mergeInput, { target: { value: 'hund [dog | canine]' } });
 
-    expect((screen.getByRole('button', { name: 'Commit Import' }) as HTMLButtonElement).disabled).toBe(true);
-    await user.click(screen.getByRole('button', { name: 'Revalidate Rows' }));
-    expect(revalidateSpy).toHaveBeenCalledWith([{ row_number: 3, qml_line: 'hund [dog | canine]' }]);
-    expect(commitSpy).not.toHaveBeenCalled();
+    expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(false);
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(commitSpy).toHaveBeenCalledWith([{ row_number: 3, qml_line: 'hund [dog | canine]' }]);
+  });
+
+  it('shows an inline nothing-to-save message for exact-duplicate-only imports', async () => {
+    const user = userEvent.setup();
+    const commitSpy = vi.fn().mockResolvedValue(undefined);
+    const moduleNode: ModuleNode = {
+      id: 30,
+      title: 'target',
+      slug: 'target',
+      full_slug: 'norwegian/vocabulary/target',
+      instruction: 'Target module.',
+      children: []
+    };
+    const result: QuestionImportResult = {
+      ready_to_commit: false,
+      rows: [{ row_number: 1, qml_line: 'år [year]' }],
+      valid_row_count: 0,
+      exact_duplicate_count: 1,
+      review_rows: [],
+      report_text: '1 exact duplicates omitted',
+      committed: false,
+      committed_count: 0
+    };
+
+    const view = render(ImportDrawer, {
+      props: {
+        open: true,
+        moduleNode,
+        result,
+        busy: false,
+        onClose: vi.fn(),
+        onStartImport: vi.fn(),
+        onCommit: commitSpy
+      }
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(commitSpy).toHaveBeenCalledWith([{ row_number: 1, qml_line: 'år [year]' }]);
+
+    await view.rerender({
+      open: true,
+      moduleNode,
+      result,
+      busy: false,
+      onClose: vi.fn(),
+      onStartImport: vi.fn(),
+      onCommit: commitSpy
+    });
+
+    expect(screen.getByText('Nothing new to save.')).toBeTruthy();
+  });
+
+  it('publishes draft text and edited review rows so a parent can persist them', async () => {
+    const user = userEvent.setup();
+    const draftSpy = vi.fn();
+    const moduleNode: ModuleNode = {
+      id: 31,
+      title: 'target',
+      slug: 'target',
+      full_slug: 'norwegian/vocabulary/target',
+      instruction: 'Target module.',
+      children: []
+    };
+    const result: QuestionImportResult = {
+      ready_to_commit: true,
+      rows: [{ row_number: 4, qml_line: 'mot [toward]' }],
+      valid_row_count: 1,
+      exact_duplicate_count: 0,
+      review_rows: [
+        {
+          row_number: 4,
+          qml_line: 'mot [toward]',
+          status: 'duplicate',
+          status_text: 'This prompt already exists in the target leaf.',
+          editable: true,
+          blocking: false,
+          current_answer_blocks: ['against'],
+          imported_answer_blocks: ['toward'],
+          matched_questions: [
+            {
+              question_id: 8,
+              module_id: 31,
+              module_full_slug: 'norwegian/vocabulary/target',
+              qml_line: 'mot [against]',
+              answer_blocks: ['against']
+            }
+          ]
+        }
+      ],
+      report_text: '1 row ready',
+      committed: false,
+      committed_count: 0
+    };
+
+    const view = render(ImportDrawer, {
+      props: {
+        open: true,
+        moduleNode,
+        result,
+        busy: false,
+        draftText: 'mot [toward]',
+        draftRows: [{ row_number: 4, qml_line: 'mot [toward]' }],
+        onClose: vi.fn(),
+        onDraftChange: draftSpy,
+        onStartImport: vi.fn(),
+        onCommit: vi.fn()
+      }
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Toggle current answer against in QML row 4' }));
+    expect(draftSpy).toHaveBeenLastCalledWith('mot [toward]', [{ row_number: 4, qml_line: 'mot [toward | against]' }]);
+
+    await user.click(screen.getByRole('button', { name: 'Remove row 4' }));
+    expect(draftSpy).toHaveBeenLastCalledWith('mot [toward]', []);
+
+    await view.rerender({
+      open: true,
+      moduleNode,
+      result: null,
+      busy: false,
+      draftText: 'år [year]',
+      draftRows: [],
+      onClose: vi.fn(),
+      onDraftChange: draftSpy,
+      onStartImport: vi.fn(),
+      onCommit: vi.fn()
+    });
+
+    const qmlTextarea = screen.getByLabelText('QML text') as HTMLTextAreaElement;
+    await fireEvent.input(qmlTextarea, { target: { value: 'selv [self]' } });
+    await waitFor(() => {
+      expect(draftSpy.mock.calls.some(([qmlText, rows]) => qmlText === 'selv [self]' && rows.length === 0)).toBe(true);
+    });
+  });
+
+  it('keeps answer chips responsive when the parent echoes draft rows back after every click', async () => {
+    const user = userEvent.setup();
+    const moduleNode: ModuleNode = {
+      id: 32,
+      title: 'target',
+      slug: 'target',
+      full_slug: 'norwegian/vocabulary/target',
+      instruction: 'Target module.',
+      children: []
+    };
+    const result: QuestionImportResult = {
+      ready_to_commit: true,
+      rows: [{ row_number: 4, qml_line: 'mot [toward]' }],
+      valid_row_count: 1,
+      exact_duplicate_count: 0,
+      review_rows: [
+        {
+          row_number: 4,
+          qml_line: 'mot [toward]',
+          status: 'duplicate',
+          status_text: 'This prompt already exists in the target leaf.',
+          editable: true,
+          blocking: false,
+          current_answer_blocks: ['against'],
+          imported_answer_blocks: ['toward'],
+          matched_questions: [
+            {
+              question_id: 8,
+              module_id: 32,
+              module_full_slug: 'norwegian/vocabulary/target',
+              qml_line: 'mot [against]',
+              answer_blocks: ['against']
+            }
+          ]
+        }
+      ],
+      report_text: '1 row ready',
+      committed: false,
+      committed_count: 0
+    };
+
+    let echoedRows = [{ row_number: 4, qml_line: 'mot [against]' }];
+    let view: ReturnType<typeof render> | null = null;
+    const rerenderWithEcho = async (): Promise<void> => {
+      if (!view) {
+        return;
+      }
+      await view.rerender({
+        open: true,
+        moduleNode,
+        result,
+        busy: false,
+        draftText: 'mot [toward]',
+        draftRows: echoedRows,
+        onClose: vi.fn(),
+        onDraftChange: handleDraftChange,
+        onStartImport: vi.fn(),
+        onCommit: vi.fn()
+      });
+    };
+    const handleDraftChange = (qmlText: string, rows: { row_number: number; qml_line: string }[]): void => {
+      echoedRows = rows.map((row) => ({ ...row }));
+      void rerenderWithEcho();
+    };
+
+    view = render(ImportDrawer, {
+      props: {
+        open: true,
+        moduleNode,
+        result,
+        busy: false,
+        draftText: 'mot [toward]',
+        draftRows: echoedRows,
+        onClose: vi.fn(),
+        onDraftChange: handleDraftChange,
+        onStartImport: vi.fn(),
+        onCommit: vi.fn()
+      }
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Toggle imported answer toward in QML row 4' }));
+    await waitFor(() => {
+      expect((screen.getByDisplayValue('mot [against | toward]') as HTMLInputElement).value).toBe('mot [against | toward]');
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Toggle current answer against in QML row 4' }));
+    await waitFor(() => {
+      expect((screen.getByDisplayValue('mot [toward]') as HTMLInputElement).value).toBe('mot [toward]');
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Toggle imported answer toward in QML row 4' }));
+    await waitFor(() => {
+      expect((screen.getByDisplayValue('mot []') as HTMLInputElement).value).toBe('mot []');
+    });
   });
 });

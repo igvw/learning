@@ -1,16 +1,65 @@
 import { findModuleNode } from './module-paths';
-import type { ModuleNode, User } from './types';
+import { cloneImportRows } from './import-session';
+import type { ModuleNode, QuestionImportResult, QuestionImportRowPayload, User } from './types';
 
 const LEGACY_ACTIVE_USER_STORAGE_KEY = 'learning.active-user-id';
 const LEGACY_ACTIVE_MODULE_STORAGE_KEY = 'learning.selected-module-id';
+const IMPORT_SESSION_STORAGE_SUFFIX = 'import-drawer-session';
+
+export interface ImportSessionSnapshot {
+  targetModuleId: number;
+  qmlText: string;
+  rows: QuestionImportRowPayload[];
+  result: QuestionImportResult | null;
+}
 
 export function storageKey(instanceKey: string, suffix: string): string {
   return `learning.${instanceKey}.${suffix}`;
 }
 
+function isQuestionImportRowPayload(value: unknown): value is QuestionImportRowPayload {
+  return Boolean(
+    value &&
+      typeof value === 'object' &&
+      typeof (value as QuestionImportRowPayload).row_number === 'number' &&
+      typeof (value as QuestionImportRowPayload).qml_line === 'string'
+  );
+}
+
+function normalizeImportRows(value: unknown): QuestionImportRowPayload[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter(isQuestionImportRowPayload)
+    .map((row) => ({
+      row_number: row.row_number,
+      qml_line: row.qml_line
+    }))
+    .sort((left, right) => left.row_number - right.row_number);
+}
+
+function isQuestionImportResult(value: unknown): value is QuestionImportResult {
+  const result = value as QuestionImportResult;
+  return Boolean(
+    value &&
+      typeof value === 'object' &&
+      Array.isArray(result.rows) &&
+      Array.isArray(result.review_rows) &&
+      typeof result.valid_row_count === 'number' &&
+      typeof result.exact_duplicate_count === 'number' &&
+      (result.committable_row_numbers === undefined || Array.isArray(result.committable_row_numbers))
+  );
+}
+
 export function clearLegacySelectionStorage(storage: Storage): void {
   storage.removeItem(LEGACY_ACTIVE_USER_STORAGE_KEY);
   storage.removeItem(LEGACY_ACTIVE_MODULE_STORAGE_KEY);
+}
+
+export function clearImportSessionStorage(storage: Storage, instanceKey: string): void {
+  storage.removeItem(storageKey(instanceKey, IMPORT_SESSION_STORAGE_SUFFIX));
 }
 
 export function routeFromPath(pathname: string): 'quiz' | 'stats' | 'admin' {
@@ -169,4 +218,89 @@ export function restoreActiveUserId(
     return users[0].id;
   }
   return null;
+}
+
+export function persistImportSession(
+  storage: Storage,
+  {
+    instanceKey,
+    modules,
+    open,
+    targetModuleId,
+    qmlText,
+    rows,
+    result
+  }: {
+    instanceKey: string;
+    modules: ModuleNode[];
+    open: boolean;
+    targetModuleId: number | null;
+    qmlText: string;
+    rows: QuestionImportRowPayload[];
+    result: QuestionImportResult | null;
+  }
+): void {
+  if (!open || targetModuleId === null) {
+    clearImportSessionStorage(storage, instanceKey);
+    return;
+  }
+
+  const targetModule = findModuleNode(modules, targetModuleId);
+  if (!targetModule) {
+    clearImportSessionStorage(storage, instanceKey);
+    return;
+  }
+
+  storage.setItem(
+    storageKey(instanceKey, IMPORT_SESSION_STORAGE_SUFFIX),
+    JSON.stringify({
+      target_module_full_slug: targetModule.full_slug,
+      qml_text: qmlText,
+      rows: cloneImportRows(rows),
+      result
+    })
+  );
+}
+
+export function restoreImportSession(
+  storage: Storage,
+  {
+    instanceKey,
+    modules
+  }: {
+    instanceKey: string;
+    modules: ModuleNode[];
+  }
+): ImportSessionSnapshot | null {
+  const rawValue = storage.getItem(storageKey(instanceKey, IMPORT_SESSION_STORAGE_SUFFIX));
+  if (!rawValue) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(rawValue) as {
+      target_module_full_slug?: string;
+      qml_text?: string;
+      rows?: unknown;
+      result?: unknown;
+    };
+    const targetModuleId = findModuleIdByFullSlug(modules, parsed.target_module_full_slug ?? null);
+    if (targetModuleId === null) {
+      clearImportSessionStorage(storage, instanceKey);
+      return null;
+    }
+
+    const result = isQuestionImportResult(parsed.result) ? parsed.result : null;
+    const rows = normalizeImportRows(parsed.rows);
+
+    return {
+      targetModuleId,
+      qmlText: typeof parsed.qml_text === 'string' ? parsed.qml_text : '',
+      rows: rows.length > 0 ? rows : result ? cloneImportRows(result.rows) : [],
+      result
+    };
+  } catch {
+    clearImportSessionStorage(storage, instanceKey);
+    return null;
+  }
 }

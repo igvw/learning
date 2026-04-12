@@ -35,6 +35,7 @@ from .services import (
     create_question,
     create_quiz_session,
     create_user,
+    delete_question,
     get_module_tree,
     get_stats,
     list_users,
@@ -222,6 +223,14 @@ def create_app(
             try:
                 draft = QuestionDraftIn(**payload.model_dump(exclude={"reset_stats"}))
                 return revise_question(connection, question_id, draft, reset_stats=payload.reset_stats)
+            except ServiceError as error:
+                _handle_service_error(error)
+
+    @app.delete("/api/questions/{question_id}", response_model=QuestionMutationOut)
+    def questions_delete(question_id: int) -> dict:
+        with get_connection(app.state.database_url) as connection:
+            try:
+                return delete_question(connection, question_id)
             except ServiceError as error:
                 _handle_service_error(error)
 

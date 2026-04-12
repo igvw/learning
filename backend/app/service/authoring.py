@@ -169,10 +169,26 @@ def create_question(connection: DatabaseConnection, payload: QuestionDraftIn, *,
     return {"question_id": question_id}
 
 
-def revise_question(connection: DatabaseConnection, question_id: int, payload: QuestionDraftIn, *, reset_stats: bool) -> dict[str, int]:
-    current = connection.execute("SELECT id, module_id, rank FROM questions WHERE id = ?", (question_id,)).fetchone()
-    if current is None:
+def _question_row(connection: DatabaseConnection, question_id: int) -> Any:
+    return connection.execute(
+        """
+        SELECT id, module_id, rank
+        FROM questions
+        WHERE id = ?
+        """,
+        (question_id,),
+    ).fetchone()
+
+
+def _require_question_row(connection: DatabaseConnection, question_id: int) -> Any:
+    row = _question_row(connection, question_id)
+    if row is None:
         raise NotFoundError(f"Question {question_id} was not found.")
+    return row
+
+
+def revise_question(connection: DatabaseConnection, question_id: int, payload: QuestionDraftIn, *, reset_stats: bool) -> dict[str, int]:
+    current = _require_question_row(connection, question_id)
 
     ensure_leaf_module(connection, payload.module_id)
     type_config = serialize_type_config(payload)
@@ -230,6 +246,12 @@ def revise_question(connection: DatabaseConnection, question_id: int, payload: Q
     return {"question_id": question_id}
 
 
+def delete_question(connection: DatabaseConnection, question_id: int) -> dict[str, int]:
+    _require_question_row(connection, question_id)
+    delete_question_and_close_rank_gap(connection, question_id)
+    return {"question_id": question_id}
+
+
 def set_question_review_flag(
     connection: DatabaseConnection,
     *,
@@ -238,9 +260,7 @@ def set_question_review_flag(
     review_flag: bool,
 ) -> dict[str, Any]:
     ensure_user_exists(connection, user_id)
-    row = connection.execute("SELECT id FROM questions WHERE id = ?", (question_id,)).fetchone()
-    if row is None:
-        raise NotFoundError(f"Question {question_id} was not found.")
+    _require_question_row(connection, question_id)
     connection.execute(
         """
         INSERT INTO user_review_flags (user_id, question_id, review_flag, updated_at)
@@ -252,19 +272,6 @@ def set_question_review_flag(
         (user_id, question_id, int(review_flag), utc_now()),
     )
     return {"question_id": question_id, "review_flag": review_flag}
-
-
-def _question_row(connection: DatabaseConnection, question_id: int) -> Any:
-    return connection.execute(
-        """
-        SELECT id, module_id, rank
-        FROM questions
-        WHERE id = ?
-        """,
-        (question_id,),
-    ).fetchone()
-
-
 def _session_item_merge_priority(row: dict[str, Any]) -> tuple[int, float, int]:
     answered = row["score_earned"] is not None and row["score_possible"] is not None
     if answered and row["score_possible"]:

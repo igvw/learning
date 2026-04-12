@@ -3,8 +3,8 @@
 Learning App is a local-first study tool with three main surfaces:
 
 - `Quiz` for active recall
-- `Stats` for question performance and revision work
-- `Admin` for module management and QML imports
+- `Stats` for question performance, revision, and delete work
+- `Admin` for module management, users, and QML imports
 
 The current runtime target is Docker Compose with:
 

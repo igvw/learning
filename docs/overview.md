@@ -88,12 +88,14 @@ Content can come from repo seed files and from Admin flows.
 
 Current behavior:
 
-- repo seed content still imports from `content/modules`
-- modules can be created from the Admin page
-- QML imports are stateless and additive
-- duplicate prompts in overlapping imports are skipped automatically
-- authored question lines live in `questions.dsl`
-- the current format is described in [Question Markup DSL](question-markup.md)
+- repo seed content imports from `content/modules/**/questions.dsl`
+- Admin imports use pasted QML or `.qml` files targeted at one leaf module
+- exact duplicate import rows are omitted and summarized
+- same-leaf duplicate rows can revise the existing question in place
+- same-tree prompt matches can move an existing question into a different leaf while keeping its quiz history and derived scheduling
+- invalid or conflicting rows stay in review until they are edited or removed
+- leaf modules can be renamed from Admin without changing the underlying module id
+- the current question-line format is described in [Question Markup DSL](question-markup.md)
 
 ## Main Screens
 
@@ -114,15 +116,16 @@ The stats page combines:
 - recent quiz performance
 - spaced-repetition and entry-state graphs
 - a sortable question table
-- question editing entry points
+- question revision and delete entry points
 
 ### Admin
 
 The Admin page owns shared-content administration:
 
+- leaf-module rename and instruction updates
 - module creation
 - user creation
-- question import
+- question import with review and chunked save progress
 
 ## Documentation Principle
 

@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field, model_validator
 
 type QuestionType = Literal["single_text", "multi_text", "ordered_multi", "inline_cloze", "computed_text"]
 type PriorityMode = Literal["high", "mid", "low"]
-type QuestionImportRelocationStatus = Literal["move", "revise", "merge"]
+type QuestionImportReviewStatus = Literal["invalid", "duplicate", "relocation", "info", "conflict"]
 type ScheduleBucket = Literal[
     "hot0",
     "hot1",
@@ -236,35 +236,23 @@ class CommitQuestionImportIn(BaseModel):
     rows: list[QuestionImportRowIn] = Field(default_factory=list, min_length=1)
 
 
-class QuestionImportUnresolvedRowOut(BaseModel):
-    row_number: int
-    qml_line: str
-    issues: list[str]
-    inferred_type: QuestionType | None = None
-
-
-class QuestionImportSkippedRowOut(BaseModel):
-    row_number: int
-    qml_line: str
-    reason: str
-    inferred_type: QuestionType | None = None
-
-
 class QuestionImportMatchedQuestionOut(BaseModel):
-    question_id: int
-    module_id: int
+    question_id: int | None = None
+    module_id: int | None = None
     module_full_slug: str
     qml_line: str
     answer_blocks: list[str] = Field(default_factory=list)
 
 
-class QuestionImportRelocationRowOut(BaseModel):
+class QuestionImportReviewRowOut(BaseModel):
     row_number: int
     qml_line: str
-    target_module_full_slug: str
-    status: QuestionImportRelocationStatus
-    requires_edit: bool = False
-    ready_without_edit: bool = False
+    status: QuestionImportReviewStatus
+    status_text: str
+    editable: bool = False
+    blocking: bool = False
+    target_module_full_slug: str | None = None
+    current_answer_blocks: list[str] = Field(default_factory=list)
     imported_answer_blocks: list[str] = Field(default_factory=list)
     matched_questions: list[QuestionImportMatchedQuestionOut] = Field(default_factory=list)
 
@@ -273,10 +261,9 @@ class QuestionImportResultOut(BaseModel):
     ready_to_commit: bool
     rows: list[QuestionImportRowOut] = Field(default_factory=list)
     valid_row_count: int
-    skipped_duplicate_count: int
-    skipped_rows: list[QuestionImportSkippedRowOut] = Field(default_factory=list)
-    unresolved_rows: list[QuestionImportUnresolvedRowOut]
-    relocation_rows: list[QuestionImportRelocationRowOut] = Field(default_factory=list)
+    committable_row_numbers: list[int] = Field(default_factory=list)
+    exact_duplicate_count: int = 0
+    review_rows: list[QuestionImportReviewRowOut] = Field(default_factory=list)
     report_text: str
     committed: bool = False
     committed_count: int = 0

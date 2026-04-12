@@ -141,6 +141,12 @@ export function reviseQuestion(
   });
 }
 
+export function deleteQuestion(questionId: number): Promise<QuestionMutationResult> {
+  return request<QuestionMutationResult>(`/api/questions/${questionId}`, {
+    method: 'DELETE'
+  });
+}
+
 export function setQuestionReviewFlag(
   userId: number,
   questionId: number,
