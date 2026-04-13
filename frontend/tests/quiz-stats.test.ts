@@ -1,6 +1,6 @@
 import './test-support';
 
-import { render, screen, waitFor } from '@testing-library/svelte';
+import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -336,17 +336,17 @@ describe('QuizPage', () => {
 });
 
 describe('StatsPage', () => {
-  it('opens a question row, toggles the review filter, renders both graphs, and sorts the table', async () => {
+  it('splits review questions into a separate table, keeps graphs visible, and sorts both partitions', async () => {
     const user = userEvent.setup();
     const openSpy = vi.fn();
     const toggleSpy = vi.fn();
     const stats: StatsResponse = {
       summary: {
-        total_questions: 2,
-        reviewed_questions: 1,
-        total_attempts: 3,
-        total_correct: 2,
-        total_possible: 3,
+        total_questions: 4,
+        reviewed_questions: 2,
+        total_attempts: 7,
+        total_correct: 4,
+        total_possible: 6,
         accuracy: 2 / 3
       },
       recent_sessions: [
@@ -448,6 +448,37 @@ describe('StatsPage', () => {
             retry_pending: false
           },
           recent_incorrect_answers: []
+        },
+        {
+          question_id: 53,
+          module_id: 3,
+          module_full_slug: 'biology/plants',
+          prompt: 'What process lets plants turn light into stored energy?',
+          prompt_preview: 'What process lets plants turn light into stored energy?',
+          question_type: 'single_text',
+          rank: 1,
+          attempts: 2,
+          correct_percentage: 1 / 2,
+          last_asked_at: '2026-04-03T07:00:00Z',
+          review_flag: true,
+          accepted_answers: [['photosynthesis']],
+          segments: [],
+          schedule: {
+            bucket: 'hot0',
+            logical_bucket: 'review',
+            recovery_streak: 0,
+            interval_step: 0,
+            last_incorrect_at: '2026-04-03T07:00:00Z',
+            next_due_at: null,
+            retry_pending: true
+          },
+          recent_incorrect_answers: [
+            {
+              answer_text: 'respiration',
+              count: 1,
+              latest_answered_at: '2026-04-03T07:00:00Z'
+            }
+          ]
         }
       ]
     };
@@ -464,11 +495,31 @@ describe('StatsPage', () => {
       }
     });
 
-    await user.click(screen.getByText('What structure anchors most plants in the ground?'));
-    expect(openSpy).toHaveBeenCalledWith(stats.questions[0]);
+    expect(screen.queryByRole('heading', { name: 'Review Questions' })).toBeNull();
+    expect(screen.queryByText('What structure anchors most plants in the ground?')).toBeNull();
+
+    await user.click(screen.getByText('What is the capital of Canada?'));
+    expect(openSpy).toHaveBeenCalledWith(stats.questions[1]);
 
     await user.click(screen.getByRole('checkbox'));
     expect(toggleSpy).toHaveBeenCalledWith(true);
+    await view.rerender({
+      moduleLabel: 'Biology',
+      stats,
+      loading: false,
+      reviewOnly: true,
+      onToggleReviewOnly: toggleSpy,
+      onOpenCreate: vi.fn(),
+      onOpenEdit: openSpy
+    });
+
+    const mainPanel = screen.getByRole('heading', { name: 'Questions' }).closest('.panel') as HTMLElement;
+    const reviewPanel = screen.getByRole('heading', { name: 'Review Questions' }).closest('.panel') as HTMLElement;
+    expect(within(reviewPanel).getByText('What structure anchors most plants in the ground?')).toBeTruthy();
+    expect(within(reviewPanel).getByText('What process lets plants turn light into stored energy?')).toBeTruthy();
+
+    await user.click(within(reviewPanel).getByText('What structure anchors most plants in the ground?'));
+    expect(openSpy).toHaveBeenLastCalledWith(stats.questions[0]);
 
     expect(screen.getByRole('img', { name: 'Recent session accuracy graph' })).toBeTruthy();
     expect(screen.getByRole('img', { name: 'Spaced repetition stage counts' })).toBeTruthy();
@@ -490,34 +541,134 @@ describe('StatsPage', () => {
     expect(graphLabels).toContain('Mastery');
     expect(view.container.querySelector('.graph-average-line title')?.textContent).toBe('83%');
     expect(screen.queryByRole('button', { name: 'Review' })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Bucket' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Last seen' })).toBeTruthy();
+    expect(within(mainPanel).getByRole('button', { name: 'Bucket' })).toBeTruthy();
+    expect(within(mainPanel).getByRole('button', { name: 'Last seen' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Type' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Module' })).toBeNull();
-    const firstRowClass = screen.getByText('What structure anchors most plants in the ground?').closest('tr')?.className ?? '';
+    const firstRowClass =
+      within(reviewPanel).getByText('What structure anchors most plants in the ground?').closest('tr')?.className ?? '';
     expect(firstRowClass).toContain('flagged-review');
     expect(firstRowClass).not.toContain('hot1-row');
 
-    await user.click(screen.getByRole('button', { name: 'Bucket' }));
+    await user.click(within(mainPanel).getByRole('button', { name: 'Bucket' }));
     await waitFor(() => {
-      const rowsAfterScheduleSort = screen.getAllByRole('row');
+      const rowsAfterScheduleSort = within(mainPanel).getAllByRole('row');
       expect(rowsAfterScheduleSort[1].textContent).toContain('What is the capital of Canada?');
       expect(rowsAfterScheduleSort[1].textContent).toContain('3h');
     });
 
-    await user.click(screen.getByRole('button', { name: 'Attempts' }));
+    await user.click(within(mainPanel).getByRole('button', { name: 'Attempts' }));
     await waitFor(() => {
-      const rowsAfterSort = screen.getAllByRole('row');
+      const rowsAfterSort = within(mainPanel).getAllByRole('row');
       expect(rowsAfterSort[1].textContent).toContain('What is the capital of Canada?');
     });
 
-    await user.click(screen.getByRole('button', { name: 'Last seen' }));
+    await user.click(within(mainPanel).getByRole('button', { name: 'Last seen' }));
     await waitFor(() => {
-      const rowsAfterLastSeenSort = screen.getAllByRole('row');
-      expect(rowsAfterLastSeenSort[1].textContent).toContain('What is the capital of Sweden?');
-      expect(rowsAfterLastSeenSort[2].textContent).toContain('What structure anchors most plants in the ground?');
-      expect(rowsAfterLastSeenSort[3].textContent).toContain('What is the capital of Canada?');
-      expect(rowsAfterLastSeenSort[3].textContent).toContain('Never');
+      const mainRowsAfterLastSeenSort = within(mainPanel).getAllByRole('row');
+      expect(mainRowsAfterLastSeenSort[1].textContent).toContain('What is the capital of Sweden?');
+      expect(mainRowsAfterLastSeenSort[2].textContent).toContain('What is the capital of Canada?');
+      expect(mainRowsAfterLastSeenSort[2].textContent).toContain('Never');
+
+      const reviewRowsAfterLastSeenSort = within(reviewPanel).getAllByRole('row');
+      expect(reviewRowsAfterLastSeenSort[1].textContent).toContain('What process lets plants turn light into stored energy?');
+      expect(reviewRowsAfterLastSeenSort[2].textContent).toContain('What structure anchors most plants in the ground?');
     });
+  });
+
+  it('shows an empty review table when the toggle is on but no review questions exist', () => {
+    render(StatsPage, {
+      props: {
+        stats: {
+          summary: {
+            total_questions: 1,
+            reviewed_questions: 0,
+            total_attempts: 0,
+            total_correct: 0,
+            total_possible: 0,
+            accuracy: 0
+          },
+          recent_sessions: [],
+          questions: [
+            {
+              question_id: 1,
+              module_id: 2,
+              module_full_slug: 'geography/capitals',
+              prompt: 'What is the capital of Canada?',
+              prompt_preview: 'What is the capital of Canada?',
+              question_type: 'single_text',
+              rank: 1,
+              attempts: 0,
+              correct_percentage: 0,
+              last_asked_at: null,
+              review_flag: false,
+              accepted_answers: [['ottawa']],
+              segments: [],
+              recent_incorrect_answers: [],
+              schedule: {
+                bucket: 'unseen',
+                logical_bucket: 'unseen',
+                recovery_streak: null,
+                interval_step: null,
+                last_incorrect_at: null,
+                next_due_at: null,
+                retry_pending: false
+              }
+            }
+          ]
+        },
+        reviewOnly: true
+      }
+    });
+
+    expect(screen.getByRole('heading', { name: 'Review Questions' })).toBeTruthy();
+    expect(screen.getByText('No review questions in this scope.')).toBeTruthy();
+  });
+
+  it('shows an empty main table when every question is review-flagged', () => {
+    render(StatsPage, {
+      props: {
+        stats: {
+          summary: {
+            total_questions: 1,
+            reviewed_questions: 1,
+            total_attempts: 1,
+            total_correct: 1,
+            total_possible: 1,
+            accuracy: 1
+          },
+          recent_sessions: [],
+          questions: [
+            {
+              question_id: 1,
+              module_id: 2,
+              module_full_slug: 'biology/plants',
+              prompt: 'What structure anchors most plants in the ground?',
+              prompt_preview: 'What structure anchors most plants in the ground?',
+              question_type: 'single_text',
+              rank: 1,
+              attempts: 1,
+              correct_percentage: 1,
+              last_asked_at: '2026-04-01T06:00:00Z',
+              review_flag: true,
+              accepted_answers: [['roots']],
+              segments: [],
+              recent_incorrect_answers: [],
+              schedule: {
+                bucket: 'hot1_sit_out',
+                logical_bucket: 'review',
+                recovery_streak: 1,
+                interval_step: 0,
+                last_incorrect_at: '2026-04-01T06:00:00Z',
+                next_due_at: null,
+                retry_pending: false
+              }
+            }
+          ]
+        }
+      }
+    });
+
+    expect(screen.getByText('No non-review questions in this scope.')).toBeTruthy();
   });
 });

@@ -28,7 +28,7 @@ import ModuleMenu from '../src/components/ModuleMenu.svelte';
 import * as api from '../src/lib/api';
 import { persistImportSession } from '../src/lib/app-state';
 import { ensureModulePath } from '../src/lib/module-paths';
-import type { ModuleNode, QuestionImportResult, User } from '../src/lib/types';
+import type { ModuleNode, QuestionImportResult, StatsResponse, User } from '../src/lib/types';
 
 function deferred<T>(): {
   promise: Promise<T>;
@@ -168,6 +168,113 @@ describe('Header', () => {
 });
 
 describe('App', () => {
+  it('uses the review toggle as local table visibility instead of reloading stats', async () => {
+    const user = userEvent.setup();
+    window.history.replaceState({}, '', '/stats');
+
+    const modules: ModuleNode[] = [
+      {
+        id: 1,
+        title: 'Biology',
+        slug: 'biology',
+        full_slug: 'biology',
+        instruction: '',
+        children: []
+      }
+    ];
+    const users: User[] = [
+      {
+        id: 1,
+        handle: 'user-a',
+        display_name: 'User A',
+        created_at: '2026-04-05T10:00:00Z'
+      }
+    ];
+    const stats: StatsResponse = {
+      summary: {
+        total_questions: 2,
+        reviewed_questions: 1,
+        total_attempts: 1,
+        total_correct: 1,
+        total_possible: 1,
+        accuracy: 1
+      },
+      recent_sessions: [],
+      questions: [
+        {
+          question_id: 1,
+          module_id: 1,
+          module_full_slug: 'biology',
+          prompt: 'What structure anchors most plants in the ground?',
+          prompt_preview: 'What structure anchors most plants in the ground?',
+          question_type: 'single_text',
+          rank: 1,
+          attempts: 1,
+          correct_percentage: 1,
+          last_asked_at: '2026-04-01T06:00:00Z',
+          review_flag: true,
+          accepted_answers: [['roots']],
+          segments: [],
+          recent_incorrect_answers: [],
+          schedule: {
+            bucket: 'hot1_sit_out',
+            logical_bucket: 'review',
+            recovery_streak: 1,
+            interval_step: 0,
+            last_incorrect_at: '2026-04-01T06:00:00Z',
+            next_due_at: null,
+            retry_pending: false
+          }
+        },
+        {
+          question_id: 2,
+          module_id: 1,
+          module_full_slug: 'biology',
+          prompt: 'What is chlorophyll used for?',
+          prompt_preview: 'What is chlorophyll used for?',
+          question_type: 'single_text',
+          rank: 2,
+          attempts: 0,
+          correct_percentage: 0,
+          last_asked_at: null,
+          review_flag: false,
+          accepted_answers: [['photosynthesis']],
+          segments: [],
+          recent_incorrect_answers: [],
+          schedule: {
+            bucket: 'unseen',
+            logical_bucket: 'unseen',
+            recovery_streak: null,
+            interval_step: null,
+            last_incorrect_at: null,
+            next_due_at: null,
+            retry_pending: false
+          }
+        }
+      ]
+    };
+
+    vi.mocked(api.getHealth).mockResolvedValue({ status: 'ok', instance_key: 'local-dev' });
+    vi.mocked(api.getModulesTree).mockResolvedValue(modules);
+    vi.mocked(api.getUsers).mockResolvedValue(users);
+    vi.mocked(api.getStats).mockResolvedValue(stats);
+
+    render(App);
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Questions' })).toBeTruthy();
+    });
+
+    expect(api.getStats).toHaveBeenCalledTimes(1);
+    expect(api.getStats).toHaveBeenCalledWith(1, 1);
+    expect(screen.queryByRole('heading', { name: 'Review Questions' })).toBeNull();
+
+    await user.click(screen.getByRole('checkbox', { name: 'Review only' }));
+
+    expect(screen.getByRole('heading', { name: 'Review Questions' })).toBeTruthy();
+    expect(api.getStats).toHaveBeenCalledTimes(1);
+  });
+
   it('switches users from the header menu in the full app and updates persisted state', async () => {
     const user = userEvent.setup();
     const modules: ModuleNode[] = [

@@ -1,34 +1,33 @@
 # TODO
 
-## Priority 1: Security And Access
+This file is the short tracker. The fuller alpha-to-beta product roadmap lives in [roadmap.md](roadmap.md).
 
-- Harden all user-authored text against injection attacks:
-  sanitize and safely render QML, prompts, answers, module titles, handles, and display names
-- Add input limits and parser hardening for QML imports, question editing, and answer submission
-- Add passwords and proper authentication for users
-- Add guest, user, and admin modes with real authorization boundaries
-- Restrict admin-only actions:
-  module creation, question creation/revision, imports, and user management should not be open to ordinary users
-- Add production security basics for public deployment:
-  secure session handling, CSRF protection if cookie auth is used, tighter CORS, security headers, and rate limiting
+## Alpha blockers
 
-## Priority 2: Runtime And Deployment
+- Harden all user-authored text and parsing paths
+- Add passwords, authentication, and guest/user/admin authorization
+- Make private hosting production-safe with HTTPS and security defaults
+- Add reliable backup and restore for hosted use
+- Fix rank/order performance so imports and bulk authoring scale better
 
-- Refactor backend code to make good use of newer Python features now that the 3.14 baseline is in place
-- Host the app on a public URL with HTTPS and production deployment hardening
-- Add backup and restore guidance for hosted deployments
+## Alpha work that can continue in parallel
 
-## Priority 3: Product And Authoring Follow-Ups
+- Improve authoring and import workflows
+- Make small UX improvements that reduce friction
+- Improve content-building tooling
 
-- Config-driven behavior
-- Spaced repetition algorithm variants
-- Export bundles
-- QML v2: ghost-text syntax for authoring hints and richer examples
+## Beta focus
 
-## Priority 4: Eternal Slimdown
+- Complete revise mode
+- Mobile-friendly study modes, especially multiple choice
+- More performant data model and database design
+- QML v2
+- Theme presets and background treatments
+- Better full-database import/export UX
 
-Do this after any major piece of feature additions
+## Later beta or post-beta
 
-- Slim down data model further
-- Slim down API further
-- Slim down UI further
+- A/B testing
+- Alternative repetition algorithms
+- Retention comparisons across variants
+- Bucket-structure experimentation

@@ -69,7 +69,8 @@ Current behavior:
 - recent session performance graph
 - spaced-repetition stages graph
 - entry-state graph
-- sortable question table
+- sortable main question table
+- optional review-only table toggled from the checkbox at the top
 - floating create-question action
 
 The question table currently focuses on:
@@ -81,10 +82,13 @@ The question table currently focuses on:
 - attempts
 - correctness
 
-Visual treatment:
+Current table behavior:
 
-- review-flagged rows are orange
-- hot rows are shaded red in two intensities
+- the main table excludes review-flagged questions
+- checking `Review only` reveals a separate review table below the main table
+- cards and graphs stay based on the full module scope when the review table is shown
+- review rows stay orange in the dedicated review table
+- hot rows are shaded red in two intensities in the main table
 - logical bucket and hotness are separated intentionally
 
 ## Revision Drawer

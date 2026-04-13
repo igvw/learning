@@ -111,13 +111,13 @@ export function submitQuizAnswer(
   );
 }
 
-export function getStats(userId: number, moduleId: number | null, reviewOnly: boolean): Promise<StatsResponse> {
+export function getStats(userId: number, moduleId: number | null): Promise<StatsResponse> {
   const params = new URLSearchParams();
   if (moduleId !== null) {
     params.set('module_id', String(moduleId));
   }
-  params.set('review_only', String(reviewOnly));
-  return request<StatsResponse>(`/api/stats?${params.toString()}`, undefined, userId);
+  const query = params.toString();
+  return request<StatsResponse>(query ? `/api/stats?${query}` : '/api/stats', undefined, userId);
 }
 
 export function createQuestion(userId: number | null, payload: QuestionDraftPayload): Promise<QuestionMutationResult> {

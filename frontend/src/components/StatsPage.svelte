@@ -49,7 +49,10 @@
     return sortDirection === 'asc' ? ' ↑' : ' ↓';
   }
 
-  $: sortedQuestions = stats ? sortQuestions(stats.questions, sortKey, sortDirection) : [];
+  $: mainQuestions = stats ? stats.questions.filter((question) => !question.review_flag) : [];
+  $: reviewQuestions = stats ? stats.questions.filter((question) => question.review_flag) : [];
+  $: sortedMainQuestions = sortQuestions(mainQuestions, sortKey, sortDirection);
+  $: sortedReviewQuestions = sortQuestions(reviewQuestions, sortKey, sortDirection);
   $: sessionGraph = stats ? buildSessionGraph(stats.recent_sessions) : emptySessionGraph;
   $: recoveryStageGraph = stats ? buildRecoveryStageGraph(stats.questions) : emptyRecoveryStageGraph;
   $: auxiliaryStageGraph = stats ? buildAuxiliaryStageGraph(stats.questions) : emptyAuxiliaryStageGraph;
@@ -249,8 +252,8 @@
         </div>
       </div>
 
-      {#if sortedQuestions.length === 0}
-        <p class="muted-copy">No questions match this filter.</p>
+      {#if sortedMainQuestions.length === 0}
+        <p class="muted-copy">No non-review questions in this scope.</p>
       {:else}
         <div class="table-shell">
           <table>
@@ -270,9 +273,8 @@
               </tr>
             </thead>
             <tbody>
-              {#each sortedQuestions as question (question.question_id)}
+              {#each sortedMainQuestions as question (question.question_id)}
                 <tr
-                  class:flagged-review={question.review_flag}
                   class:hot0-row={!question.review_flag && question.schedule.bucket === 'hot0'}
                   class:hot1-row={!question.review_flag && (question.schedule.bucket === 'hot1' || question.schedule.bucket === 'hot1_sit_out')}
                   on:click={() => onOpenEdit(question)}
@@ -294,6 +296,59 @@
         </div>
       {/if}
     </div>
+
+    {#if reviewOnly}
+      <div class="panel table-panel">
+        <div class="panel-header">
+          <div>
+            <h3>Review Questions</h3>
+          </div>
+        </div>
+
+        {#if sortedReviewQuestions.length === 0}
+          <p class="muted-copy">No review questions in this scope.</p>
+        {:else}
+          <div class="table-shell">
+            <table>
+              <thead>
+                <tr>
+                  {#each sortDefinitions as definition (definition.key)}
+                    <th>
+                      <button
+                        class="table-sort-button"
+                        type="button"
+                        on:click={() => handleSort(definition.key)}
+                      >
+                        {definition.label}{sortIndicator(definition.key)}
+                      </button>
+                    </th>
+                  {/each}
+                </tr>
+              </thead>
+              <tbody>
+                {#each sortedReviewQuestions as question (question.question_id)}
+                  <tr
+                    class:flagged-review={question.review_flag}
+                    on:click={() => onOpenEdit(question)}
+                  >
+                    <td>{question.rank}</td>
+                    <td>
+                      <div class="question-cell">
+                        <span>{question.prompt_preview}</span>
+                      </div>
+                    </td>
+                    <td>{formatBucketLabel(question)}</td>
+                    <td>{formatLastSeen(question.last_asked_at)}</td>
+                    <td>{question.attempts}</td>
+                    <td>{Math.round(question.correct_percentage * 100)}%</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {/if}
+      </div>
+    {/if}
   {:else}
     <div class="panel empty-state">
       <h3>No stats to show yet.</h3>

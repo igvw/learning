@@ -10,6 +10,7 @@ For the current system spec, see:
 
 For supporting docs, see:
 
+- [Roadmap](roadmap.md)
 - [Spaced Repetition](spaced-repetition.md)
 - [Question Markup DSL](question-markup.md)
 - [Question Markup LLM Prompt](question-markup-llm-prompt.md)
@@ -115,7 +116,7 @@ The stats page combines:
 
 - recent quiz performance
 - spaced-repetition and entry-state graphs
-- a sortable question table
+- a sortable main question table plus a separate review table toggle
 - question revision and delete entry points
 
 ### Admin

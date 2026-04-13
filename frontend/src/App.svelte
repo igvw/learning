@@ -262,7 +262,7 @@
     statsLoading = true;
     statsError = '';
     try {
-      stats = await getStats(activeUserId, selectedModuleId, reviewOnly);
+      stats = await getStats(activeUserId, selectedModuleId);
     } catch (error) {
       statsError = error instanceof Error ? error.message : 'Unable to load stats.';
     } finally {
@@ -340,9 +340,8 @@
     }
   }
 
-  async function handleToggleReviewOnly(value: boolean): Promise<void> {
+  function handleToggleReviewOnly(value: boolean): void {
     reviewOnly = value;
-    await loadStats();
   }
 
   async function handleMarkForRevision(questionId: number): Promise<void> {
