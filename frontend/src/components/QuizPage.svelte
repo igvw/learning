@@ -136,6 +136,50 @@
     return '';
   }
 
+  function feedbackAnswerGroups(item: QuizItem): string[][] {
+    if (item.accepted_answer_groups && item.accepted_answer_groups.length > 0) {
+      return item.accepted_answer_groups.map((group) => [...group]);
+    }
+    if (item.canonical_answers && item.canonical_answers.length > 0) {
+      return item.canonical_answers.map((answer) => [answer]);
+    }
+    return [];
+  }
+
+  function defaultFeedbackAnswers(item: QuizItem): string[] {
+    if (item.default_answers && item.default_answers.length > 0) {
+      return item.default_answers;
+    }
+    return feedbackAnswerGroups(item).map((group) => group[0] ?? '');
+  }
+
+  function slotWasCorrect(item: QuizItem, slotIndex: number): boolean {
+    const slotResult = item.slot_results?.find((result) => result.index === slotIndex);
+    if (slotResult) {
+      return slotResult.is_correct;
+    }
+    return slotCount(item) === 1 ? item.is_correct === true : false;
+  }
+
+  function shouldExpandFeedback(item: QuizItem): boolean {
+    return (item.matched_default_answers ?? []).some((matchedDefault, slotIndex) => !matchedDefault && slotWasCorrect(item, slotIndex));
+  }
+
+  function feedbackAnswers(item: QuizItem): string[] {
+    if (shouldExpandFeedback(item)) {
+      return feedbackAnswerGroups(item).map((group) => group.join(' / '));
+    }
+    return defaultFeedbackAnswers(item);
+  }
+
+  function shouldShowFeedback(item: QuizItem): boolean {
+    return item.is_correct !== true || shouldExpandFeedback(item);
+  }
+
+  function usePlainFeedbackBox(item: QuizItem): boolean {
+    return feedbackAnswers(item).length === 1 && !shouldExpandFeedback(item);
+  }
+
   function handleKeydown(event: KeyboardEvent, item: QuizItem, slotIndex: number): void {
     if (busyItemId === item.id || item.submitted_answer) {
       return;
@@ -376,24 +420,25 @@
                 </div>
               {/if}
 
-              {#if answered && item.is_correct !== true}
-                <div class="feedback-block">
-                  {#if item.canonical_answers}
-                    {#if (item.question_type === 'single_text' || item.question_type === 'computed_text') && item.canonical_answers.length === 1}
+              {#if answered && shouldShowFeedback(item)}
+                {@const answerFeedback = feedbackAnswers(item)}
+                {#if answerFeedback.length > 0}
+                  <div class="feedback-block">
+                    {#if usePlainFeedbackBox(item)}
                       <div class="answer-box plain-answer-box">
-                        <p>{item.canonical_answers[0]}</p>
+                        <p>{answerFeedback[0]}</p>
                       </div>
                     {:else}
                       <div class="answer-box">
                         <ul>
-                          {#each item.canonical_answers as answer}
+                          {#each answerFeedback as answer}
                             <li>{answer}</li>
                           {/each}
                         </ul>
                       </div>
                     {/if}
-                  {/if}
-                </div>
+                  </div>
+                {/if}
               {/if}
             </div>
           </article>

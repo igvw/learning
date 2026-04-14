@@ -940,8 +940,35 @@ select:focus,
 
 .stats-chart-grid {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1fr);
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-areas:
+    "performance performance performance performance entry entry"
+    "stages stages retry retry first-seen first-seen";
   gap: 1rem;
+}
+
+.stats-chart-panel {
+  min-width: 0;
+}
+
+.stats-chart-panel-performance {
+  grid-area: performance;
+}
+
+.stats-chart-panel-entry {
+  grid-area: entry;
+}
+
+.stats-chart-panel-stages {
+  grid-area: stages;
+}
+
+.stats-chart-panel-retry {
+  grid-area: retry;
+}
+
+.stats-chart-panel-first-seen {
+  grid-area: first-seen;
 }
 
 .session-graph {
@@ -1762,6 +1789,15 @@ tbody tr.hot1-row:hover {
   .import-panel,
   .stats-chart-grid {
     grid-template-columns: 1fr;
+  }
+
+  .stats-chart-grid {
+    grid-template-areas:
+      "performance"
+      "entry"
+      "stages"
+      "retry"
+      "first-seen";
   }
 
   .module-bar-form,

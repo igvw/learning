@@ -328,7 +328,10 @@
                 score_earned: result.score_earned,
                 score_possible: result.score_possible,
                 slot_results: result.slot_results,
-                canonical_answers: result.canonical_answers
+                canonical_answers: result.canonical_answers,
+                default_answers: result.default_answers,
+                accepted_answer_groups: result.accepted_answer_groups,
+                matched_default_answers: result.matched_default_answers
               }
             : item
         )

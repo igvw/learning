@@ -78,7 +78,7 @@ The app is multi-user over shared content.
 Scheduling uses:
 
 - short-term hotness states (`hot0`, `hot1`, `hot1_sit_out`)
-- fixed long-term buckets (`1h` through `14d`)
+- fixed long-term buckets (`1h` through `14d`), with lowest-bucket misses returning to hot recovery
 - a `mastery` state outside active serving
 
 The serving algorithm is described in [Spaced Repetition](spaced-repetition.md).
@@ -115,7 +115,7 @@ The quiz page is the active recall surface.
 The stats page combines:
 
 - recent quiz performance
-- spaced-repetition and entry-state graphs
+- entry-state, spaced-repetition, retry-eligibility, and first-time-answered graphs
 - a sortable main question table plus a separate review table toggle
 - question revision and delete entry points
 

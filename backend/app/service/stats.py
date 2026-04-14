@@ -65,7 +65,13 @@ def get_stats(
 
         stats = stats_by_question.get(
             row["question_id"],
-            {"attempts_count": 0, "correct_count": 0.0, "incorrect_count": 0.0, "last_asked_at": None},
+            {
+                "attempts_count": 0,
+                "correct_count": 0.0,
+                "incorrect_count": 0.0,
+                "first_asked_at": None,
+                "last_asked_at": None,
+            },
         )
         schedule = _schedule_snapshot_from_attempts(
             history_by_question.get(row["question_id"], []),
@@ -85,6 +91,7 @@ def get_stats(
                 "rank": row["rank"],
                 "attempts": stats["attempts_count"],
                 "correct_percentage": (stats["correct_count"] / denominator) if denominator else 0.0,
+                "first_asked_at": stats["first_asked_at"],
                 "last_asked_at": stats["last_asked_at"],
                 "review_flag": review_flag,
                 "accepted_answers": type_config["accepted_answers"],

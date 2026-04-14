@@ -12,6 +12,8 @@ export type SortDefinition = {
 export type SessionGraph = ReturnType<typeof buildSessionGraph>;
 export type RecoveryStageGraph = ReturnType<typeof buildRecoveryStageGraph>;
 export type AuxiliaryStageGraph = ReturnType<typeof buildAuxiliaryStageGraph>;
+export type RetryEligibilityGraph = ReturnType<typeof buildRetryEligibilityGraph>;
+export type FirstSeenGraph = ReturnType<typeof buildFirstSeenGraph>;
 
 export const sortDefinitions: SortDefinition[] = [
   { key: 'rank', label: 'Rank', defaultDirection: 'asc' },
@@ -35,20 +37,38 @@ export const emptySessionGraph = {
 
 export const emptyRecoveryStageGraph = {
   stages: [],
-  chartWidth: 560,
+  chartWidth: 360,
   chartHeight: 220,
   axisY: 168,
   plotLeft: 20,
-  plotRight: 540
+  plotRight: 340
 };
 
 export const emptyAuxiliaryStageGraph = {
   stages: [],
-  chartWidth: 280,
+  chartWidth: 360,
   chartHeight: 220,
   axisY: 168,
   plotLeft: 20,
-  plotRight: 260
+  plotRight: 340
+};
+
+export const emptyRetryEligibilityGraph = {
+  days: [],
+  chartWidth: 360,
+  chartHeight: 220,
+  axisY: 168,
+  plotLeft: 20,
+  plotRight: 340
+};
+
+export const emptyFirstSeenGraph = {
+  days: [],
+  chartWidth: 360,
+  chartHeight: 220,
+  axisY: 168,
+  plotLeft: 20,
+  plotRight: 340
 };
 
 export function formatScore(value: number): string {
@@ -277,7 +297,7 @@ export function buildRecoveryStageGraph(questions: QuestionRow[]) {
     }
   }
 
-  const chartWidth = 560;
+  const chartWidth = 360;
   const chartHeight = 220;
   const padding = { top: 28, right: 20, bottom: 52, left: 20 };
   const plotWidth = chartWidth - padding.left - padding.right;
@@ -347,7 +367,7 @@ export function buildAuxiliaryStageGraph(questions: QuestionRow[]) {
     }
   }
 
-  const chartWidth = 280;
+  const chartWidth = 360;
   const chartHeight = 220;
   const padding = { top: 28, right: 20, bottom: 52, left: 20 };
   const plotWidth = chartWidth - padding.left - padding.right;
@@ -368,6 +388,184 @@ export function buildAuxiliaryStageGraph(questions: QuestionRow[]) {
         label: stage.label,
         count,
         fillColor: stage.fillColor,
+        x,
+        y,
+        width: barWidth,
+        height: barHeight,
+        labelX: x + barWidth / 2
+      };
+    }),
+    chartWidth,
+    chartHeight,
+    axisY,
+    plotLeft: padding.left,
+    plotRight: chartWidth - padding.right
+  };
+}
+
+const subDayRetryBuckets = new Set(['1h', '3h', '6h', '12h']);
+const oneDayRetryBucket = '1d';
+const longRetryBuckets = new Set(['3d', '7d', '14d']);
+const dayInMs = 24 * 60 * 60 * 1000;
+
+function startOfLocalDay(value: Date): Date {
+  const date = new Date(value);
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+function localDayOffset(target: Date, referenceDayStart: Date): number {
+  const targetDayStart = startOfLocalDay(target);
+  return Math.round((targetDayStart.getTime() - referenceDayStart.getTime()) / dayInMs);
+}
+
+export function buildRetryEligibilityGraph(questions: QuestionRow[], referenceTime: Date = new Date()) {
+  const reference = new Date(referenceTime);
+  const referenceDayStart = startOfLocalDay(reference);
+  const dayDefinitions = [
+    { key: 'lt1', label: '<1', fillColor: 'hsl(22, 92%, 58%)' },
+    { key: 'day1', label: '1', fillColor: 'hsl(34, 90%, 58%)' },
+    { key: 'day2', label: '2', fillColor: 'hsl(46, 90%, 58%)' },
+    { key: 'day3', label: '3', fillColor: 'hsl(166, 76%, 56%)' },
+    { key: 'day4', label: '4', fillColor: 'hsl(188, 76%, 56%)' },
+    { key: 'day5', label: '5', fillColor: 'hsl(204, 80%, 58%)' },
+    { key: 'day6', label: '6', fillColor: 'hsl(220, 82%, 60%)' },
+    { key: 'day7', label: '7', fillColor: 'hsl(238, 78%, 66%)' }
+  ] as const;
+  const counts = [0, 0, 0, 0, 0, 0, 0, 0];
+
+  for (const question of questions) {
+    const logicalBucket = question.schedule.logical_bucket;
+    if (subDayRetryBuckets.has(logicalBucket)) {
+      counts[0] += 1;
+      continue;
+    }
+    if (logicalBucket === oneDayRetryBucket) {
+      counts[1] += 1;
+      continue;
+    }
+    if (!longRetryBuckets.has(logicalBucket)) {
+      continue;
+    }
+    if (question.schedule.retry_pending) {
+      counts[0] += 1;
+      continue;
+    }
+    if (!question.schedule.next_due_at) {
+      continue;
+    }
+
+    const dueAt = new Date(question.schedule.next_due_at);
+    if (Number.isNaN(dueAt.getTime())) {
+      continue;
+    }
+
+    const dayOffset = localDayOffset(dueAt, referenceDayStart);
+    if (dayOffset <= 0) {
+      counts[0] += 1;
+      continue;
+    }
+    if (dayOffset === 1) {
+      counts[1] += 1;
+      continue;
+    }
+    if (dayOffset < counts.length) {
+      counts[dayOffset] += 1;
+    }
+  }
+
+  const chartWidth = 360;
+  const chartHeight = 220;
+  const padding = { top: 28, right: 20, bottom: 52, left: 20 };
+  const plotWidth = chartWidth - padding.left - padding.right;
+  const plotHeight = chartHeight - padding.top - padding.bottom;
+  const axisY = padding.top + plotHeight;
+  const stepWidth = plotWidth / dayDefinitions.length;
+  const barWidth = Math.max(stepWidth - 4, 20);
+  const maxCount = Math.max(...counts, 1);
+
+  return {
+    days: dayDefinitions.map((day, index) => {
+      const count = counts[index];
+      const barHeight = count > 0 ? Math.max((plotHeight * count) / maxCount, 8) : 0;
+      const x = padding.left + stepWidth * index + (stepWidth - barWidth) / 2;
+      const y = axisY - barHeight;
+      return {
+        key: day.key,
+        label: day.label,
+        count,
+        fillColor: day.fillColor,
+        x,
+        y,
+        width: barWidth,
+        height: barHeight,
+        labelX: x + barWidth / 2
+      };
+    }),
+    chartWidth,
+    chartHeight,
+    axisY,
+    plotLeft: padding.left,
+    plotRight: chartWidth - padding.right
+  };
+}
+
+export function buildFirstSeenGraph(questions: QuestionRow[], referenceTime: Date = new Date()) {
+  const reference = new Date(referenceTime);
+  const referenceDayStart = startOfLocalDay(reference);
+  const dayDefinitions = Array.from({ length: 7 }, (_, index) => {
+    const dayOffset = 6 - index;
+    const dayStart = new Date(referenceDayStart);
+    dayStart.setDate(referenceDayStart.getDate() - dayOffset);
+    return {
+      key: `day-${index}`,
+      label: dayStart.toLocaleDateString(undefined, { weekday: 'short' }),
+      fullLabel: dayStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+      fillColor: `hsl(${170 + index * 8}, 74%, ${62 - index * 3}%)`,
+      dayStart
+    };
+  });
+  const counts = Array.from({ length: dayDefinitions.length }, () => 0);
+
+  for (const question of questions) {
+    if (!question.first_asked_at) {
+      continue;
+    }
+
+    const firstAskedAt = new Date(question.first_asked_at);
+    if (Number.isNaN(firstAskedAt.getTime())) {
+      continue;
+    }
+
+    const daysAgo = -localDayOffset(firstAskedAt, referenceDayStart);
+    if (daysAgo < 0 || daysAgo >= dayDefinitions.length) {
+      continue;
+    }
+    counts[dayDefinitions.length - 1 - daysAgo] += 1;
+  }
+
+  const chartWidth = 360;
+  const chartHeight = 220;
+  const padding = { top: 28, right: 20, bottom: 52, left: 20 };
+  const plotWidth = chartWidth - padding.left - padding.right;
+  const plotHeight = chartHeight - padding.top - padding.bottom;
+  const axisY = padding.top + plotHeight;
+  const stepWidth = plotWidth / dayDefinitions.length;
+  const barWidth = Math.max(stepWidth - 4, 20);
+  const maxCount = Math.max(...counts, 1);
+
+  return {
+    days: dayDefinitions.map((day, index) => {
+      const count = counts[index];
+      const barHeight = count > 0 ? Math.max((plotHeight * count) / maxCount, 8) : 0;
+      const x = padding.left + stepWidth * index + (stepWidth - barWidth) / 2;
+      const y = axisY - barHeight;
+      return {
+        key: day.key,
+        label: day.label,
+        fullLabel: day.fullLabel,
+        count,
+        fillColor: day.fillColor,
         x,
         y,
         width: barWidth,

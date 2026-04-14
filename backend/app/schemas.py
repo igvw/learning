@@ -101,6 +101,9 @@ class SubmitAnswerOut(BaseModel):
     score_possible: float
     slot_results: list[SlotResultOut]
     canonical_answers: list[str]
+    default_answers: list[str]
+    accepted_answer_groups: list[list[str]]
+    matched_default_answers: list[bool]
     session_completed: bool
     submitted_answer: list[str]
 
@@ -193,6 +196,7 @@ class QuestionRowOut(BaseModel):
     rank: int
     attempts: int
     correct_percentage: float
+    first_asked_at: str | None = None
     last_asked_at: str | None = None
     review_flag: bool
     accepted_answers: list[list[str]]

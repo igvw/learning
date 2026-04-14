@@ -1,11 +1,15 @@
 <script lang="ts">
-  import type { QuestionRow, RecentSession, StatsResponse } from '../lib/types';
+  import type { QuestionRow, StatsResponse } from '../lib/types';
   import {
     buildAuxiliaryStageGraph,
+    buildFirstSeenGraph,
     buildRecoveryStageGraph,
+    buildRetryEligibilityGraph,
     buildSessionGraph,
     emptyAuxiliaryStageGraph,
+    emptyFirstSeenGraph,
     emptyRecoveryStageGraph,
+    emptyRetryEligibilityGraph,
     emptySessionGraph,
     formatBucketLabel,
     formatLastSeen,
@@ -51,11 +55,14 @@
 
   $: mainQuestions = stats ? stats.questions.filter((question) => !question.review_flag) : [];
   $: reviewQuestions = stats ? stats.questions.filter((question) => question.review_flag) : [];
-  $: sortedMainQuestions = sortQuestions(mainQuestions, sortKey, sortDirection);
-  $: sortedReviewQuestions = sortQuestions(reviewQuestions, sortKey, sortDirection);
+  $: displayedQuestions = reviewOnly ? reviewQuestions : mainQuestions;
+  $: sortedDisplayedQuestions = sortQuestions(displayedQuestions, sortKey, sortDirection);
+  $: emptyMessage = reviewOnly ? 'No review questions in this scope.' : 'No non-review questions in this scope.';
   $: sessionGraph = stats ? buildSessionGraph(stats.recent_sessions) : emptySessionGraph;
   $: recoveryStageGraph = stats ? buildRecoveryStageGraph(stats.questions) : emptyRecoveryStageGraph;
   $: auxiliaryStageGraph = stats ? buildAuxiliaryStageGraph(stats.questions) : emptyAuxiliaryStageGraph;
+  $: retryEligibilityGraph = stats ? buildRetryEligibilityGraph(stats.questions) : emptyRetryEligibilityGraph;
+  $: firstSeenGraph = stats ? buildFirstSeenGraph(stats.questions) : emptyFirstSeenGraph;
 </script>
 
 <section class="page stats-page">
@@ -105,7 +112,7 @@
     </div>
 
     <div class="stats-chart-grid">
-      <div class="panel stats-chart-panel stats-chart-panel-wide">
+      <div class="panel stats-chart-panel stats-chart-panel-performance">
         <div class="panel-header">
           <div><h3>Latest quiz performance</h3></div>
         </div>
@@ -155,7 +162,47 @@
         {/if}
       </div>
 
-      <div class="panel stats-chart-panel">
+      <div class="panel stats-chart-panel stats-chart-panel-entry">
+        <div class="panel-header">
+          <div><h3>Entry states</h3></div>
+        </div>
+        <div class="session-graph-shell">
+          <svg
+            class="session-graph"
+            viewBox={`0 0 ${auxiliaryStageGraph.chartWidth} ${auxiliaryStageGraph.chartHeight}`}
+            role="img"
+            aria-label="Entry state counts"
+          >
+            <line
+              x1={auxiliaryStageGraph.plotLeft}
+              y1={auxiliaryStageGraph.axisY}
+              x2={auxiliaryStageGraph.plotRight}
+              y2={auxiliaryStageGraph.axisY}
+              class="graph-axis"
+            />
+            {#each auxiliaryStageGraph.stages as stage}
+              <g class="session-bar">
+                <title>{stage.label}: {stage.count} questions</title>
+                <rect
+                  x={stage.x}
+                  y={stage.y}
+                  width={stage.width}
+                  height={stage.height}
+                  rx="10"
+                  ry="10"
+                  fill={stage.fillColor}
+                />
+                <text x={stage.labelX} y={stage.y - 8} text-anchor="middle" class="stage-count-label">
+                  {stage.count}
+                </text>
+                <text x={stage.labelX} y={auxiliaryStageGraph.chartHeight - 18} text-anchor="middle">{stage.label}</text>
+              </g>
+            {/each}
+          </svg>
+        </div>
+      </div>
+
+      <div class="panel stats-chart-panel stats-chart-panel-stages">
         <div class="panel-header">
           <div><h3>Spaced repetition stages</h3></div>
         </div>
@@ -204,40 +251,80 @@
         </div>
       </div>
 
-      <div class="panel stats-chart-panel">
+      <div class="panel stats-chart-panel stats-chart-panel-retry">
         <div class="panel-header">
-          <div><h3>Entry states</h3></div>
+          <div><h3>Retry eligibility</h3></div>
         </div>
         <div class="session-graph-shell">
           <svg
             class="session-graph"
-            viewBox={`0 0 ${auxiliaryStageGraph.chartWidth} ${auxiliaryStageGraph.chartHeight}`}
+            viewBox={`0 0 ${retryEligibilityGraph.chartWidth} ${retryEligibilityGraph.chartHeight}`}
             role="img"
-            aria-label="Entry state counts"
+            aria-label="Retry eligibility by day"
           >
             <line
-              x1={auxiliaryStageGraph.plotLeft}
-              y1={auxiliaryStageGraph.axisY}
-              x2={auxiliaryStageGraph.plotRight}
-              y2={auxiliaryStageGraph.axisY}
+              x1={retryEligibilityGraph.plotLeft}
+              y1={retryEligibilityGraph.axisY}
+              x2={retryEligibilityGraph.plotRight}
+              y2={retryEligibilityGraph.axisY}
               class="graph-axis"
             />
-            {#each auxiliaryStageGraph.stages as stage}
+            {#each retryEligibilityGraph.days as day}
               <g class="session-bar">
-                <title>{stage.label}: {stage.count} questions</title>
+                <title>{day.label}: {day.count} questions</title>
                 <rect
-                  x={stage.x}
-                  y={stage.y}
-                  width={stage.width}
-                  height={stage.height}
+                  x={day.x}
+                  y={day.y}
+                  width={day.width}
+                  height={day.height}
                   rx="10"
                   ry="10"
-                  fill={stage.fillColor}
+                  fill={day.fillColor}
                 />
-                <text x={stage.labelX} y={stage.y - 8} text-anchor="middle" class="stage-count-label">
-                  {stage.count}
+                <text x={day.labelX} y={day.y - 8} text-anchor="middle" class="stage-count-label">
+                  {day.count}
                 </text>
-                <text x={stage.labelX} y={auxiliaryStageGraph.chartHeight - 18} text-anchor="middle">{stage.label}</text>
+                <text x={day.labelX} y={retryEligibilityGraph.chartHeight - 18} text-anchor="middle">{day.label}</text>
+              </g>
+            {/each}
+          </svg>
+        </div>
+      </div>
+
+      <div class="panel stats-chart-panel stats-chart-panel-first-seen">
+        <div class="panel-header">
+          <div><h3>First-time questions answered</h3></div>
+        </div>
+        <div class="session-graph-shell">
+          <svg
+            class="session-graph"
+            viewBox={`0 0 ${firstSeenGraph.chartWidth} ${firstSeenGraph.chartHeight}`}
+            role="img"
+            aria-label="First-time questions answered by day"
+          >
+            <line
+              x1={firstSeenGraph.plotLeft}
+              y1={firstSeenGraph.axisY}
+              x2={firstSeenGraph.plotRight}
+              y2={firstSeenGraph.axisY}
+              class="graph-axis"
+            />
+            {#each firstSeenGraph.days as day}
+              <g class="session-bar">
+                <title>{day.fullLabel}: {day.count} questions first answered</title>
+                <rect
+                  x={day.x}
+                  y={day.y}
+                  width={day.width}
+                  height={day.height}
+                  rx="10"
+                  ry="10"
+                  fill={day.fillColor}
+                />
+                <text x={day.labelX} y={day.y - 8} text-anchor="middle" class="stage-count-label">
+                  {day.count}
+                </text>
+                <text x={day.labelX} y={firstSeenGraph.chartHeight - 18} text-anchor="middle">{day.label}</text>
               </g>
             {/each}
           </svg>
@@ -252,8 +339,8 @@
         </div>
       </div>
 
-      {#if sortedMainQuestions.length === 0}
-        <p class="muted-copy">No non-review questions in this scope.</p>
+      {#if sortedDisplayedQuestions.length === 0}
+        <p class="muted-copy">{emptyMessage}</p>
       {:else}
         <div class="table-shell">
           <table>
@@ -273,8 +360,9 @@
               </tr>
             </thead>
             <tbody>
-              {#each sortedMainQuestions as question (question.question_id)}
+              {#each sortedDisplayedQuestions as question (question.question_id)}
                 <tr
+                  class:flagged-review={question.review_flag}
                   class:hot0-row={!question.review_flag && question.schedule.bucket === 'hot0'}
                   class:hot1-row={!question.review_flag && (question.schedule.bucket === 'hot1' || question.schedule.bucket === 'hot1_sit_out')}
                   on:click={() => onOpenEdit(question)}
@@ -296,59 +384,6 @@
         </div>
       {/if}
     </div>
-
-    {#if reviewOnly}
-      <div class="panel table-panel">
-        <div class="panel-header">
-          <div>
-            <h3>Review Questions</h3>
-          </div>
-        </div>
-
-        {#if sortedReviewQuestions.length === 0}
-          <p class="muted-copy">No review questions in this scope.</p>
-        {:else}
-          <div class="table-shell">
-            <table>
-              <thead>
-                <tr>
-                  {#each sortDefinitions as definition (definition.key)}
-                    <th>
-                      <button
-                        class="table-sort-button"
-                        type="button"
-                        on:click={() => handleSort(definition.key)}
-                      >
-                        {definition.label}{sortIndicator(definition.key)}
-                      </button>
-                    </th>
-                  {/each}
-                </tr>
-              </thead>
-              <tbody>
-                {#each sortedReviewQuestions as question (question.question_id)}
-                  <tr
-                    class:flagged-review={question.review_flag}
-                    on:click={() => onOpenEdit(question)}
-                  >
-                    <td>{question.rank}</td>
-                    <td>
-                      <div class="question-cell">
-                        <span>{question.prompt_preview}</span>
-                      </div>
-                    </td>
-                    <td>{formatBucketLabel(question)}</td>
-                    <td>{formatLastSeen(question.last_asked_at)}</td>
-                    <td>{question.attempts}</td>
-                    <td>{Math.round(question.correct_percentage * 100)}%</td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-          </div>
-        {/if}
-      </div>
-    {/if}
   {:else}
     <div class="panel empty-state">
       <h3>No stats to show yet.</h3>

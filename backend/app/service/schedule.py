@@ -107,6 +107,7 @@ def _derive_schedule_state_from_attempts(attempts: list[dict[str, Any]]) -> dict
     state: dict[str, Any] = {
         "bucket": "unseen",
         "recovery_streak": None,
+        "recovery_origin": None,
         "interval_step": None,
         "last_incorrect_at": None,
         "next_due_at": None,
@@ -129,6 +130,7 @@ def _derive_schedule_state_from_attempts(attempts: list[dict[str, Any]]) -> dict
                     {
                         "bucket": "mastery",
                         "recovery_streak": None,
+                        "recovery_origin": None,
                         "interval_step": None,
                         "last_answered_at": answered_at,
                         "last_session_id": session_id,
@@ -139,6 +141,7 @@ def _derive_schedule_state_from_attempts(attempts: list[dict[str, Any]]) -> dict
                     {
                         "bucket": "hot0",
                         "recovery_streak": 0,
+                        "recovery_origin": "unseen",
                         "interval_step": None,
                         "last_incorrect_at": answered_at,
                         "next_due_at": None,
@@ -153,12 +156,13 @@ def _derive_schedule_state_from_attempts(attempts: list[dict[str, Any]]) -> dict
 
         if bucket == "mastery":
             if is_correct:
-                state.update({"last_answered_at": answered_at, "last_session_id": session_id})
+                state.update({"last_answered_at": answered_at, "last_session_id": session_id, "recovery_origin": None})
             else:
                 state.update(
                     {
                         "bucket": "hot0",
                         "recovery_streak": 0,
+                        "recovery_origin": "mastery",
                         "interval_step": None,
                         "last_incorrect_at": answered_at,
                         "next_due_at": None,
@@ -179,6 +183,7 @@ def _derive_schedule_state_from_attempts(attempts: list[dict[str, Any]]) -> dict
                         {
                             "bucket": "mastery",
                             "recovery_streak": None,
+                            "recovery_origin": None,
                             "interval_step": None,
                             "last_answered_at": answered_at,
                             "last_session_id": session_id,
@@ -194,6 +199,7 @@ def _derive_schedule_state_from_attempts(attempts: list[dict[str, Any]]) -> dict
                         {
                             "bucket": "cooling",
                             "recovery_streak": None,
+                            "recovery_origin": None,
                             "interval_step": next_step,
                             "last_answered_at": answered_at,
                             "last_session_id": session_id,
@@ -204,20 +210,38 @@ def _derive_schedule_state_from_attempts(attempts: list[dict[str, Any]]) -> dict
                         }
                     )
             else:
-                state.update(
-                    {
-                        "bucket": "bucket_retry_wait",
-                        "recovery_streak": None,
-                        "interval_step": current_step,
-                        "last_incorrect_at": answered_at,
-                        "last_answered_at": answered_at,
-                        "last_session_id": session_id,
-                        "next_due_at": None,
-                        "retry_pending": True,
-                        "bucket_origin_step": current_step,
-                        "failures_after_bucket_retry": 0,
-                    }
-                )
+                if current_step == 0:
+                    state.update(
+                        {
+                            "bucket": "hot0",
+                            "recovery_streak": 0,
+                            "recovery_origin": "bucket",
+                            "interval_step": None,
+                            "last_incorrect_at": answered_at,
+                            "last_answered_at": answered_at,
+                            "last_session_id": session_id,
+                            "next_due_at": None,
+                            "retry_pending": False,
+                            "bucket_origin_step": current_step,
+                            "failures_after_bucket_retry": 1,
+                        }
+                    )
+                else:
+                    state.update(
+                        {
+                            "bucket": "bucket_retry_wait",
+                            "recovery_streak": None,
+                            "recovery_origin": None,
+                            "interval_step": current_step,
+                            "last_incorrect_at": answered_at,
+                            "last_answered_at": answered_at,
+                            "last_session_id": session_id,
+                            "next_due_at": None,
+                            "retry_pending": True,
+                            "bucket_origin_step": current_step,
+                            "failures_after_bucket_retry": 0,
+                        }
+                    )
             continue
 
         if bucket == "bucket_retry_wait":
@@ -227,6 +251,7 @@ def _derive_schedule_state_from_attempts(attempts: list[dict[str, Any]]) -> dict
                     {
                         "bucket": "cooling",
                         "recovery_streak": None,
+                        "recovery_origin": None,
                         "interval_step": origin_step,
                         "last_answered_at": answered_at,
                         "last_session_id": session_id,
@@ -241,6 +266,7 @@ def _derive_schedule_state_from_attempts(attempts: list[dict[str, Any]]) -> dict
                     {
                         "bucket": "hot0",
                         "recovery_streak": 0,
+                        "recovery_origin": "bucket",
                         "interval_step": None,
                         "last_incorrect_at": answered_at,
                         "last_answered_at": answered_at,
@@ -289,6 +315,7 @@ def _derive_schedule_state_from_attempts(attempts: list[dict[str, Any]]) -> dict
                     {
                         "bucket": "cooling",
                         "recovery_streak": 2,
+                        "recovery_origin": None,
                         "interval_step": resolved_step,
                         "last_answered_at": answered_at,
                         "last_session_id": session_id,
@@ -337,7 +364,12 @@ def _schedule_snapshot_from_attempts(
 
     state = _derive_schedule_state_from_attempts(attempts)
     bucket = state["bucket"]
-    if bucket == "hot1" and latest_scored_session_id is not None and state.get("last_session_id") == latest_scored_session_id:
+    if (
+        bucket == "hot1"
+        and latest_scored_session_id is not None
+        and state.get("last_session_id") == latest_scored_session_id
+        and state.get("recovery_origin") != "unseen"
+    ):
         bucket = "hot1_sit_out"
     elif bucket == "bucket_retry_wait" and latest_scored_session_id is not None and state.get("last_session_id") != latest_scored_session_id:
         bucket = "due_review"
@@ -380,6 +412,7 @@ def _question_stats_by_question(
             COUNT(*) AS attempts_count,
             COALESCE(SUM(qsi.score_earned), 0) AS correct_count,
             COALESCE(SUM(qsi.score_possible - qsi.score_earned), 0) AS incorrect_count,
+            MIN(COALESCE(qs.completed_at, qs.created_at)) AS first_asked_at,
             MAX(COALESCE(qs.completed_at, qs.created_at)) AS last_asked_at
         FROM quiz_session_items AS qsi
         JOIN quiz_sessions AS qs ON qs.id = qsi.session_id
@@ -393,6 +426,7 @@ def _question_stats_by_question(
             "attempts_count": row["attempts_count"],
             "correct_count": row["correct_count"],
             "incorrect_count": row["incorrect_count"],
+            "first_asked_at": row["first_asked_at"],
             "last_asked_at": row["last_asked_at"],
         }
         for row in rows

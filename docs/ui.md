@@ -69,6 +69,8 @@ Current behavior:
 - recent session performance graph
 - spaced-repetition stages graph
 - entry-state graph
+- retry-eligibility graph
+- first-time questions answered by day over the last 7 local days
 - sortable main question table
 - optional review-only table toggled from the checkbox at the top
 - floating create-question action
@@ -87,6 +89,8 @@ Current table behavior:
 - the main table excludes review-flagged questions
 - checking `Review only` reveals a separate review table below the main table
 - cards and graphs stay based on the full module scope when the review table is shown
+- chart layout is two rows:
+  `Latest quiz performance` with `Entry states` on top, then `Spaced repetition stages`, `Retry eligibility`, and `First-time questions answered` below
 - review rows stay orange in the dedicated review table
 - hot rows are shaded red in two intensities in the main table
 - logical bucket and hotness are separated intentionally

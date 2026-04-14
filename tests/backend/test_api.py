@@ -105,6 +105,85 @@ class PostgresBackendIntegrationTests(PostgresBackendTestCase):
         self.assertEqual(stats_response.status_code, 200)
         self.assertGreaterEqual(stats_response.json()["summary"]["total_attempts"], 1)
 
+    def test_stats_include_first_asked_at_for_answered_questions_only(self) -> None:
+        with get_connection(self.database_url) as connection:
+            geography = create_module(connection, title="First Seen Geography", parent_id=None, instruction="")
+            capitals = create_module(connection, title="First Seen Capitals", parent_id=geography["id"], instruction="")
+            answered_question_id = create_question(
+                connection,
+                QuestionDraftIn(
+                    module_id=capitals["id"],
+                    prompt="What is the capital of Norway?",
+                    question_type="single_text",
+                    rank=1,
+                    accepted_answers=[["Oslo"]],
+                    segments=[],
+                ),
+            )["question_id"]
+            unseen_question_id = create_question(
+                connection,
+                QuestionDraftIn(
+                    module_id=capitals["id"],
+                    prompt="What is the capital of Sweden?",
+                    question_type="single_text",
+                    rank=2,
+                    accepted_answers=[["Stockholm"]],
+                    segments=[],
+                ),
+            )["question_id"]
+
+        user = self.client.post(
+            "/api/users",
+            json={"handle": "alice-stats", "display_name": "Alice Stats"},
+        ).json()
+
+        with get_connection(self.database_url) as connection:
+            first_session_id = connection.execute(
+                """
+                INSERT INTO quiz_sessions (user_id, module_id, created_at, completed_at)
+                VALUES (?, ?, ?, ?)
+                RETURNING id
+                """,
+                (user["id"], capitals["id"], "2026-04-01T09:00:00Z", "2026-04-01T09:15:00Z"),
+            ).fetchone()["id"]
+            connection.execute(
+                """
+                INSERT INTO quiz_session_items (session_id, question_id, score_earned, score_possible)
+                VALUES (?, ?, ?, ?)
+                """,
+                (first_session_id, answered_question_id, 1.0, 1.0),
+            )
+
+            second_session_id = connection.execute(
+                """
+                INSERT INTO quiz_sessions (user_id, module_id, created_at, completed_at)
+                VALUES (?, ?, ?, ?)
+                RETURNING id
+                """,
+                (user["id"], capitals["id"], "2026-04-03T10:00:00Z", "2026-04-03T10:20:00Z"),
+            ).fetchone()["id"]
+            connection.execute(
+                """
+                INSERT INTO quiz_session_items (session_id, question_id, score_earned, score_possible)
+                VALUES (?, ?, ?, ?)
+                """,
+                (second_session_id, answered_question_id, 0.0, 1.0),
+            )
+
+        stats_response = self.client.get(
+            "/api/stats",
+            params={"module_id": capitals["id"]},
+            headers={"X-User-Id": str(user["id"])},
+        )
+        self.assertEqual(stats_response.status_code, 200)
+        stats_payload = stats_response.json()
+        questions_by_id = {row["question_id"]: row for row in stats_payload["questions"]}
+
+        self.assertEqual(questions_by_id[answered_question_id]["first_asked_at"], "2026-04-01T09:15:00Z")
+        self.assertEqual(questions_by_id[answered_question_id]["last_asked_at"], "2026-04-03T10:20:00Z")
+        self.assertEqual(questions_by_id[unseen_question_id]["first_asked_at"], None)
+        self.assertEqual(questions_by_id[unseen_question_id]["last_asked_at"], None)
+
     def test_review_flagged_questions_do_not_reappear_in_quiz(self) -> None:
         user = self.client.post(
             "/api/users",
@@ -134,6 +213,80 @@ class PostgresBackendIntegrationTests(PostgresBackendTestCase):
         self.assertEqual(session_response.status_code, 200)
         returned_ids = [item["question_id"] for item in session_response.json()["items"]]
         self.assertNotIn(flagged_question_id, returned_ids)
+
+    def test_unseen_miss_then_correct_reappears_in_next_quiz_without_sit_out(self) -> None:
+        with get_connection(self.database_url) as connection:
+            norwegian = create_module(connection, title="Norwegian Retry", parent_id=None, instruction="")
+            weekdays = create_module(connection, title="Weekdays Retry", parent_id=norwegian["id"], instruction="")
+            first_question_id = create_question(
+                connection,
+                QuestionDraftIn(
+                    module_id=weekdays["id"],
+                    prompt="mandag",
+                    question_type="single_text",
+                    rank=1,
+                    accepted_answers=[["Monday"]],
+                    segments=[],
+                ),
+            )["question_id"]
+            create_question(
+                connection,
+                QuestionDraftIn(
+                    module_id=weekdays["id"],
+                    prompt="tirsdag",
+                    question_type="single_text",
+                    rank=2,
+                    accepted_answers=[["Tuesday"]],
+                    segments=[],
+                ),
+            )
+
+        user = self.client.post(
+            "/api/users",
+            json={"handle": "alice-unseen-retry", "display_name": "Alice Unseen Retry"},
+        ).json()
+
+        first_session_response = self.client.post(
+            "/api/quiz-sessions",
+            json={"module_id": weekdays["id"], "count": 1},
+            headers={"X-User-Id": str(user["id"])},
+        )
+        self.assertEqual(first_session_response.status_code, 200)
+        first_item = first_session_response.json()["items"][0]
+        self.assertEqual(first_item["question_id"], first_question_id)
+
+        first_submit_response = self.client.post(
+            f"/api/quiz-sessions/{first_session_response.json()['id']}/items/{first_item['id']}/submit",
+            json={"answers": ["wrong"]},
+            headers={"X-User-Id": str(user["id"])},
+        )
+        self.assertEqual(first_submit_response.status_code, 200)
+        self.assertFalse(first_submit_response.json()["is_correct"])
+
+        second_session_response = self.client.post(
+            "/api/quiz-sessions",
+            json={"module_id": weekdays["id"], "count": 1},
+            headers={"X-User-Id": str(user["id"])},
+        )
+        self.assertEqual(second_session_response.status_code, 200)
+        second_item = second_session_response.json()["items"][0]
+        self.assertEqual(second_item["question_id"], first_question_id)
+
+        second_submit_response = self.client.post(
+            f"/api/quiz-sessions/{second_session_response.json()['id']}/items/{second_item['id']}/submit",
+            json={"answers": ["monday"]},
+            headers={"X-User-Id": str(user["id"])},
+        )
+        self.assertEqual(second_submit_response.status_code, 200)
+        self.assertTrue(second_submit_response.json()["is_correct"])
+
+        third_session_response = self.client.post(
+            "/api/quiz-sessions",
+            json={"module_id": weekdays["id"], "count": 1},
+            headers={"X-User-Id": str(user["id"])},
+        )
+        self.assertEqual(third_session_response.status_code, 200)
+        self.assertEqual(third_session_response.json()["items"][0]["question_id"], first_question_id)
 
     def test_leaf_module_can_be_renamed_without_losing_question_access(self) -> None:
         with get_connection(self.database_url) as connection:
@@ -404,6 +557,92 @@ class PostgresBackendIntegrationTests(PostgresBackendTestCase):
         self.assertEqual(stats_payload["questions"][0]["question_id"], question_id)
         self.assertEqual(stats_payload["questions"][0]["attempts"], 1)
         self.assertEqual(stats_payload["questions"][0]["correct_percentage"], 1.0)
+
+    def test_quiz_submission_returns_default_and_alternative_feedback(self) -> None:
+        with get_connection(self.database_url) as connection:
+            norwegian = create_module(connection, title="Norwegian", parent_id=None, instruction="")
+            weekdays = create_module(connection, title="Weekdays", parent_id=norwegian["id"], instruction="")
+            question_id = create_question(
+                connection,
+                QuestionDraftIn(
+                    module_id=weekdays["id"],
+                    prompt="lørdag",
+                    question_type="single_text",
+                    rank=1,
+                    accepted_answers=[["Saturday", "Sat"]],
+                    segments=[],
+                ),
+            )["question_id"]
+
+        user = self.client.post(
+            "/api/users",
+            json={"handle": "alice-alt", "display_name": "Alice Alt"},
+        ).json()
+
+        session_response = self.client.post(
+            "/api/quiz-sessions",
+            json={"module_id": weekdays["id"], "count": 1},
+            headers={"X-User-Id": str(user["id"])},
+        )
+        self.assertEqual(session_response.status_code, 200)
+        item = session_response.json()["items"][0]
+        self.assertEqual(item["question_id"], question_id)
+
+        submit_response = self.client.post(
+            f"/api/quiz-sessions/{session_response.json()['id']}/items/{item['id']}/submit",
+            json={"answers": ["sat"]},
+            headers={"X-User-Id": str(user["id"])},
+        )
+        self.assertEqual(submit_response.status_code, 200)
+        submit_payload = submit_response.json()
+        self.assertTrue(submit_payload["is_correct"])
+        self.assertEqual(submit_payload["canonical_answers"], ["Saturday / Sat"])
+        self.assertEqual(submit_payload["default_answers"], ["Saturday"])
+        self.assertEqual(submit_payload["accepted_answer_groups"], [["Saturday", "Sat"]])
+        self.assertEqual(submit_payload["matched_default_answers"], [False])
+
+    def test_quiz_submission_marks_default_matches_for_unordered_multi(self) -> None:
+        with get_connection(self.database_url) as connection:
+            geography = create_module(connection, title="Geography Alt", parent_id=None, instruction="")
+            capitals = create_module(connection, title="Capitals Alt", parent_id=geography["id"], instruction="")
+            question_id = create_question(
+                connection,
+                QuestionDraftIn(
+                    module_id=capitals["id"],
+                    prompt="Name the capitals of Norway and Sweden.",
+                    question_type="multi_text",
+                    rank=1,
+                    accepted_answers=[["Oslo"], ["Stockholm", "Sthlm"]],
+                    segments=[],
+                ),
+            )["question_id"]
+
+        user = self.client.post(
+            "/api/users",
+            json={"handle": "alice-multi", "display_name": "Alice Multi"},
+        ).json()
+
+        session_response = self.client.post(
+            "/api/quiz-sessions",
+            json={"module_id": capitals["id"], "count": 1},
+            headers={"X-User-Id": str(user["id"])},
+        )
+        self.assertEqual(session_response.status_code, 200)
+        item = session_response.json()["items"][0]
+        self.assertEqual(item["question_id"], question_id)
+
+        submit_response = self.client.post(
+            f"/api/quiz-sessions/{session_response.json()['id']}/items/{item['id']}/submit",
+            json={"answers": ["sthlm", "oslo"]},
+            headers={"X-User-Id": str(user["id"])},
+        )
+        self.assertEqual(submit_response.status_code, 200)
+        submit_payload = submit_response.json()
+        self.assertTrue(submit_payload["is_correct"])
+        self.assertEqual(submit_payload["score_earned"], 1.0)
+        self.assertEqual(submit_payload["default_answers"], ["Oslo", "Stockholm"])
+        self.assertEqual(submit_payload["accepted_answer_groups"], [["Oslo"], ["Stockholm", "Sthlm"]])
+        self.assertEqual(submit_payload["matched_default_answers"], [False, True])
 
     def test_exact_duplicate_in_target_leaf_is_omitted_from_review_rows(self) -> None:
         with get_connection(self.database_url) as connection:

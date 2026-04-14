@@ -21,7 +21,7 @@ This file is the short tracker. The fuller alpha-to-beta product roadmap lives i
 - Complete revise mode
 - Mobile-friendly study modes, especially multiple choice
 - More performant data model and database design
-- QML v2
+- QML v2, likely moving from computed math syntax toward bundles
 - Theme presets and background treatments
 - Better full-database import/export UX
 

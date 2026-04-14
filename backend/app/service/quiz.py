@@ -7,7 +7,9 @@ from .catalog import ensure_user_exists, get_scope_module_ids
 from .common import (
     NotFoundError,
     ValidationError,
+    accepted_answer_groups,
     canonical_answers,
+    default_answers,
     json_dumps,
     normalize_text,
     public_type_config,
@@ -185,7 +187,7 @@ def evaluate_answers(
     question_type: str,
     type_config: dict[str, Any],
     answers: list[str],
-) -> tuple[bool, float, float, list[dict[str, Any]]]:
+) -> tuple[bool, float, float, list[dict[str, Any]], list[bool]]:
     normalized_inputs = [normalize_text(answer) for answer in answers]
     expected_groups = type_config.get("accepted_answers", [])
     possible_score = float(score_possible(type_config))
@@ -196,15 +198,20 @@ def evaluate_answers(
         used_expected_indices = {value for value in aligned_expected_indices if value is not None}
         remaining_expected_indices = [index for index in range(len(expected_groups)) if index not in used_expected_indices]
         slot_results = []
+        matched_default_answers = []
         for index, matched_expected_index in enumerate(aligned_expected_indices):
             if matched_expected_index is not None:
                 expected_text = " / ".join(expected_groups[matched_expected_index])
+                matches_default = normalized_inputs[index] == normalize_text(expected_groups[matched_expected_index][0])
             elif remaining_expected_indices:
                 expected_text = " / ".join(expected_groups[remaining_expected_indices.pop(0)])
+                matches_default = False
             elif expected_groups:
                 expected_text = " / ".join(expected_groups[min(index, len(expected_groups) - 1)])
+                matches_default = False
             else:
                 expected_text = ""
+                matches_default = False
             slot_results.append(
                 {
                     "index": index,
@@ -212,10 +219,12 @@ def evaluate_answers(
                     "expected": expected_text,
                 }
             )
+            matched_default_answers.append(matched_expected_index is not None and matches_default)
         earned_score = len(used_expected_indices) / slot_total
-        return earned_score == possible_score, earned_score, possible_score, slot_results
+        return earned_score == possible_score, earned_score, possible_score, slot_results, matched_default_answers
 
     slot_results = []
+    matched_default_answers = []
     all_correct = True
     correct_slots = 0
     for index, expected_group in enumerate(expected_groups):
@@ -223,14 +232,15 @@ def evaluate_answers(
         expected_normalized = {normalize_text(answer) for answer in expected_group}
         is_correct = submitted in expected_normalized
         slot_results.append({"index": index, "is_correct": is_correct, "expected": " / ".join(expected_group)})
+        matched_default_answers.append(is_correct and bool(expected_group) and submitted == normalize_text(expected_group[0]))
         all_correct = all_correct and is_correct
         if is_correct:
             correct_slots += 1
 
     earned_score = correct_slots / slot_total
     if question_type in {"single_text", "computed_text"} and len(expected_groups) == 1:
-        return slot_results[0]["is_correct"], earned_score, possible_score, slot_results
-    return all_correct, earned_score, possible_score, slot_results
+        return slot_results[0]["is_correct"], earned_score, possible_score, slot_results, matched_default_answers
+    return all_correct, earned_score, possible_score, slot_results, matched_default_answers
 
 
 def submit_answer(
@@ -264,7 +274,9 @@ def submit_answer(
         raise ValidationError("Quiz session item has already been answered.")
 
     type_config = json.loads(row["resolved_type_config_json"] or row["type_config_json"])
-    is_correct, earned_score, possible_score_value, slot_results = evaluate_answers(row["question_type"], type_config, answers)
+    is_correct, earned_score, possible_score_value, slot_results, matched_default_answers = evaluate_answers(
+        row["question_type"], type_config, answers
+    )
     answered_at = utc_now()
     connection.execute(
         """
@@ -297,6 +309,9 @@ def submit_answer(
         "score_possible": possible_score_value,
         "slot_results": slot_results,
         "canonical_answers": canonical_answers(type_config),
+        "default_answers": default_answers(type_config),
+        "accepted_answer_groups": accepted_answer_groups(type_config),
+        "matched_default_answers": matched_default_answers,
         "session_completed": session_completed,
         "submitted_answer": answers,
     }

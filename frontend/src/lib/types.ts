@@ -60,6 +60,9 @@ export interface QuizItem {
   score_possible?: number;
   slot_results?: SlotResult[];
   canonical_answers?: string[];
+  default_answers?: string[];
+  accepted_answer_groups?: string[][];
+  matched_default_answers?: boolean[];
 }
 
 export interface QuizSession {
@@ -76,6 +79,9 @@ export interface SubmitAnswerResult {
   score_possible: number;
   slot_results: SlotResult[];
   canonical_answers: string[];
+  default_answers: string[];
+  accepted_answer_groups: string[][];
+  matched_default_answers: boolean[];
   session_completed: boolean;
   submitted_answer: string[];
 }
@@ -126,6 +132,7 @@ export interface QuestionRow {
   rank: number;
   attempts: number;
   correct_percentage: number;
+  first_asked_at: string | null;
   last_asked_at: string | null;
   review_flag: boolean;
   accepted_answers: string[][];

@@ -53,6 +53,11 @@ Key roadmap conclusion:
 ### Beta pillar 3: Authoring and presentation
 
 - QML v2
+  - likely move away from inline math-style computed questions toward question bundles
+  - bundles would allow curated tested variants instead of inline expression syntax
+  - this may imply multiline bundle blocks in QML, or a dedicated bundle section inside QML/import flows
+  - exact syntax and storage model are intentionally still undecided
+  - bundle direction matters because variants may need to stay logically grouped for study behavior
   - ghost text as lightweight authoring metadata
   - distractors for future multiple-choice support
 - theme presets, color schemes, and background patterns

@@ -80,6 +80,14 @@ def canonical_answers(type_config: dict[str, Any]) -> list[str]:
     return [" / ".join(group) for group in type_config.get("accepted_answers", [])]
 
 
+def default_answers(type_config: dict[str, Any]) -> list[str]:
+    return [group[0] if group else "" for group in type_config.get("accepted_answers", [])]
+
+
+def accepted_answer_groups(type_config: dict[str, Any]) -> list[list[str]]:
+    return [list(group) for group in type_config.get("accepted_answers", [])]
+
+
 def answer_blocks(type_config: dict[str, Any]) -> list[str]:
     return [" | ".join(group) for group in type_config.get("accepted_answers", [])]
 

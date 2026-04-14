@@ -112,7 +112,7 @@ class SchedulerUnitTests(unittest.TestCase):
         self.assertEqual(schedule["bucket"], "hot0")
         self.assertEqual(schedule["recovery_streak"], 0)
 
-    def test_first_recovery_correct_enters_one_quiz_cooldown(self) -> None:
+    def test_unseen_origin_first_recovery_correct_stays_eligible_in_latest_quiz(self) -> None:
         attempts = [
             {
                 "score_earned": 0.0,
@@ -134,7 +134,7 @@ class SchedulerUnitTests(unittest.TestCase):
             latest_scored_session_id=11,
         )
 
-        self.assertEqual(schedule["bucket"], "hot1_sit_out")
+        self.assertEqual(schedule["bucket"], "hot1")
         self.assertEqual(schedule["recovery_streak"], 1)
 
     def test_hot1_becomes_eligible_after_one_intervening_quiz(self) -> None:
@@ -160,6 +160,37 @@ class SchedulerUnitTests(unittest.TestCase):
         )
 
         self.assertEqual(schedule["bucket"], "hot1")
+        self.assertEqual(schedule["recovery_streak"], 1)
+
+    def test_non_unseen_hot1_still_enters_one_quiz_cooldown(self) -> None:
+        attempts = [
+            {
+                "score_earned": 1.0,
+                "score_possible": 1.0,
+                "answered_at": "2026-04-05T12:00:00+00:00",
+                "session_id": 10,
+            },
+            {
+                "score_earned": 0.0,
+                "score_possible": 1.0,
+                "answered_at": "2026-04-05T12:10:00+00:00",
+                "session_id": 11,
+            },
+            {
+                "score_earned": 1.0,
+                "score_possible": 1.0,
+                "answered_at": "2026-04-05T12:20:00+00:00",
+                "session_id": 12,
+            },
+        ]
+
+        schedule = _schedule_snapshot_from_attempts(
+            attempts,
+            now="2026-04-05T12:25:00+00:00",
+            latest_scored_session_id=12,
+        )
+
+        self.assertEqual(schedule["bucket"], "hot1_sit_out")
         self.assertEqual(schedule["recovery_streak"], 1)
 
     def test_unseen_first_try_correct_moves_to_mastery(self) -> None:
@@ -214,7 +245,7 @@ class SchedulerUnitTests(unittest.TestCase):
         self.assertEqual(schedule["next_due_at"], "2026-04-05T13:30:00+00:00")
         self.assertEqual(schedule["interval_step"], 0)
 
-    def test_bucket_miss_waits_one_quiz_before_retry(self) -> None:
+    def test_lowest_bucket_miss_reenters_hot_recovery_immediately(self) -> None:
         attempts = [
             {
                 "score_earned": 0.0,
@@ -248,19 +279,119 @@ class SchedulerUnitTests(unittest.TestCase):
             latest_scored_session_id=14,
         )
 
+        self.assertEqual(schedule["bucket"], "hot0")
+        self.assertIsNone(schedule["interval_step"])
+        self.assertEqual(schedule["bucket_origin_step"], 0)
+        self.assertFalse(schedule["retry_pending"])
+        self.assertEqual(schedule["last_session_id"], 14)
+
+    def test_lowest_bucket_miss_is_selected_again_in_next_quiz(self) -> None:
+        attempts = [
+            {
+                "score_earned": 0.0,
+                "score_possible": 1.0,
+                "answered_at": "2026-04-05T12:00:00+00:00",
+                "session_id": 10,
+            },
+            {
+                "score_earned": 1.0,
+                "score_possible": 1.0,
+                "answered_at": "2026-04-05T12:10:00+00:00",
+                "session_id": 11,
+            },
+            {
+                "score_earned": 1.0,
+                "score_possible": 1.0,
+                "answered_at": "2026-04-05T12:30:00+00:00",
+                "session_id": 13,
+            },
+            {
+                "score_earned": 0.0,
+                "score_possible": 1.0,
+                "answered_at": "2026-04-05T13:35:00+00:00",
+                "session_id": 14,
+            },
+        ]
+
+        schedule = _schedule_snapshot_from_attempts(
+            attempts,
+            now="2026-04-05T13:40:00+00:00",
+            latest_scored_session_id=14,
+        )
+
+        selected = _bucketed_question_selection(
+            [
+                {
+                    "question_id": 1,
+                    "rank": 5,
+                    "latest_scored_session_id": 14,
+                    **schedule,
+                },
+                {
+                    "question_id": 2,
+                    "bucket": "unseen",
+                    "rank": 1,
+                },
+            ],
+            count=1,
+            now="2026-04-05T13:40:00+00:00",
+        )
+
+        self.assertEqual([row["question_id"] for row in selected], [1])
+
+    def test_higher_bucket_miss_still_waits_one_quiz_before_retry(self) -> None:
+        attempts = [
+            {
+                "score_earned": 0.0,
+                "score_possible": 1.0,
+                "answered_at": "2026-04-05T12:00:00+00:00",
+                "session_id": 10,
+            },
+            {
+                "score_earned": 1.0,
+                "score_possible": 1.0,
+                "answered_at": "2026-04-05T12:10:00+00:00",
+                "session_id": 11,
+            },
+            {
+                "score_earned": 1.0,
+                "score_possible": 1.0,
+                "answered_at": "2026-04-05T12:30:00+00:00",
+                "session_id": 13,
+            },
+            {
+                "score_earned": 1.0,
+                "score_possible": 1.0,
+                "answered_at": "2026-04-05T13:35:00+00:00",
+                "session_id": 14,
+            },
+            {
+                "score_earned": 0.0,
+                "score_possible": 1.0,
+                "answered_at": "2026-04-05T16:40:00+00:00",
+                "session_id": 20,
+            },
+        ]
+
+        schedule = _schedule_snapshot_from_attempts(
+            attempts,
+            now="2026-04-05T16:45:00+00:00",
+            latest_scored_session_id=20,
+        )
+
         self.assertEqual(schedule["bucket"], "bucket_retry_wait")
-        self.assertEqual(schedule["interval_step"], 0)
+        self.assertEqual(schedule["interval_step"], 1)
         self.assertTrue(schedule["retry_pending"])
 
         eligible = _schedule_snapshot_from_attempts(
             attempts,
-            now="2026-04-05T14:00:00+00:00",
-            latest_scored_session_id=15,
+            now="2026-04-05T17:00:00+00:00",
+            latest_scored_session_id=21,
         )
         self.assertEqual(eligible["bucket"], "due_review")
         self.assertTrue(eligible["retry_pending"])
 
-    def test_bucket_retry_correct_returns_to_original_bucket(self) -> None:
+    def test_higher_bucket_retry_correct_returns_to_original_bucket(self) -> None:
         attempts = [
             {
                 "score_earned": 0.0,
@@ -281,29 +412,35 @@ class SchedulerUnitTests(unittest.TestCase):
                 "session_id": 13,
             },
             {
-                "score_earned": 0.0,
+                "score_earned": 1.0,
                 "score_possible": 1.0,
                 "answered_at": "2026-04-05T13:35:00+00:00",
                 "session_id": 14,
             },
             {
+                "score_earned": 0.0,
+                "score_possible": 1.0,
+                "answered_at": "2026-04-05T16:40:00+00:00",
+                "session_id": 20,
+            },
+            {
                 "score_earned": 1.0,
                 "score_possible": 1.0,
-                "answered_at": "2026-04-05T14:35:00+00:00",
-                "session_id": 16,
+                "answered_at": "2026-04-05T17:40:00+00:00",
+                "session_id": 22,
             },
         ]
 
         schedule = _schedule_snapshot_from_attempts(
             attempts,
-            now="2026-04-05T14:40:00+00:00",
-            latest_scored_session_id=16,
+            now="2026-04-05T17:45:00+00:00",
+            latest_scored_session_id=22,
         )
 
         self.assertEqual(schedule["bucket"], "cooling")
-        self.assertEqual(schedule["interval_step"], 0)
+        self.assertEqual(schedule["interval_step"], 1)
 
-    def test_bucket_retry_incorrect_then_hot_recovery_returns_to_original_bucket_after_one_failure(self) -> None:
+    def test_higher_bucket_retry_then_hot_recovery_returns_to_original_bucket_after_one_failure(self) -> None:
         attempts = [
             {
                 "score_earned": 0.0,
@@ -324,7 +461,7 @@ class SchedulerUnitTests(unittest.TestCase):
                 "session_id": 13,
             },
             {
-                "score_earned": 0.0,
+                "score_earned": 1.0,
                 "score_possible": 1.0,
                 "answered_at": "2026-04-05T13:35:00+00:00",
                 "session_id": 14,
@@ -332,31 +469,37 @@ class SchedulerUnitTests(unittest.TestCase):
             {
                 "score_earned": 0.0,
                 "score_possible": 1.0,
-                "answered_at": "2026-04-05T14:35:00+00:00",
-                "session_id": 16,
+                "answered_at": "2026-04-05T16:40:00+00:00",
+                "session_id": 20,
+            },
+            {
+                "score_earned": 0.0,
+                "score_possible": 1.0,
+                "answered_at": "2026-04-05T17:40:00+00:00",
+                "session_id": 22,
             },
             {
                 "score_earned": 1.0,
                 "score_possible": 1.0,
-                "answered_at": "2026-04-05T15:00:00+00:00",
-                "session_id": 17,
+                "answered_at": "2026-04-05T18:00:00+00:00",
+                "session_id": 23,
             },
             {
                 "score_earned": 1.0,
                 "score_possible": 1.0,
-                "answered_at": "2026-04-05T15:30:00+00:00",
-                "session_id": 19,
+                "answered_at": "2026-04-05T18:40:00+00:00",
+                "session_id": 25,
             },
         ]
 
         schedule = _schedule_snapshot_from_attempts(
             attempts,
-            now="2026-04-05T15:35:00+00:00",
-            latest_scored_session_id=19,
+            now="2026-04-05T18:45:00+00:00",
+            latest_scored_session_id=25,
         )
 
         self.assertEqual(schedule["bucket"], "cooling")
-        self.assertEqual(schedule["interval_step"], 0)
+        self.assertEqual(schedule["interval_step"], 1)
 
     def test_bucket_retry_multiple_failures_drop_one_bucket(self) -> None:
         attempts = [
@@ -491,6 +634,54 @@ class SchedulerUnitTests(unittest.TestCase):
         )
 
         self.assertEqual([row["question_id"] for row in selected], [3, 2, 1, 4])
+
+    def test_selector_serves_unseen_origin_hot1_again_before_due_and_unseen(self) -> None:
+        schedule = _schedule_snapshot_from_attempts(
+            [
+                {
+                    "score_earned": 0.0,
+                    "score_possible": 1.0,
+                    "answered_at": "2026-04-05T12:00:00+00:00",
+                    "session_id": 10,
+                },
+                {
+                    "score_earned": 1.0,
+                    "score_possible": 1.0,
+                    "answered_at": "2026-04-05T12:10:00+00:00",
+                    "session_id": 11,
+                },
+            ],
+            now="2026-04-05T12:15:00+00:00",
+            latest_scored_session_id=11,
+        )
+
+        selected = _bucketed_question_selection(
+            [
+                {
+                    "question_id": 1,
+                    "rank": 3,
+                    "latest_scored_session_id": 11,
+                    **schedule,
+                },
+                {
+                    "question_id": 2,
+                    "bucket": "due_review",
+                    "interval_step": 0,
+                    "next_due_at": "2026-04-05T11:00:00+00:00",
+                    "retry_pending": False,
+                    "rank": 2,
+                },
+                {
+                    "question_id": 3,
+                    "bucket": "unseen",
+                    "rank": 1,
+                },
+            ],
+            count=1,
+            now="2026-04-05T12:15:00+00:00",
+        )
+
+        self.assertEqual([row["question_id"] for row in selected], [1])
 
     def test_selector_prioritizes_due_review_questions_over_unseen(self) -> None:
         selected = _bucketed_question_selection(

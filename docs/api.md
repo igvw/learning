@@ -163,6 +163,7 @@ Each question row includes:
 
 - current question content
 - attempts and accuracy
+- `first_asked_at`
 - `last_asked_at`
 - user review flag
 - recent aggregated incorrect answers

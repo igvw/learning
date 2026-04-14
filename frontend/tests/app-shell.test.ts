@@ -168,7 +168,7 @@ describe('Header', () => {
 });
 
 describe('App', () => {
-  it('uses the review toggle as local table visibility instead of reloading stats', async () => {
+  it('uses the review toggle to switch the single table without reloading stats', async () => {
     const user = userEvent.setup();
     window.history.replaceState({}, '', '/stats');
 
@@ -211,6 +211,7 @@ describe('App', () => {
           rank: 1,
           attempts: 1,
           correct_percentage: 1,
+          first_asked_at: '2026-04-01T06:00:00Z',
           last_asked_at: '2026-04-01T06:00:00Z',
           review_flag: true,
           accepted_answers: [['roots']],
@@ -236,6 +237,7 @@ describe('App', () => {
           rank: 2,
           attempts: 0,
           correct_percentage: 0,
+          first_asked_at: null,
           last_asked_at: null,
           review_flag: false,
           accepted_answers: [['photosynthesis']],
@@ -267,11 +269,13 @@ describe('App', () => {
 
     expect(api.getStats).toHaveBeenCalledTimes(1);
     expect(api.getStats).toHaveBeenCalledWith(1, 1);
-    expect(screen.queryByRole('heading', { name: 'Review Questions' })).toBeNull();
+    expect(screen.getByText('What is chlorophyll used for?')).toBeTruthy();
+    expect(screen.queryByText('What structure anchors most plants in the ground?')).toBeNull();
 
     await user.click(screen.getByRole('checkbox', { name: 'Review only' }));
 
-    expect(screen.getByRole('heading', { name: 'Review Questions' })).toBeTruthy();
+    expect(screen.getByText('What structure anchors most plants in the ground?')).toBeTruthy();
+    expect(screen.queryByText('What is chlorophyll used for?')).toBeNull();
     expect(api.getStats).toHaveBeenCalledTimes(1);
   });
 
