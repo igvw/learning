@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import os
 import unittest
 from pathlib import Path
@@ -11,7 +9,8 @@ from psycopg import sql
 
 from backend.app.database import get_connection, initialize_database
 from backend.app.main import create_app
-from backend.app.services import sync_seed_content
+from backend.app.schemas import QuestionDraftIn
+from backend.app.services import create_module, create_question, sync_seed_content
 from backend.app.settings import CONTENT_DIR, resolve_database_url
 
 
@@ -97,3 +96,127 @@ class PostgresBackendTestCase(unittest.TestCase):
             sync_seed_content(connection, Path(CONTENT_DIR))
         self.database_url = TEST_DATABASE_URL
         self.client = TestClient(create_app(database_url=TEST_DATABASE_URL, content_root=CONTENT_DIR))
+
+    def create_user(self, handle: str = "alice", display_name: str = "Alice") -> dict[str, object]:
+        response = self.client.post(
+            "/api/users",
+            json={"handle": handle, "display_name": display_name},
+        )
+        self.assertEqual(response.status_code, 200)
+        return response.json()
+
+    def user_headers(self, user_id: int) -> dict[str, str]:
+        return {"X-User-Id": str(user_id)}
+
+    def create_module_record(
+        self,
+        title: str,
+        parent_id: int | None = None,
+        instruction: str = "",
+    ) -> dict[str, object]:
+        with get_connection(self.database_url) as connection:
+            return create_module(connection, title=title, parent_id=parent_id, instruction=instruction)
+
+    def create_question_record(
+        self,
+        module_id: int,
+        prompt: str,
+        accepted_answers: list[list[str]],
+        *,
+        question_type: str = "single_text",
+        rank: int = 1,
+        segments: list[str] | None = None,
+    ) -> dict[str, object]:
+        with get_connection(self.database_url) as connection:
+            return create_question(
+                connection,
+                QuestionDraftIn(
+                    module_id=module_id,
+                    prompt=prompt,
+                    question_type=question_type,
+                    rank=rank,
+                    accepted_answers=accepted_answers,
+                    segments=segments or [],
+                ),
+            )
+
+    def create_module_tree(self) -> dict[str, int]:
+        norwegian = self.create_module_record("Norwegian")
+        vocabulary = self.create_module_record("Vocabulary", norwegian["id"])
+        source_a = self.create_module_record("Source A", vocabulary["id"])
+        source_b = self.create_module_record("Source B", vocabulary["id"])
+        target = self.create_module_record("Target", vocabulary["id"])
+        return {
+            "norwegian": norwegian["id"],
+            "vocabulary": vocabulary["id"],
+            "source_a": source_a["id"],
+            "source_b": source_b["id"],
+            "target": target["id"],
+        }
+
+    def start_quiz_session(self, user_id: int, module_id: int | None, count: int) -> dict[str, object]:
+        response = self.client.post(
+            "/api/quiz-sessions",
+            json={"module_id": module_id, "count": count},
+            headers=self.user_headers(user_id),
+        )
+        self.assertEqual(response.status_code, 200)
+        return response.json()
+
+    def submit_quiz_item(
+        self,
+        user_id: int,
+        session_id: int,
+        item_id: int,
+        answers: list[str],
+    ) -> dict[str, object]:
+        response = self.client.post(
+            f"/api/quiz-sessions/{session_id}/items/{item_id}/submit",
+            json={"answers": answers},
+            headers=self.user_headers(user_id),
+        )
+        self.assertEqual(response.status_code, 200)
+        return response.json()
+
+    def get_stats_payload(self, user_id: int, module_id: int | None = None) -> dict[str, object]:
+        params = {"module_id": module_id} if module_id is not None else None
+        response = self.client.get(
+            "/api/stats",
+            params=params,
+            headers=self.user_headers(user_id),
+        )
+        self.assertEqual(response.status_code, 200)
+        return response.json()
+
+    def set_review_flag(self, user_id: int, question_id: int, review_flag: bool = True) -> dict[str, object]:
+        response = self.client.patch(
+            f"/api/questions/{question_id}/review-flag",
+            json={"review_flag": review_flag},
+            headers=self.user_headers(user_id),
+        )
+        self.assertEqual(response.status_code, 200)
+        return response.json()
+
+    def validate_import_payload(
+        self,
+        module_id: int,
+        *,
+        qml_text: str | None = None,
+        rows: list[dict[str, object]] | None = None,
+    ) -> dict[str, object]:
+        payload: dict[str, object] = {"module_id": module_id}
+        if qml_text is not None:
+            payload["qml_text"] = qml_text
+        if rows is not None:
+            payload["rows"] = rows
+        response = self.client.post("/api/question-imports/validate", json=payload)
+        self.assertEqual(response.status_code, 200)
+        return response.json()
+
+    def commit_import_payload(self, module_id: int, rows: list[dict[str, object]]) -> dict[str, object]:
+        response = self.client.post(
+            "/api/question-imports/commit",
+            json={"module_id": module_id, "rows": rows},
+        )
+        self.assertEqual(response.status_code, 200)
+        return response.json()

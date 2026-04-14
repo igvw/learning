@@ -51,7 +51,9 @@ Current behavior:
 - answered cards remain visible
 - `Enter` moves through multi-input answers and submits from the last field
 - correct answers tint the card green
-- incorrect answers tint the card red and show neutral expected-answer boxes
+- incorrect answers tint the card red and show the default accepted answer for each slot
+- correct answers that used a non-default accepted alternative expand to show all accepted answers for the question
+- correct answers that used the default accepted answer do not show a separate neutral feedback box
 - the completed session becomes the review surface
 
 Completed-session behavior:
@@ -71,8 +73,8 @@ Current behavior:
 - entry-state graph
 - retry-eligibility graph
 - first-time questions answered by day over the last 7 local days
-- sortable main question table
-- optional review-only table toggled from the checkbox at the top
+- sortable question table
+- `Review only` checkbox that filters that same table between non-review and review-flagged rows
 - floating create-question action
 
 The question table currently focuses on:
@@ -86,12 +88,12 @@ The question table currently focuses on:
 
 Current table behavior:
 
-- the main table excludes review-flagged questions
-- checking `Review only` reveals a separate review table below the main table
-- cards and graphs stay based on the full module scope when the review table is shown
+- when unchecked, the table shows only non-review rows
+- when checked, the table shows only review-flagged rows
+- summary cards and graphs stay based on the full module scope while the table is filtered
 - chart layout is two rows:
-  `Latest quiz performance` with `Entry states` on top, then `Spaced repetition stages`, `Retry eligibility`, and `First-time questions answered` below
-- review rows stay orange in the dedicated review table
+  `Latest quiz performance` with `Entry states` on the top row, then `Spaced repetition stages`, `Retry eligibility`, and `First-time questions answered` below
+- review rows stay orange when shown in the filtered table
 - hot rows are shaded red in two intensities in the main table
 - logical bucket and hotness are separated intentionally
 

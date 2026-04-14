@@ -137,8 +137,18 @@ Response includes:
 - `score_possible`
 - `slot_results`
 - `canonical_answers`
+- `default_answers`
+- `accepted_answer_groups`
+- `matched_default_answers`
 - `session_completed`
 - `submitted_answer`
+
+Current feedback behavior:
+
+- `canonical_answers` remains the compatibility field
+- `default_answers` is the first accepted answer for each slot
+- `accepted_answer_groups` contains the full accepted answers for each slot in authoring order
+- `matched_default_answers` marks whether each submitted slot matched that slot’s first accepted answer
 
 ## Stats
 
@@ -152,6 +162,11 @@ Supported query params:
 
 - `module_id`
 - `review_only`
+
+Current frontend behavior note:
+
+- the shipped stats page requests full-scope stats and filters review rows client-side
+- `review_only` remains a supported backend query parameter for direct API callers
 
 The response contains:
 

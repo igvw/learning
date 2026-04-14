@@ -21,16 +21,9 @@
     restoreSelectedModuleId,
     routeFromPath
   } from './lib/app-state';
-  import {
-    cloneImportRows,
-    IMPORT_COMMIT_CHUNK_SIZE,
-    importCommitQueue,
-    initialImportDraftRows,
-    partialSaveStatus,
-    removeCommittedImportRows,
-    rowChunks,
-    validationSaveStatus
-  } from './lib/import-session';
+  import { IMPORT_COMMIT_CHUNK_SIZE, initialImportDraftRows } from './lib/import-session';
+  import { cloneImportRows } from './lib/import-rows';
+  import { commitImportInChunks, prepareImportSave, rebuildImportStateAfterPartialSave } from './lib/import-workflow';
   import {
     commitQuestionImport,
     createModule,
@@ -50,6 +43,7 @@
     validateQuestionImportText
   } from './lib/api';
   import { ensureModulePath, findModuleNode as findModuleNodeInTree } from './lib/module-paths';
+  import { applyQuestionReviewFlag, applySubmitAnswerResult } from './lib/quiz-session';
   import type {
     CreateModulePayload,
     CreateUserPayload,
@@ -165,21 +159,6 @@
   function setImportSaveStatus(message = '', tone: 'error' | 'info' | '' = ''): void {
     importSaveStatusMessage = message;
     importSaveStatusTone = tone;
-  }
-
-  async function rebuildImportStateAfterPartialSave(
-    rows: QuestionImportRowPayload[],
-    committedRows: number
-  ): Promise<void> {
-    if (!importTargetModuleNode) {
-      return;
-    }
-
-    const nextState = await validateQuestionImportRows(importTargetModuleNode.id, rows);
-    importDraftRows = cloneImportRows(rows);
-    importResult = nextState;
-    const { message, tone } = partialSaveStatus(nextState, committedRows);
-    setImportSaveStatus(message, tone);
   }
 
   function restoreImportStateFromSession(): void {
@@ -316,26 +295,7 @@
     quizError = '';
     try {
       const result = await submitQuizAnswer(activeUserId, session.id, itemId, answers);
-      session = {
-        ...session,
-        completed_at: result.session_completed ? new Date().toISOString() : session.completed_at,
-        items: session.items.map((item) =>
-          item.id === itemId
-            ? {
-                ...item,
-                submitted_answer: result.submitted_answer,
-                is_correct: result.is_correct,
-                score_earned: result.score_earned,
-                score_possible: result.score_possible,
-                slot_results: result.slot_results,
-                canonical_answers: result.canonical_answers,
-                default_answers: result.default_answers,
-                accepted_answer_groups: result.accepted_answer_groups,
-                matched_default_answers: result.matched_default_answers
-              }
-            : item
-        )
-      };
+      session = applySubmitAnswerResult(session, itemId, result, new Date().toISOString());
     } catch (error) {
       quizError = error instanceof Error ? error.message : 'Unable to submit this answer.';
     } finally {
@@ -355,17 +315,7 @@
     quizError = '';
     try {
       await setQuestionReviewFlag(activeUserId, questionId, true);
-      session = {
-        ...session,
-        items: session.items.map((item) =>
-          item.question_id === questionId
-            ? {
-                ...item,
-                review_flag: true
-              }
-            : item
-        )
-      };
+      session = applyQuestionReviewFlag(session, questionId, true);
     } catch (error) {
       quizError = error instanceof Error ? error.message : 'Unable to mark this question for revision.';
     } finally {
@@ -482,11 +432,15 @@
     setImportSaveStatus();
     importDraftRows = cloneImportRows(rows);
     try {
-      const validatedState = await validateQuestionImportRows(importTargetModuleNode.id, rows);
+      const { validatedState, draftRows, queue, saveStatus } = await prepareImportSave({
+        moduleId: importTargetModuleNode.id,
+        rows,
+        validateRows: validateQuestionImportRows
+      });
       importResult = validatedState;
-      importDraftRows = cloneImportRows(rows);
+      importDraftRows = draftRows;
 
-      const validationStatus = validationSaveStatus(validatedState);
+      const validationStatus = saveStatus ?? (queue.length === 0 ? { message: 'Nothing new to save.', tone: 'info' as const } : null);
       if (validationStatus) {
         setImportSaveStatus(validationStatus.message, validationStatus.tone);
         importSaveProgressTotal = 0;
@@ -494,29 +448,27 @@
         return;
       }
 
-      const queue = importCommitQueue(rows, validatedState);
-      if (queue.length === 0) {
-        setImportSaveStatus('Nothing new to save.', 'info');
-        importSaveProgressTotal = 0;
-        importSaveProgressCompleted = 0;
-        return;
-      }
-
-      importSaveProgressTotal = queue.length;
-      importSaveProgressCompleted = 0;
-
-      let remainingRows = cloneImportRows(rows);
-      for (const chunk of rowChunks(queue, IMPORT_COMMIT_CHUNK_SIZE)) {
-        const nextState = await commitQuestionImport(importTargetModuleNode.id, chunk);
-        if (!nextState.committed) {
-          await rebuildImportStateAfterPartialSave(remainingRows, importSaveProgressCompleted);
-          return;
+      const commitResult = await commitImportInChunks({
+        moduleId: importTargetModuleNode.id,
+        rows: queue,
+        commitRows: commitQuestionImport,
+        chunkSize: IMPORT_COMMIT_CHUNK_SIZE,
+        onProgress: ({ completed, total }) => {
+          importSaveProgressCompleted = completed;
+          importSaveProgressTotal = total;
         }
-
-        importSaveProgressCompleted += nextState.committed_count;
-        const committedRowNumbers = new Set(chunk.map((row) => row.row_number));
-        remainingRows = removeCommittedImportRows(remainingRows, committedRowNumbers);
-        importDraftRows = cloneImportRows(remainingRows);
+      });
+      if (!commitResult.completed) {
+        const rebuiltState = await rebuildImportStateAfterPartialSave({
+          moduleId: importTargetModuleNode.id,
+          rows: commitResult.remainingRows,
+          committedRows: commitResult.committedRows,
+          validateRows: validateQuestionImportRows
+        });
+        importDraftRows = rebuiltState.draftRows;
+        importResult = rebuiltState.validatedState;
+        setImportSaveStatus(rebuiltState.saveStatus.message, rebuiltState.saveStatus.tone);
+        return;
       }
 
       resetImportState(true);
@@ -527,7 +479,15 @@
     } catch (error) {
       if (importSaveProgressCompleted > 0) {
         try {
-          await rebuildImportStateAfterPartialSave(importDraftRows, importSaveProgressCompleted);
+          const rebuiltState = await rebuildImportStateAfterPartialSave({
+            moduleId: importTargetModuleNode.id,
+            rows: importDraftRows,
+            committedRows: importSaveProgressCompleted,
+            validateRows: validateQuestionImportRows
+          });
+          importDraftRows = rebuiltState.draftRows;
+          importResult = rebuiltState.validatedState;
+          setImportSaveStatus(rebuiltState.saveStatus.message, rebuiltState.saveStatus.tone);
         } catch (rebuildError) {
           console.error(rebuildError);
           importError = error instanceof Error ? error.message : 'Unable to commit this upload.';

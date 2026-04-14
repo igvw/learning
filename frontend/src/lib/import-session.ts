@@ -1,3 +1,4 @@
+import { cloneImportRows, draftImportRowsFromResult } from './import-rows';
 import type { QuestionImportResult, QuestionImportRowPayload } from './types';
 
 export type ImportSaveStatusTone = 'error' | 'info' | '';
@@ -9,30 +10,8 @@ export interface ImportSaveStatus {
 
 export const IMPORT_COMMIT_CHUNK_SIZE = 10;
 
-export function cloneImportRows(rows: QuestionImportRowPayload[]): QuestionImportRowPayload[] {
-  return rows.map((row) => ({
-    row_number: row.row_number,
-    qml_line: row.qml_line
-  }));
-}
-
 export function initialImportDraftRows(result: QuestionImportResult): QuestionImportRowPayload[] {
-  const existingReviewQmlByRow = new Map(
-    result.review_rows
-      .filter(
-        (row) =>
-          row.editable &&
-          (row.status === 'duplicate' || row.status === 'relocation') &&
-          row.matched_questions.length > 0 &&
-          row.matched_questions[0]?.qml_line
-      )
-      .map((row) => [row.row_number, row.matched_questions[0].qml_line])
-  );
-
-  return result.rows.map((row) => ({
-    row_number: row.row_number,
-    qml_line: existingReviewQmlByRow.get(row.row_number) ?? row.qml_line
-  }));
+  return draftImportRowsFromResult(result);
 }
 
 export function rowChunks(rows: QuestionImportRowPayload[], size: number): QuestionImportRowPayload[][] {

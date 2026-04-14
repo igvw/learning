@@ -4,14 +4,13 @@
     answerChoiceSourceLabel,
     answerChoicesByBlock,
     answerSelectedInQmlLine,
-    currentImportRowValue,
     effectiveImportRowsFromResult,
     parsePendingImportRows,
     reviewRowsForPendingRows,
     toggleAnswerInQmlLine,
     type AnswerChoice
   } from '../lib/import-review';
-  import { cloneImportRows } from '../lib/import-session';
+  import { cloneImportRows, currentImportRowValue } from '../lib/import-rows';
   import type { ModuleNode, QuestionImportResult, QuestionImportReviewRow, QuestionImportRowPayload } from '../lib/types';
 
   export let open = false;

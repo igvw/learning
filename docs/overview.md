@@ -116,7 +116,7 @@ The stats page combines:
 
 - recent quiz performance
 - entry-state, spaced-repetition, retry-eligibility, and first-time-answered graphs
-- a sortable main question table plus a separate review table toggle
+- a sortable question table filtered between non-review and review-only rows
 - question revision and delete entry points
 
 ### Admin

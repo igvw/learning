@@ -1,5 +1,5 @@
 import { findModuleNode } from './module-paths';
-import { cloneImportRows } from './import-session';
+import { cloneImportRows } from './import-rows';
 import type { ModuleNode, QuestionImportResult, QuestionImportRowPayload, User } from './types';
 
 const LEGACY_ACTIVE_USER_STORAGE_KEY = 'learning.active-user-id';
