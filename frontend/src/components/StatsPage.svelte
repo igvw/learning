@@ -1,15 +1,20 @@
 <script lang="ts">
+  import RetryEligibilityOverlay from './RetryEligibilityOverlay.svelte';
   import type { QuestionRow, StatsResponse } from '../lib/types';
   import {
     buildAuxiliaryStageGraph,
     buildFirstSeenGraph,
     buildRecoveryStageGraph,
     buildRetryEligibilityGraph,
+    buildRetryEligibilityHourlyGraph,
+    buildRetryEligibilityLongRangeGraph,
     buildSessionGraph,
     emptyAuxiliaryStageGraph,
     emptyFirstSeenGraph,
     emptyRecoveryStageGraph,
     emptyRetryEligibilityGraph,
+    emptyRetryEligibilityHourlyGraph,
+    emptyRetryEligibilityLongRangeGraph,
     emptySessionGraph,
     formatBucketLabel,
     formatLastSeen,
@@ -32,6 +37,7 @@
 
   let sortKey: SortKey | null = null;
   let sortDirection: SortDirection = 'asc';
+  let retryDetailOpen = false;
 
   function handleSort(nextSortKey: SortKey): void {
     const definition = sortDefinitions.find((candidate) => candidate.key === nextSortKey);
@@ -53,6 +59,17 @@
     return sortDirection === 'asc' ? ' ↑' : ' ↓';
   }
 
+  function openRetryDetail(): void {
+    retryDetailOpen = true;
+  }
+
+  function handleRetryDetailKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      openRetryDetail();
+    }
+  }
+
   $: mainQuestions = stats ? stats.questions.filter((question) => !question.review_flag) : [];
   $: reviewQuestions = stats ? stats.questions.filter((question) => question.review_flag) : [];
   $: displayedQuestions = reviewOnly ? reviewQuestions : mainQuestions;
@@ -62,7 +79,16 @@
   $: recoveryStageGraph = stats ? buildRecoveryStageGraph(stats.questions) : emptyRecoveryStageGraph;
   $: auxiliaryStageGraph = stats ? buildAuxiliaryStageGraph(stats.questions) : emptyAuxiliaryStageGraph;
   $: retryEligibilityGraph = stats ? buildRetryEligibilityGraph(stats.questions) : emptyRetryEligibilityGraph;
+  $: retryEligibilityHourlyGraph = stats
+    ? buildRetryEligibilityHourlyGraph(stats.questions)
+    : emptyRetryEligibilityHourlyGraph;
+  $: retryEligibilityLongRangeGraph = stats
+    ? buildRetryEligibilityLongRangeGraph(stats.questions)
+    : emptyRetryEligibilityLongRangeGraph;
   $: firstSeenGraph = stats ? buildFirstSeenGraph(stats.questions) : emptyFirstSeenGraph;
+  $: if (!stats) {
+    retryDetailOpen = false;
+  }
 </script>
 
 <section class="page stats-page">
@@ -251,7 +277,15 @@
         </div>
       </div>
 
-      <div class="panel stats-chart-panel stats-chart-panel-retry">
+      <div
+        class="panel stats-chart-panel stats-chart-panel-retry graph-launch-panel"
+        role="button"
+        tabindex="0"
+        aria-haspopup="dialog"
+        aria-label="Open retry eligibility details"
+        on:click={openRetryDetail}
+        on:keydown={handleRetryDetailKeydown}
+      >
         <div class="panel-header">
           <div><h3>Retry eligibility</h3></div>
         </div>
@@ -393,3 +427,10 @@
 
   <button class="floating-action" type="button" aria-label="Create question" on:click={onOpenCreate}>+</button>
 </section>
+
+<RetryEligibilityOverlay
+  open={retryDetailOpen}
+  hourlyGraph={retryEligibilityHourlyGraph}
+  longRangeGraph={retryEligibilityLongRangeGraph}
+  onClose={() => (retryDetailOpen = false)}
+/>

@@ -146,13 +146,6 @@
     return [];
   }
 
-  function defaultFeedbackAnswers(item: QuizItem): string[] {
-    if (item.default_answers && item.default_answers.length > 0) {
-      return item.default_answers;
-    }
-    return feedbackAnswerGroups(item).map((group) => group[0] ?? '');
-  }
-
   function slotWasCorrect(item: QuizItem, slotIndex: number): boolean {
     const slotResult = item.slot_results?.find((result) => result.index === slotIndex);
     if (slotResult) {
@@ -161,23 +154,27 @@
     return slotCount(item) === 1 ? item.is_correct === true : false;
   }
 
-  function shouldExpandFeedback(item: QuizItem): boolean {
-    return (item.matched_default_answers ?? []).some((matchedDefault, slotIndex) => !matchedDefault && slotWasCorrect(item, slotIndex));
+  function slotUsedNonPrimaryCorrectAnswer(item: QuizItem, slotIndex: number): boolean {
+    return item.is_correct === true && slotWasCorrect(item, slotIndex) && item.matched_default_answers?.[slotIndex] === false;
   }
 
-  function feedbackAnswers(item: QuizItem): string[] {
-    if (shouldExpandFeedback(item)) {
-      return feedbackAnswerGroups(item).map((group) => group.join(' / '));
+  function displayedAnswerValue(item: QuizItem, slotIndex: number, currentValue: string): string {
+    if (!item.submitted_answer || item.is_correct !== true || !slotUsedNonPrimaryCorrectAnswer(item, slotIndex)) {
+      return currentValue;
     }
-    return defaultFeedbackAnswers(item);
+    return feedbackAnswerGroups(item)[slotIndex]?.join(' / ') ?? currentValue;
+  }
+
+  function incorrectFeedbackAnswers(item: QuizItem): string[] {
+    return feedbackAnswerGroups(item).map((group) => group.join(' / '));
   }
 
   function shouldShowFeedback(item: QuizItem): boolean {
-    return item.is_correct !== true || shouldExpandFeedback(item);
+    return item.is_correct === false;
   }
 
   function usePlainFeedbackBox(item: QuizItem): boolean {
-    return feedbackAnswers(item).length === 1 && !shouldExpandFeedback(item);
+    return incorrectFeedbackAnswers(item).length === 1;
   }
 
   function handleKeydown(event: KeyboardEvent, item: QuizItem, slotIndex: number): void {
@@ -352,7 +349,7 @@
                   class="answer-input"
                   class:answer-correct={slotState(item, 0) === 'correct'}
                   class:answer-incorrect={slotState(item, 0) === 'incorrect'}
-                  value={currentAnswers[0] ?? ''}
+                  value={displayedAnswerValue(item, 0, currentAnswers[0] ?? '')}
                   disabled={answered || busyItemId === item.id}
                   data-active-input={!answered && activeIndex === index ? 'true' : undefined}
                   data-question-id={item.id}
@@ -370,7 +367,7 @@
                         class:answer-correct={slotState(item, slotIndex) === 'correct'}
                         class:answer-incorrect={slotState(item, slotIndex) === 'incorrect'}
                         aria-label={`Answer ${slotIndex + 1}`}
-                        value={currentAnswers[slotIndex] ?? ''}
+                        value={displayedAnswerValue(item, slotIndex, currentAnswers[slotIndex] ?? '')}
                         disabled={answered || busyItemId === item.id}
                         data-active-input={!answered && activeIndex === index && slotIndex === 0 ? 'true' : undefined}
                         data-question-id={item.id}
@@ -394,7 +391,7 @@
                         class="answer-input inline"
                         class:answer-correct={slotState(item, segmentIndex) === 'correct'}
                         class:answer-incorrect={slotState(item, segmentIndex) === 'incorrect'}
-                        value={currentAnswers[segmentIndex] ?? ''}
+                        value={displayedAnswerValue(item, segmentIndex, currentAnswers[segmentIndex] ?? '')}
                         disabled={answered || busyItemId === item.id}
                         data-active-input={!answered && activeIndex === index && segmentIndex === 0 ? 'true' : undefined}
                         data-question-id={item.id}
@@ -421,7 +418,7 @@
               {/if}
 
               {#if answered && shouldShowFeedback(item)}
-                {@const answerFeedback = feedbackAnswers(item)}
+                {@const answerFeedback = incorrectFeedbackAnswers(item)}
                 {#if answerFeedback.length > 0}
                   <div class="feedback-block">
                     {#if usePlainFeedbackBox(item)}

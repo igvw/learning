@@ -13,6 +13,8 @@ export type SessionGraph = ReturnType<typeof buildSessionGraph>;
 export type RecoveryStageGraph = ReturnType<typeof buildRecoveryStageGraph>;
 export type AuxiliaryStageGraph = ReturnType<typeof buildAuxiliaryStageGraph>;
 export type RetryEligibilityGraph = ReturnType<typeof buildRetryEligibilityGraph>;
+export type RetryEligibilityHourlyGraph = ReturnType<typeof buildRetryEligibilityHourlyGraph>;
+export type RetryEligibilityLongRangeGraph = ReturnType<typeof buildRetryEligibilityLongRangeGraph>;
 export type FirstSeenGraph = ReturnType<typeof buildFirstSeenGraph>;
 
 export const sortDefinitions: SortDefinition[] = [
@@ -60,6 +62,24 @@ export const emptyRetryEligibilityGraph = {
   axisY: 168,
   plotLeft: 20,
   plotRight: 340
+};
+
+export const emptyRetryEligibilityHourlyGraph = {
+  hours: [],
+  chartWidth: 960,
+  chartHeight: 240,
+  axisY: 188,
+  plotLeft: 24,
+  plotRight: 936
+};
+
+export const emptyRetryEligibilityLongRangeGraph = {
+  weeks: [],
+  chartWidth: 1320,
+  chartHeight: 240,
+  axisY: 188,
+  plotLeft: 24,
+  plotRight: 1296
 };
 
 export const emptyFirstSeenGraph = {
@@ -122,12 +142,16 @@ function bucketSortTuple(question: QuestionRow): [number, string] {
       return [6, question.prompt_preview];
     case '14d':
       return [7, question.prompt_preview];
-    case 'unseen':
+    case '30d':
       return [8, question.prompt_preview];
-    case 'mastery':
+    case '60d':
       return [9, question.prompt_preview];
-    case 'review':
+    case 'unseen':
       return [10, question.prompt_preview];
+    case 'mastery':
+      return [11, question.prompt_preview];
+    case 'review':
+      return [12, question.prompt_preview];
     default:
       return [99, question.prompt_preview];
   }
@@ -254,18 +278,43 @@ export function buildSessionGraph(recentSessions: RecentSession[]) {
   };
 }
 
-export function buildRecoveryStageGraph(questions: QuestionRow[]) {
-  const stageDefinitions = [
-    { key: '1h', label: '1h', fillColor: 'hsl(20, 90%, 58%)' },
-    { key: '3h', label: '3h', fillColor: 'hsl(30, 90%, 58%)' },
-    { key: '6h', label: '6h', fillColor: 'hsl(40, 90%, 58%)' },
-    { key: '12h', label: '12h', fillColor: 'hsl(52, 90%, 58%)' },
-    { key: '1d', label: '1d', fillColor: 'hsl(166, 76%, 56%)' },
-    { key: '3d', label: '3d', fillColor: 'hsl(188, 76%, 56%)' },
-    { key: '7d', label: '7d', fillColor: 'hsl(204, 80%, 58%)' },
-    { key: '14d', label: '14d', fillColor: 'hsl(220, 82%, 60%)' }
-  ] as const;
+const recoveryStageDefinitions = [
+  { key: '1h', label: '1h', fillColor: 'hsl(20, 90%, 58%)' },
+  { key: '3h', label: '3h', fillColor: 'hsl(30, 90%, 58%)' },
+  { key: '6h', label: '6h', fillColor: 'hsl(40, 90%, 58%)' },
+  { key: '12h', label: '12h', fillColor: 'hsl(52, 90%, 58%)' },
+  { key: '1d', label: '1d', fillColor: 'hsl(166, 76%, 56%)' },
+  { key: '3d', label: '3d', fillColor: 'hsl(188, 76%, 56%)' },
+  { key: '7d', label: '7d', fillColor: 'hsl(204, 80%, 58%)' },
+  { key: '14d', label: '14d', fillColor: 'hsl(220, 82%, 60%)' },
+  { key: '30d', label: '30d', fillColor: 'hsl(236, 78%, 66%)' },
+  { key: '60d', label: '60d', fillColor: 'hsl(252, 72%, 70%)' }
+] as const;
 
+const fixedRetryBucketLabels = recoveryStageDefinitions.map((stage) => stage.key);
+const fixedRetryBuckets = new Set(fixedRetryBucketLabels);
+const retryEligibilityDayDefinitions = [
+  { key: 'lt1', label: '<1', fillColor: 'hsl(22, 92%, 58%)' },
+  { key: 'day1', label: '1', fillColor: 'hsl(34, 90%, 58%)' },
+  { key: 'day2', label: '2', fillColor: 'hsl(46, 90%, 58%)' },
+  { key: 'day3', label: '3', fillColor: 'hsl(166, 76%, 56%)' },
+  { key: 'day4', label: '4', fillColor: 'hsl(188, 76%, 56%)' },
+  { key: 'day5', label: '5', fillColor: 'hsl(204, 80%, 58%)' },
+  { key: 'day6', label: '6', fillColor: 'hsl(220, 82%, 60%)' },
+  { key: 'day7', label: '7', fillColor: 'hsl(238, 78%, 66%)' },
+  { key: 'gt7', label: '>7', fillColor: 'hsl(260, 70%, 70%)' }
+] as const;
+type RetryEligibilityCategory = (typeof retryEligibilityDayDefinitions)[number]['key'];
+type RetryEligibilityEntry = {
+  dueAt: Date | null;
+  category: RetryEligibilityCategory;
+};
+const dayInMs = 24 * 60 * 60 * 1000;
+const hourInMs = 60 * 60 * 1000;
+const hourlyDetailWindowCount = 24;
+const weeklyDetailWindowCount = 52;
+
+export function buildRecoveryStageGraph(questions: QuestionRow[]) {
   const counts = {
     '1h': 0,
     '3h': 0,
@@ -274,7 +323,9 @@ export function buildRecoveryStageGraph(questions: QuestionRow[]) {
     '1d': 0,
     '3d': 0,
     '7d': 0,
-    '14d': 0
+    '14d': 0,
+    '30d': 0,
+    '60d': 0
   };
   const coolingCounts = {
     '1h': 0,
@@ -284,7 +335,9 @@ export function buildRecoveryStageGraph(questions: QuestionRow[]) {
     '1d': 0,
     '3d': 0,
     '7d': 0,
-    '14d': 0
+    '14d': 0,
+    '30d': 0,
+    '60d': 0
   };
 
   for (const question of questions) {
@@ -303,12 +356,12 @@ export function buildRecoveryStageGraph(questions: QuestionRow[]) {
   const plotWidth = chartWidth - padding.left - padding.right;
   const plotHeight = chartHeight - padding.top - padding.bottom;
   const axisY = padding.top + plotHeight;
-  const stepWidth = plotWidth / stageDefinitions.length;
+  const stepWidth = plotWidth / recoveryStageDefinitions.length;
   const barWidth = stepWidth;
   const maxCount = Math.max(...Object.values(counts), 1);
 
   return {
-    stages: stageDefinitions.map((stage, index) => {
+    stages: recoveryStageDefinitions.map((stage, index) => {
       const count = counts[stage.key as keyof typeof counts];
       const coolingCount = coolingCounts[stage.key as keyof typeof coolingCounts];
       const barHeight = count > 0 ? Math.max((plotHeight * count) / maxCount, 8) : 0;
@@ -403,14 +456,15 @@ export function buildAuxiliaryStageGraph(questions: QuestionRow[]) {
   };
 }
 
-const subDayRetryBuckets = new Set(['1h', '3h', '6h', '12h']);
-const oneDayRetryBucket = '1d';
-const longRetryBuckets = new Set(['3d', '7d', '14d']);
-const dayInMs = 24 * 60 * 60 * 1000;
-
 function startOfLocalDay(value: Date): Date {
   const date = new Date(value);
   date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+function startOfLocalHour(value: Date): Date {
+  const date = new Date(value);
+  date.setMinutes(0, 0, 0);
   return date;
 }
 
@@ -419,58 +473,56 @@ function localDayOffset(target: Date, referenceDayStart: Date): number {
   return Math.round((targetDayStart.getTime() - referenceDayStart.getTime()) / dayInMs);
 }
 
+function parseRetryDueAt(value: string | null | undefined): Date | null {
+  if (!value) {
+    return null;
+  }
+  const dueAt = new Date(value);
+  return Number.isNaN(dueAt.getTime()) ? null : dueAt;
+}
+
+function classifyRetryEligibilityQuestion(
+  question: QuestionRow,
+  referenceDayStart: Date
+): RetryEligibilityEntry | null {
+  const logicalBucket = question.schedule.logical_bucket;
+  if (!fixedRetryBuckets.has(logicalBucket)) {
+    return null;
+  }
+  if (question.schedule.retry_pending) {
+    return { dueAt: null, category: 'lt1' };
+  }
+
+  const dueAt = parseRetryDueAt(question.schedule.next_due_at);
+  if (!dueAt) {
+    return null;
+  }
+
+  const dayOffset = localDayOffset(dueAt, referenceDayStart);
+  if (dayOffset <= 0) {
+    return { dueAt, category: 'lt1' };
+  }
+  if (dayOffset <= 7) {
+    return { dueAt, category: `day${dayOffset}` as RetryEligibilityCategory };
+  }
+  return { dueAt, category: 'gt7' };
+}
+
+function retryEligibilityEntries(questions: QuestionRow[], referenceTime: Date): RetryEligibilityEntry[] {
+  const referenceDayStart = startOfLocalDay(referenceTime);
+  return questions
+    .map((question) => classifyRetryEligibilityQuestion(question, referenceDayStart))
+    .filter((entry): entry is RetryEligibilityEntry => entry !== null);
+}
+
 export function buildRetryEligibilityGraph(questions: QuestionRow[], referenceTime: Date = new Date()) {
   const reference = new Date(referenceTime);
-  const referenceDayStart = startOfLocalDay(reference);
-  const dayDefinitions = [
-    { key: 'lt1', label: '<1', fillColor: 'hsl(22, 92%, 58%)' },
-    { key: 'day1', label: '1', fillColor: 'hsl(34, 90%, 58%)' },
-    { key: 'day2', label: '2', fillColor: 'hsl(46, 90%, 58%)' },
-    { key: 'day3', label: '3', fillColor: 'hsl(166, 76%, 56%)' },
-    { key: 'day4', label: '4', fillColor: 'hsl(188, 76%, 56%)' },
-    { key: 'day5', label: '5', fillColor: 'hsl(204, 80%, 58%)' },
-    { key: 'day6', label: '6', fillColor: 'hsl(220, 82%, 60%)' },
-    { key: 'day7', label: '7', fillColor: 'hsl(238, 78%, 66%)' }
-  ] as const;
-  const counts = [0, 0, 0, 0, 0, 0, 0, 0];
+  const counts = Array.from({ length: retryEligibilityDayDefinitions.length }, () => 0);
 
-  for (const question of questions) {
-    const logicalBucket = question.schedule.logical_bucket;
-    if (subDayRetryBuckets.has(logicalBucket)) {
-      counts[0] += 1;
-      continue;
-    }
-    if (logicalBucket === oneDayRetryBucket) {
-      counts[1] += 1;
-      continue;
-    }
-    if (!longRetryBuckets.has(logicalBucket)) {
-      continue;
-    }
-    if (question.schedule.retry_pending) {
-      counts[0] += 1;
-      continue;
-    }
-    if (!question.schedule.next_due_at) {
-      continue;
-    }
-
-    const dueAt = new Date(question.schedule.next_due_at);
-    if (Number.isNaN(dueAt.getTime())) {
-      continue;
-    }
-
-    const dayOffset = localDayOffset(dueAt, referenceDayStart);
-    if (dayOffset <= 0) {
-      counts[0] += 1;
-      continue;
-    }
-    if (dayOffset === 1) {
-      counts[1] += 1;
-      continue;
-    }
-    if (dayOffset < counts.length) {
-      counts[dayOffset] += 1;
+  for (const entry of retryEligibilityEntries(questions, reference)) {
+    const index = retryEligibilityDayDefinitions.findIndex((day) => day.key === entry.category);
+    if (index >= 0) {
+      counts[index] += 1;
     }
   }
 
@@ -480,12 +532,12 @@ export function buildRetryEligibilityGraph(questions: QuestionRow[], referenceTi
   const plotWidth = chartWidth - padding.left - padding.right;
   const plotHeight = chartHeight - padding.top - padding.bottom;
   const axisY = padding.top + plotHeight;
-  const stepWidth = plotWidth / dayDefinitions.length;
+  const stepWidth = plotWidth / retryEligibilityDayDefinitions.length;
   const barWidth = Math.max(stepWidth - 4, 20);
   const maxCount = Math.max(...counts, 1);
 
   return {
-    days: dayDefinitions.map((day, index) => {
+    days: retryEligibilityDayDefinitions.map((day, index) => {
       const count = counts[index];
       const barHeight = count > 0 ? Math.max((plotHeight * count) / maxCount, 8) : 0;
       const x = padding.left + stepWidth * index + (stepWidth - barWidth) / 2;
@@ -495,6 +547,144 @@ export function buildRetryEligibilityGraph(questions: QuestionRow[], referenceTi
         label: day.label,
         count,
         fillColor: day.fillColor,
+        x,
+        y,
+        width: barWidth,
+        height: barHeight,
+        labelX: x + barWidth / 2
+      };
+    }),
+    chartWidth,
+    chartHeight,
+    axisY,
+    plotLeft: padding.left,
+    plotRight: chartWidth - padding.right
+  };
+}
+
+function formatTwentyFourHourLabel(value: Date): string {
+  return `${String(value.getHours()).padStart(2, '0')}:${String(value.getMinutes()).padStart(2, '0')}`;
+}
+
+function formatDayRangeLabel(startTime: Date, endTime: Date): string {
+  return `${startTime.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric'
+  })} ${formatTwentyFourHourLabel(startTime)} - ${endTime.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric'
+  })} ${formatTwentyFourHourLabel(endTime)}`;
+}
+
+export function buildRetryEligibilityHourlyGraph(questions: QuestionRow[], referenceTime: Date = new Date()) {
+  const reference = new Date(referenceTime);
+  const referenceHourStart = startOfLocalHour(reference);
+  const counts = Array.from({ length: hourlyDetailWindowCount }, () => 0);
+
+  for (const entry of retryEligibilityEntries(questions, reference)) {
+    if (entry.category !== 'lt1') {
+      continue;
+    }
+    if (!entry.dueAt || entry.dueAt.getTime() <= reference.getTime()) {
+      counts[0] += 1;
+      continue;
+    }
+
+    const dueHourStart = startOfLocalHour(entry.dueAt);
+    const hourOffset = Math.floor((dueHourStart.getTime() - referenceHourStart.getTime()) / hourInMs);
+    if (hourOffset >= 0 && hourOffset < counts.length) {
+      counts[hourOffset] += 1;
+    }
+  }
+
+  const chartWidth = 960;
+  const chartHeight = 240;
+  const padding = { top: 28, right: 24, bottom: 52, left: 24 };
+  const plotWidth = chartWidth - padding.left - padding.right;
+  const plotHeight = chartHeight - padding.top - padding.bottom;
+  const axisY = padding.top + plotHeight;
+  const stepWidth = plotWidth / hourlyDetailWindowCount;
+  const barWidth = Math.max(stepWidth - 2, 8);
+  const maxCount = Math.max(...counts, 1);
+
+  return {
+    hours: Array.from({ length: hourlyDetailWindowCount }, (_, index) => {
+      const count = counts[index];
+      const barHeight = count > 0 ? Math.max((plotHeight * count) / maxCount, 8) : 0;
+      const x = padding.left + stepWidth * index + (stepWidth - barWidth) / 2;
+      const y = axisY - barHeight;
+      const rangeStart = new Date(referenceHourStart);
+      rangeStart.setHours(referenceHourStart.getHours() + index);
+      const rangeEnd = new Date(rangeStart);
+      rangeEnd.setHours(rangeStart.getHours() + 1);
+      return {
+        key: `hour-${index}`,
+        label: index === 0 || index % 4 === 0 ? formatTwentyFourHourLabel(rangeStart) : '',
+        fullLabel: formatDayRangeLabel(rangeStart, rangeEnd),
+        count,
+        fillColor: `hsl(${20 + index * 4}, 88%, ${58 - Math.min(index, 10)}%)`,
+        x,
+        y,
+        width: barWidth,
+        height: barHeight,
+        labelX: x + barWidth / 2
+      };
+    }),
+    chartWidth,
+    chartHeight,
+    axisY,
+    plotLeft: padding.left,
+    plotRight: chartWidth - padding.right
+  };
+}
+
+function formatShortDate(value: Date): string {
+  return value.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+export function buildRetryEligibilityLongRangeGraph(questions: QuestionRow[], referenceTime: Date = new Date()) {
+  const reference = new Date(referenceTime);
+  const counts = Array.from({ length: weeklyDetailWindowCount }, () => 0);
+
+  for (const entry of retryEligibilityEntries(questions, reference)) {
+    if (entry.category !== 'gt7' || !entry.dueAt) {
+      continue;
+    }
+
+    const diffMs = entry.dueAt.getTime() - reference.getTime();
+    if (diffMs <= 7 * dayInMs) {
+      continue;
+    }
+    const weekIndex = Math.max(0, Math.ceil((diffMs - 7 * dayInMs) / (7 * dayInMs)) - 1);
+    if (weekIndex < counts.length) {
+      counts[weekIndex] += 1;
+    }
+  }
+
+  const chartWidth = 1320;
+  const chartHeight = 240;
+  const padding = { top: 28, right: 24, bottom: 52, left: 24 };
+  const plotWidth = chartWidth - padding.left - padding.right;
+  const plotHeight = chartHeight - padding.top - padding.bottom;
+  const axisY = padding.top + plotHeight;
+  const stepWidth = plotWidth / weeklyDetailWindowCount;
+  const barWidth = Math.max(stepWidth - 2, 6);
+  const maxCount = Math.max(...counts, 1);
+
+  return {
+    weeks: Array.from({ length: weeklyDetailWindowCount }, (_, index) => {
+      const count = counts[index];
+      const barHeight = count > 0 ? Math.max((plotHeight * count) / maxCount, 8) : 0;
+      const x = padding.left + stepWidth * index + (stepWidth - barWidth) / 2;
+      const y = axisY - barHeight;
+      const rangeStart = new Date(reference.getTime() + (7 + index * 7) * dayInMs);
+      const rangeEnd = new Date(reference.getTime() + (14 + index * 7) * dayInMs);
+      return {
+        key: `week-${index + 2}`,
+        label: index === 0 || (index + 1) % 4 === 0 ? `W${index + 2}` : '',
+        fullLabel: `Week ${index + 2}: ${formatShortDate(rangeStart)} - ${formatShortDate(rangeEnd)}`,
+        count,
+        fillColor: `hsl(${200 + Math.min(index, 12) * 3}, 72%, ${58 + Math.min(index, 8)}%)`,
         x,
         y,
         width: barWidth,

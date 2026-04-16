@@ -31,3 +31,4 @@ This file is the short tracker. The fuller alpha-to-beta product roadmap lives i
 - Alternative repetition algorithms
 - Retention comparisons across variants
 - Bucket-structure experimentation
+- Persisted or cached schedule state if history-derived scheduling becomes a real scale bottleneck

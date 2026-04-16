@@ -187,7 +187,7 @@ Each question row includes:
 Current schedule fields include:
 
 - `bucket`
-- `logical_bucket`
+- `logical_bucket` (`review`, `unseen`, fixed bucket labels from `1h` through `60d`, or `mastery`)
 - `recovery_streak`
 - `interval_step`
 - `last_incorrect_at`

@@ -73,7 +73,7 @@ describe('QuizPage', () => {
     expect(submitSpy).toHaveBeenCalledWith(9, ['Madrid', 'Lisbon']);
   });
 
-  it('shows the default answer in the feedback box and focuses the completion action', async () => {
+  it('shows all accepted answers in the feedback box for an incorrect submission and focuses the completion action', async () => {
     const session = buildQuizSession({
       id: 23,
       completed_at: '2026-04-04T10:00:00Z',
@@ -88,9 +88,9 @@ describe('QuizPage', () => {
           score_earned: 0,
           score_possible: 1,
           slot_results: [{ index: 0, is_correct: false, expected: 'nairobi' }],
-          canonical_answers: ['nairobi'],
+          canonical_answers: ['nairobi / nairobi city'],
           default_answers: ['nairobi'],
-          accepted_answer_groups: [['nairobi']],
+          accepted_answer_groups: [['nairobi', 'nairobi city']],
           matched_default_answers: [false]
         })
       ]
@@ -107,7 +107,7 @@ describe('QuizPage', () => {
 
     const answeredCard = screen.getByText('1. What is the capital of Kenya?').closest('article');
     const answeredInput = screen.getByRole('textbox');
-    const answerBox = screen.getByText('nairobi').closest('.answer-box');
+    const answerBox = screen.getByText('nairobi / nairobi city').closest('.answer-box');
 
     expect(screen.queryByText('Needs review')).toBeNull();
     expect(screen.queryByText('Accepted answers')).toBeNull();
@@ -246,6 +246,7 @@ describe('QuizPage', () => {
 
     expect(answeredCard?.className).toContain('correct');
     expect(answeredInput.className).toContain('answer-correct');
+    expect(answeredInput).toHaveValue('Nile');
     expect(screen.queryByText('nile')).toBeNull();
     expect(screen.queryByText('nile / the nile')).toBeNull();
     expect(screen.queryByRole('list')).toBeNull();
@@ -253,7 +254,7 @@ describe('QuizPage', () => {
     expect(markSpy).toHaveBeenCalledWith(21);
   });
 
-  it('shows all accepted answers when a correct alternative is submitted', () => {
+  it('shows all accepted answers inside the input when a correct alternative is submitted', () => {
     const session = buildQuizSession({
       id: 27,
       completed_at: '2026-04-04T10:00:00Z',
@@ -286,12 +287,13 @@ describe('QuizPage', () => {
       }
     });
 
-    expect(screen.getByText('nile / the nile')).toBeTruthy();
-    expect(screen.queryByText(/^nile$/)).toBeNull();
-    expect(screen.getAllByRole('listitem')).toHaveLength(1);
+    const answeredInput = screen.getByRole('textbox');
+    expect(answeredInput).toHaveValue('nile / the nile');
+    expect(screen.queryByRole('list')).toBeNull();
+    expect(screen.queryByText('nile / the nile')).toBeNull();
   });
 
-  it('shows multi-slot defaults and expands to all answers when any slot used an alternative', () => {
+  it('keeps submitted input values and shows full accepted answers below for incorrect multi-slot submissions', () => {
     const session = buildQuizSession({
       id: 26,
       completed_at: '2026-04-04T10:00:00Z',
@@ -335,10 +337,59 @@ describe('QuizPage', () => {
     expect(inputs[0].className).toContain('answer-correct');
     expect(inputs[1].className).toContain('answer-correct');
     expect(inputs[2].className).toContain('answer-incorrect');
+    expect(inputs[0]).toHaveValue('head');
+    expect(inputs[1]).toHaveValue('thorax');
+    expect(inputs[2]).toHaveValue('legs');
     expect(screen.getByText('head / skull')).toBeTruthy();
     expect(screen.getByText('thorax')).toBeTruthy();
     expect(screen.getByText('abdomen')).toBeTruthy();
     expect(screen.getAllByRole('listitem')).toHaveLength(3);
     expect(screen.getByRole('button', { name: 'Flag for revision' })).toBeTruthy();
+  });
+
+  it('only expands the slots that used non-primary correct answers for fully correct multi-slot submissions', () => {
+    const session = buildQuizSession({
+      id: 28,
+      completed_at: '2026-04-04T10:00:00Z',
+      items: [
+        buildQuizItem({
+          id: 21,
+          question_id: 24,
+          module_id: 2,
+          prompt: 'Name the three major body sections of an insect.',
+          question_type: 'ordered_multi',
+          rank: 4,
+          type_config: { expected_slots: 3 },
+          submitted_answer: ['skull', 'thorax', 'abdomen'],
+          is_correct: true,
+          score_earned: 1,
+          score_possible: 1,
+          slot_results: [
+            { index: 0, is_correct: true, expected: 'head / skull' },
+            { index: 1, is_correct: true, expected: 'thorax' },
+            { index: 2, is_correct: true, expected: 'abdomen' }
+          ],
+          canonical_answers: ['head / skull', 'thorax', 'abdomen'],
+          default_answers: ['head', 'thorax', 'abdomen'],
+          accepted_answer_groups: [['head', 'skull'], ['thorax'], ['abdomen']],
+          matched_default_answers: [false, true, true]
+        })
+      ]
+    });
+
+    const view = render(QuizPage, {
+      props: {
+        session,
+        moduleLabel: 'Biology',
+        busyItemId: null,
+        onSubmit: vi.fn()
+      }
+    });
+
+    const inputs = view.getAllByRole('textbox');
+    expect(inputs[0]).toHaveValue('head / skull');
+    expect(inputs[1]).toHaveValue('thorax');
+    expect(inputs[2]).toHaveValue('abdomen');
+    expect(screen.queryByRole('list')).toBeNull();
   });
 });

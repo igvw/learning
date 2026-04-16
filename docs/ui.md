@@ -93,6 +93,9 @@ Current table behavior:
 - summary cards and graphs stay based on the full module scope while the table is filtered
 - chart layout is two rows:
   `Latest quiz performance` with `Entry states` on the top row, then `Spaced repetition stages`, `Retry eligibility`, and `First-time questions answered` below
+- `Spaced repetition stages` shows the full fixed ladder through `60d`
+- `Retry eligibility` groups immediate availability into `<1`, keeps day buckets `1` through `7`, and groups longer availability into `>7`
+- clicking `Retry eligibility` opens a detail overlay with the next 24 local clock-hour buckets for the current `<1` group, shown in 24-hour time, and rolling weekly windows for the current `>7` group
 - review rows stay orange when shown in the filtered table
 - hot rows are shaded red in two intensities in the main table
 - logical bucket and hotness are separated intentionally

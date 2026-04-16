@@ -78,7 +78,7 @@ The app is multi-user over shared content.
 Scheduling uses:
 
 - short-term hotness states (`hot0`, `hot1`, `hot1_sit_out`)
-- fixed long-term buckets (`1h` through `14d`), with lowest-bucket misses returning to hot recovery
+- fixed long-term buckets (`1h` through `60d`), with lowest-bucket misses returning to hot recovery
 - a `mastery` state outside active serving
 
 The serving algorithm is described in [Spaced Repetition](spaced-repetition.md).

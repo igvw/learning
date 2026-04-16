@@ -463,12 +463,23 @@ kbd {
 }
 
 .menu-backdrop,
-.drawer-backdrop {
+.drawer-backdrop,
+.modal-backdrop {
   position: fixed;
   inset: 0;
   background: rgba(9, 13, 24, 0.62);
   backdrop-filter: blur(10px);
   z-index: 30;
+}
+
+.modal-shell {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  z-index: 31;
 }
 
 .menu-panel,
@@ -503,6 +514,15 @@ kbd {
 
 .import-drawer {
   width: 60vw;
+}
+
+.modal-panel {
+  width: min(78rem, 96vw);
+  max-height: calc(100vh - 3rem);
+  overflow-y: auto;
+  background: rgba(52, 52, 58, 0.98);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  box-shadow: 0 24px 80px rgba(2, 6, 23, 0.46);
 }
 
 .menu-panel-header,
@@ -938,6 +958,20 @@ select:focus,
   gap: 0.85rem;
 }
 
+.graph-launch-panel {
+  cursor: pointer;
+}
+
+.graph-launch-panel:focus-visible {
+  outline: none;
+}
+
+.graph-launch-panel:hover .session-graph,
+.graph-launch-panel:focus-visible .session-graph {
+  border-color: rgba(96, 165, 250, 0.48);
+  box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.18);
+}
+
 .stats-chart-grid {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -1005,6 +1039,47 @@ select:focus,
   fill: #f8fafc;
   font-size: 0.8rem;
   font-weight: 700;
+}
+
+.graph-range-label {
+  fill: rgba(226, 232, 240, 0.86);
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
+}
+
+.retry-detail-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.retry-detail-copy {
+  margin: 0;
+  max-width: 72ch;
+}
+
+.retry-detail-stack {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.retry-detail-section {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.retry-detail-section .session-graph-shell {
+  overflow-x: auto;
+}
+
+.retry-detail-chart {
+  width: max(100%, 60rem);
+  height: auto;
+  max-width: none;
+}
+
+.retry-detail-chart-wide {
+  width: max(100%, 82rem);
+  max-width: none;
 }
 
 .table-panel {
@@ -1775,6 +1850,17 @@ tbody tr.hot1-row:hover {
 
   .drawer-panel {
     width: 100vw;
+  }
+
+  .modal-shell {
+    padding: 0;
+  }
+
+  .modal-panel {
+    width: 100vw;
+    max-height: 100vh;
+    min-height: 100vh;
+    border-radius: 0;
   }
 
   .import-drawer-shell {

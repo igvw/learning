@@ -6,12 +6,19 @@ import { describe, expect, it, vi } from 'vitest';
 
 import StatsPage from '../src/components/StatsPage.svelte';
 import { buildQuestionRow, buildRecentSession, buildStatsResponse } from './builders';
-import { buildFirstSeenGraph, buildRetryEligibilityGraph } from '../src/lib/stats-page';
+import {
+  buildFirstSeenGraph,
+  buildRecoveryStageGraph,
+  buildRetryEligibilityGraph,
+  buildRetryEligibilityHourlyGraph,
+  buildRetryEligibilityLongRangeGraph
+} from '../src/lib/stats-page';
 
 describe('StatsPage', () => {
   it('builds retry eligibility counts across the coming week from fixed buckets only', () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-04-05T10:30:00Z'));
+    const referenceTime = new Date(2026, 3, 5, 10, 30, 0);
+    const localIso = (year: number, monthIndex: number, day: number, hours: number, minutes = 0): string =>
+      new Date(year, monthIndex, day, hours, minutes, 0).toISOString();
 
     const buildRetryQuestion = (questionId: number, prompt: string, schedule: Parameters<typeof buildQuestionRow>[0]['schedule']) =>
       buildQuestionRow({
@@ -19,65 +26,90 @@ describe('StatsPage', () => {
         prompt,
         prompt_preview: prompt,
         rank: questionId,
-        attempts: questionId === 11 ? 0 : 1,
-        correct_percentage: questionId === 11 ? 0 : 1,
-        first_asked_at: questionId === 11 ? null : '2026-04-05T09:00:00Z',
-        last_asked_at: questionId === 11 ? null : '2026-04-05T09:00:00Z',
-        review_flag: questionId === 9,
+        attempts: questionId === 15 ? 0 : 1,
+        correct_percentage: questionId === 15 ? 0 : 1,
+        first_asked_at: questionId === 15 ? null : '2026-04-05T09:00:00Z',
+        last_asked_at: questionId === 15 ? null : '2026-04-05T09:00:00Z',
+        review_flag: questionId === 13,
         schedule
       });
 
     const graph = buildRetryEligibilityGraph([
-      buildRetryQuestion(1, 'one hour', {
+      buildRetryQuestion(1, 'one hour later today', {
         bucket: 'cooling',
         logical_bucket: '1h',
         interval_step: 0,
-        next_due_at: '2026-04-05T11:00:00Z'
+        next_due_at: localIso(2026, 3, 5, 11, 0)
       }),
-      buildRetryQuestion(2, 'one day', {
+      buildRetryQuestion(2, 'one day later today', {
         bucket: 'cooling',
         logical_bucket: '1d',
         interval_step: 4,
-        next_due_at: '2026-04-06T09:00:00Z'
+        next_due_at: localIso(2026, 3, 5, 23, 0)
       }),
-      buildRetryQuestion(3, 'three day overdue', {
+      buildRetryQuestion(3, 'one day tomorrow', {
+        bucket: 'cooling',
+        logical_bucket: '1d',
+        interval_step: 4,
+        next_due_at: localIso(2026, 3, 6, 9, 0)
+      }),
+      buildRetryQuestion(4, 'twelve hours tomorrow', {
+        bucket: 'cooling',
+        logical_bucket: '12h',
+        interval_step: 3,
+        next_due_at: localIso(2026, 3, 6, 7, 0)
+      }),
+      buildRetryQuestion(5, 'three day overdue', {
         bucket: 'due_review',
         logical_bucket: '3d',
         interval_step: 5,
-        next_due_at: '2026-04-04T10:00:00Z'
+        next_due_at: localIso(2026, 3, 4, 10, 0)
       }),
-      buildRetryQuestion(4, 'seven day retry pending', {
+      buildRetryQuestion(6, 'seven day retry pending', {
         bucket: 'due_review',
         logical_bucket: '7d',
         interval_step: 6,
         next_due_at: null,
         retry_pending: true
       }),
-      buildRetryQuestion(5, 'three day future', {
+      buildRetryQuestion(7, 'three day in two days', {
         bucket: 'cooling',
         logical_bucket: '3d',
         interval_step: 5,
-        next_due_at: '2026-04-06T10:00:00Z'
+        next_due_at: localIso(2026, 3, 7, 10, 0)
       }),
-      buildRetryQuestion(6, 'seven day future', {
+      buildRetryQuestion(8, 'seven day in four days', {
         bucket: 'cooling',
         logical_bucket: '7d',
         interval_step: 6,
-        next_due_at: '2026-04-08T10:00:00Z'
+        next_due_at: localIso(2026, 3, 9, 10, 0)
       }),
-      buildRetryQuestion(7, 'fourteen day future', {
+      buildRetryQuestion(9, 'fourteen day in seven days', {
         bucket: 'cooling',
         logical_bucket: '14d',
         interval_step: 7,
-        next_due_at: '2026-04-11T10:00:00Z'
+        next_due_at: localIso(2026, 3, 12, 10, 0)
       }),
-      buildRetryQuestion(8, 'beyond week', {
+      buildRetryQuestion(10, 'thirty day future', {
         bucket: 'cooling',
-        logical_bucket: '14d',
-        interval_step: 7,
-        next_due_at: '2026-04-12T10:00:00Z'
+        logical_bucket: '30d',
+        interval_step: 8,
+        next_due_at: localIso(2026, 3, 20, 10, 0)
       }),
-      buildRetryQuestion(9, 'review', {
+      buildRetryQuestion(11, 'sixty day future', {
+        bucket: 'cooling',
+        logical_bucket: '60d',
+        interval_step: 9,
+        next_due_at: localIso(2026, 5, 10, 10, 0)
+      }),
+      buildRetryQuestion(12, 'missing due date', {
+        bucket: 'cooling',
+        logical_bucket: '3d',
+        interval_step: 5,
+        next_due_at: null,
+        retry_pending: false
+      }),
+      buildRetryQuestion(13, 'review', {
         bucket: 'hot0',
         logical_bucket: 'review',
         recovery_streak: 0,
@@ -85,18 +117,178 @@ describe('StatsPage', () => {
         next_due_at: null,
         retry_pending: true
       }),
-      buildRetryQuestion(10, 'mastery', {
+      buildRetryQuestion(14, 'mastery', {
         bucket: 'mastery',
         logical_bucket: 'mastery'
       }),
-      buildRetryQuestion(11, 'unseen', {
+      buildRetryQuestion(15, 'unseen', {
         bucket: 'unseen',
         logical_bucket: 'unseen'
       })
+    ], referenceTime);
+
+    expect(graph.days.map((day) => day.label)).toEqual(['<1', '1', '2', '3', '4', '5', '6', '7', '>7']);
+    expect(graph.days.map((day) => day.count)).toEqual([4, 2, 1, 0, 1, 0, 0, 1, 2]);
+  });
+
+  it('builds spaced repetition stage counts including 30d and 60d', () => {
+    const graph = buildRecoveryStageGraph([
+      buildQuestionRow({
+        question_id: 1,
+        schedule: {
+          bucket: 'cooling',
+          logical_bucket: '30d',
+          interval_step: 8,
+          next_due_at: '2026-05-05T10:00:00Z'
+        }
+      }),
+      buildQuestionRow({
+        question_id: 2,
+        schedule: {
+          bucket: 'due_review',
+          logical_bucket: '30d',
+          interval_step: 8,
+          next_due_at: '2026-05-05T10:00:00Z'
+        }
+      }),
+      buildQuestionRow({
+        question_id: 3,
+        schedule: {
+          bucket: 'cooling',
+          logical_bucket: '60d',
+          interval_step: 9,
+          next_due_at: '2026-06-05T10:00:00Z'
+        }
+      })
     ]);
 
-    expect(graph.days.map((day) => day.label)).toEqual(['<1', '1', '2', '3', '4', '5', '6', '7']);
-    expect(graph.days.map((day) => day.count)).toEqual([3, 2, 0, 1, 0, 0, 1, 1]);
+    expect(graph.stages.map((stage) => stage.label)).toContain('30d');
+    expect(graph.stages.map((stage) => stage.label)).toContain('60d');
+    expect(graph.stages.find((stage) => stage.key === '30d')?.count).toBe(2);
+    expect(graph.stages.find((stage) => stage.key === '30d')?.coolingCount).toBe(1);
+    expect(graph.stages.find((stage) => stage.key === '60d')?.count).toBe(1);
+  });
+
+  it('builds hourly retry detail from the current <1 group only', () => {
+    const referenceTime = new Date(2026, 3, 5, 10, 30, 0);
+    const localIso = (year: number, monthIndex: number, day: number, hours: number, minutes = 0): string =>
+      new Date(year, monthIndex, day, hours, minutes, 0).toISOString();
+
+    const graph = buildRetryEligibilityHourlyGraph([
+      buildQuestionRow({
+        question_id: 1,
+        schedule: {
+          bucket: 'due_review',
+          logical_bucket: '7d',
+          interval_step: 6,
+          retry_pending: true
+        }
+      }),
+      buildQuestionRow({
+        question_id: 2,
+        schedule: {
+          bucket: 'cooling',
+          logical_bucket: '1h',
+          interval_step: 0,
+          next_due_at: localIso(2026, 3, 5, 10, 45)
+        }
+      }),
+      buildQuestionRow({
+        question_id: 3,
+        schedule: {
+          bucket: 'cooling',
+          logical_bucket: '3h',
+          interval_step: 1,
+          next_due_at: localIso(2026, 3, 5, 12, 15)
+        }
+      }),
+      buildQuestionRow({
+        question_id: 4,
+        schedule: {
+          bucket: 'cooling',
+          logical_bucket: '1d',
+          interval_step: 4,
+          next_due_at: localIso(2026, 3, 5, 15, 45)
+        }
+      }),
+      buildQuestionRow({
+        question_id: 5,
+        schedule: {
+          bucket: 'cooling',
+          logical_bucket: '12h',
+          interval_step: 3,
+          next_due_at: localIso(2026, 3, 6, 7, 0)
+        }
+      }),
+      buildQuestionRow({
+        question_id: 6,
+        review_flag: true,
+        schedule: {
+          bucket: 'hot0',
+          logical_bucket: 'review',
+          retry_pending: true
+        }
+      })
+    ], referenceTime);
+
+    expect(graph.hours).toHaveLength(24);
+    expect(graph.hours[0]?.count).toBe(2);
+    expect(graph.hours[2]?.count).toBe(1);
+    expect(graph.hours[5]?.count).toBe(1);
+    expect(graph.hours[0]?.label).toBe('10:00');
+    expect(graph.hours[4]?.label).toBe('14:00');
+    expect(graph.hours[0]?.fullLabel).toContain('10:00');
+    expect(graph.hours.reduce((total, hour) => total + hour.count, 0)).toBe(4);
+  });
+
+  it('builds weekly retry detail from the current >7 group only', () => {
+    const referenceTime = new Date(2026, 3, 5, 10, 30, 0);
+    const localIso = (year: number, monthIndex: number, day: number, hours: number, minutes = 0): string =>
+      new Date(year, monthIndex, day, hours, minutes, 0).toISOString();
+
+    const graph = buildRetryEligibilityLongRangeGraph([
+      buildQuestionRow({
+        question_id: 1,
+        schedule: {
+          bucket: 'cooling',
+          logical_bucket: '30d',
+          interval_step: 8,
+          next_due_at: localIso(2026, 3, 13, 11, 0)
+        }
+      }),
+      buildQuestionRow({
+        question_id: 2,
+        schedule: {
+          bucket: 'cooling',
+          logical_bucket: '60d',
+          interval_step: 9,
+          next_due_at: localIso(2026, 3, 21, 10, 0)
+        }
+      }),
+      buildQuestionRow({
+        question_id: 3,
+        schedule: {
+          bucket: 'cooling',
+          logical_bucket: '14d',
+          interval_step: 7,
+          next_due_at: localIso(2027, 4, 20, 10, 0)
+        }
+      }),
+      buildQuestionRow({
+        question_id: 4,
+        schedule: {
+          bucket: 'cooling',
+          logical_bucket: '7d',
+          interval_step: 6,
+          next_due_at: localIso(2026, 3, 8, 10, 0)
+        }
+      })
+    ], referenceTime);
+
+    expect(graph.weeks).toHaveLength(52);
+    expect(graph.weeks[0]?.count).toBe(1);
+    expect(graph.weeks[1]?.count).toBe(1);
+    expect(graph.weeks.reduce((total, week) => total + week.count, 0)).toBe(2);
   });
 
   it('builds first-time answered counts across the last 7 local days', () => {
@@ -342,11 +534,15 @@ describe('StatsPage', () => {
     expect(graphLabels).toContain('3d');
     expect(graphLabels).toContain('7d');
     expect(graphLabels).toContain('14d');
+    expect(graphLabels).toContain('30d');
+    expect(graphLabels).toContain('60d');
     expect(graphLabels).toContain('Mastery');
     expect(graphLabels).toContain('<1');
     expect(graphLabels).toContain('7');
+    expect(graphLabels).toContain('>7');
     expect(view.container.querySelector('.graph-average-line title')?.textContent).toBe('83%');
     expect(screen.queryByRole('button', { name: 'Review' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Open retry eligibility details' })).toBeTruthy();
     expect(within(mainPanel).getByRole('button', { name: 'Bucket' })).toBeTruthy();
     expect(within(mainPanel).getByRole('button', { name: 'Last seen' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Type' })).toBeNull();
@@ -362,6 +558,83 @@ describe('StatsPage', () => {
       const rowsAfterLastSeenSort = within(mainPanel).getAllByRole('row');
       expect(rowsAfterLastSeenSort[1].textContent).toContain('What process lets plants turn light into stored energy?');
       expect(rowsAfterLastSeenSort[2].textContent).toContain('What structure anchors most plants in the ground?');
+    });
+  });
+
+  it('opens the retry detail overlay from the retry graph and closes it again', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-05T10:30:00Z'));
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    const view = render(StatsPage, {
+      props: {
+        stats: buildStatsResponse({
+          summary: {
+            total_questions: 2,
+            total_attempts: 2,
+            total_correct: 2,
+            total_possible: 2,
+            accuracy: 1
+          },
+          questions: [
+            buildQuestionRow({
+              question_id: 1,
+              prompt: 'due today',
+              prompt_preview: 'due today',
+              attempts: 1,
+              correct_percentage: 1,
+              first_asked_at: '2026-04-04T08:00:00Z',
+              last_asked_at: '2026-04-04T08:00:00Z',
+              schedule: {
+                bucket: 'cooling',
+                logical_bucket: '1d',
+                interval_step: 4,
+                next_due_at: '2026-04-05T23:00:00Z'
+              }
+            }),
+            buildQuestionRow({
+              question_id: 2,
+              prompt: 'due in a month',
+              prompt_preview: 'due in a month',
+              attempts: 1,
+              correct_percentage: 1,
+              first_asked_at: '2026-04-04T08:00:00Z',
+              last_asked_at: '2026-04-04T08:00:00Z',
+              schedule: {
+                bucket: 'cooling',
+                logical_bucket: '30d',
+                interval_step: 8,
+                next_due_at: '2026-05-05T10:00:00Z'
+              }
+            })
+          ]
+        })
+      }
+    });
+
+    await user.click(screen.getByRole('heading', { name: 'Retry eligibility' }));
+
+    const dialog = screen.getByRole('dialog', { name: 'Retry eligibility details' });
+    expect(dialog).toBeTruthy();
+    expect(within(dialog).getByRole('img', { name: 'Retry eligibility under one day by hour' })).toBeTruthy();
+    expect(within(dialog).getByRole('img', { name: 'Retry eligibility beyond seven days by week' })).toBeTruthy();
+    expect(within(dialog).getByText('10:00')).toBeTruthy();
+
+    await user.click(within(dialog).getByRole('button', { name: 'Close' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Retry eligibility details' })).toBeNull();
+    });
+
+    await user.click(screen.getByRole('heading', { name: 'Retry eligibility' }));
+    expect(screen.getByRole('dialog', { name: 'Retry eligibility details' })).toBeTruthy();
+
+    const backdrop = view.container.querySelector('.retry-detail-backdrop');
+    expect(backdrop).toBeTruthy();
+    if (backdrop) {
+      await user.click(backdrop);
+    }
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Retry eligibility details' })).toBeNull();
     });
   });
 

@@ -108,7 +108,7 @@ Scheduling is derived per user from quiz history.
 The current model separates:
 
 - short-term hotness (`hot0`, `hot1`, `hot1_sit_out`)
-- long-term bucket memory (`1h` through `14d`)
+- long-term bucket memory (`1h` through `60d`)
 - `mastery`
 
 Review-flagged questions are excluded from serving and treated separately in stats.

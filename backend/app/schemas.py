@@ -16,7 +16,7 @@ type ScheduleBucket = Literal[
     "unseen",
     "mastery",
 ]
-type LogicalBucket = Literal["review", "unseen", "1h", "3h", "6h", "12h", "1d", "3d", "7d", "14d", "mastery"]
+type LogicalBucket = Literal["review", "unseen", "1h", "3h", "6h", "12h", "1d", "3d", "7d", "14d", "30d", "60d", "mastery"]
 
 class ModuleNodeOut(BaseModel):
     id: int

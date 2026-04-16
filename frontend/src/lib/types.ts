@@ -21,6 +21,8 @@ export type LogicalBucket =
   | '3d'
   | '7d'
   | '14d'
+  | '30d'
+  | '60d'
   | 'mastery';
 
 export interface ModuleNode {

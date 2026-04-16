@@ -20,7 +20,7 @@ Questions marked for review are skipped entirely. Mastery questions are ignored 
 - `hot0`: answered incorrectly and needs immediate follow-up
 - `hot1`: answered correctly once after `hot0`
 - `hot1_sit_out`: a `hot1` question that must miss one full quiz before it can be shown again
-- fixed buckets: `1h`, `3h`, `6h`, `12h`, `1d`, `3d`, `7d`, `14d` (`1h` is the lowest fixed bucket)
+- fixed buckets: `1h`, `3h`, `6h`, `12h`, `1d`, `3d`, `7d`, `14d`, `30d`, `60d` (`1h` is the lowest fixed bucket)
 - `mastery`: no longer served by the scheduler
 
 ## Transitions
