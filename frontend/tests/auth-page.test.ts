@@ -24,6 +24,23 @@ describe('AuthPage', () => {
     expect(loginSpy).toHaveBeenCalledWith({ handle: 'user-a', password: 'password123' });
   });
 
+  it('submits sign-in when Enter is pressed in the password field', async () => {
+    const user = userEvent.setup();
+    const loginSpy = vi.fn().mockResolvedValue(undefined);
+
+    render(AuthPage, {
+      props: {
+        bootstrapRequired: false,
+        onLogin: loginSpy,
+      },
+    });
+
+    await user.type(screen.getByLabelText('Handle'), ' user-a ');
+    await user.type(screen.getByLabelText('Password'), 'password123{Enter}');
+
+    expect(loginSpy).toHaveBeenCalledWith({ handle: 'user-a', password: 'password123' });
+  });
+
   it('requires matching passwords before bootstrapping the first admin', async () => {
     const user = userEvent.setup();
     const bootstrapSpy = vi.fn().mockResolvedValue(undefined);

@@ -70,10 +70,12 @@
   import { applyQuestionReviewFlag, applySubmitAnswerResult } from './lib/quiz-session';
   import type {
     AuthActor,
+    BulkModerationResult,
     CreateModulePayload,
     CreateUserPayload,
     HealthResponse,
     ModerationActionPayload,
+    ModerationKind,
     ModerationQueue,
     ModuleNode,
     MyContributions,
@@ -612,7 +614,7 @@
   }
 
   async function handleModerationAction(
-    kind: 'module' | 'question' | 'revision',
+    kind: ModerationKind,
     id: number,
     payload: ModerationActionPayload
   ): Promise<void> {
@@ -628,6 +630,32 @@
     if (currentRoute === 'stats') {
       await loadStats();
     }
+  }
+
+  async function handleBulkQuestionModeration(
+    questionIds: number[],
+    payload: ModerationActionPayload
+  ): Promise<BulkModerationResult> {
+    let succeeded = 0;
+    let failed = 0;
+
+    for (const questionId of questionIds) {
+      try {
+        await reviewQuestion(questionId, payload);
+        succeeded += 1;
+      } catch (error) {
+        console.error(error);
+        failed += 1;
+      }
+    }
+
+    await loadRoleData();
+    await loadModules();
+    if (currentRoute === 'stats') {
+      await loadStats();
+    }
+
+    return { succeeded, failed };
   }
 
   onMount(() => {
@@ -750,6 +778,7 @@
           onUpdateModule={handleUpdateModule}
           onOpenImport={handleOpenImportForModule}
           onModerationAction={handleModerationAction}
+          onBulkQuestionModeration={handleBulkQuestionModeration}
         />
       {/if}
     </main>

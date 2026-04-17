@@ -6,8 +6,10 @@
   import { flattenModules } from '../lib/admin-page';
   import type {
     AuthActor,
+    BulkModerationResult,
     CreateModulePayload,
     ModerationActionPayload,
+    ModerationKind,
     ModerationQueue,
     ModuleNode,
     MyContributions,
@@ -50,11 +52,17 @@
   };
   export let onOpenImport: (moduleId: number) => void = () => {};
   export let onModerationAction: (
-    kind: 'module' | 'question' | 'revision',
+    kind: ModerationKind,
     id: number,
     payload: ModerationActionPayload
   ) => Promise<void> = async () => {
     throw new Error('Moderation handler is not configured.');
+  };
+  export let onBulkQuestionModeration: (
+    questionIds: number[],
+    payload: ModerationActionPayload
+  ) => Promise<BulkModerationResult> = async () => {
+    throw new Error('Bulk moderation handler is not configured.');
   };
 
   $: isAdmin = currentActor?.role === 'admin';
@@ -97,7 +105,11 @@
     />
 
     {#if isAdmin}
-      <ModerationQueuePanel moderationQueue={moderationQueue} onModerationAction={onModerationAction} />
+      <ModerationQueuePanel
+        moderationQueue={moderationQueue}
+        onModerationAction={onModerationAction}
+        onBulkQuestionModeration={onBulkQuestionModeration}
+      />
     {:else}
       <ContributionsPanel contributions={contributions} />
     {/if}

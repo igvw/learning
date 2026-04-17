@@ -137,7 +137,10 @@ Current behavior:
   account creation and password reset
   global module editing
   QML import
-  moderation queues for pending modules, pending uploaded questions, and question revision/delete proposals
+  moderation summary cards for pending modules, pending uploaded questions, and question revision/delete proposals
+- admins open each moderation category in its own overlay instead of keeping the full queue inline on the page
+- the pending uploaded questions overlay groups rows by module and supports bulk approve/reject per module table
+- request-changes stays a row-by-row action, and pending modules plus revision/delete proposals remain individually reviewed
 - regular users see:
   pending leaf-module creation under verified parents
   QML import for pending question uploads

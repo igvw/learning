@@ -5,8 +5,9 @@ import { describe, expect, it, vi } from 'vitest';
 import AdminPage from '../src/components/AdminPage.svelte';
 import EditorDrawer from '../src/components/EditorDrawer.svelte';
 import ImportDrawer from '../src/components/ImportDrawer.svelte';
+import ModerationQueuePanel from '../src/components/admin/ModerationQueuePanel.svelte';
 import type { ModuleNode, QuestionImportResult } from '../src/lib/types';
-import { buildAuthActor, buildModuleNode, buildQuestionRow } from './builders';
+import { buildAuthActor, buildModerationQueue, buildModuleNode, buildQuestionRow } from './builders';
 
 describe('EditorDrawer', () => {
   it('shows type-specific ghost text in create mode', async () => {
@@ -368,6 +369,169 @@ describe('AdminPage', () => {
     });
 
     expect(await screen.findByText('Module ready: norwegian.')).toBeTruthy();
+  });
+});
+
+describe('ModerationQueuePanel', () => {
+  it('shows summary cards, opens overlays, and supports bulk approve by module', async () => {
+    const user = userEvent.setup();
+    const moderationSpy = vi.fn().mockResolvedValue(undefined);
+    const bulkSpy = vi.fn().mockResolvedValue({ succeeded: 2, failed: 0 });
+
+    render(ModerationQueuePanel, {
+      props: {
+        moderationQueue: buildModerationQueue({
+          pending_modules: [
+            {
+              id: 7,
+              title: 'Vocabulary',
+              full_slug: 'norwegian/vocabulary',
+              parent_id: 1,
+              instruction: 'Translate the Norwegian term into English.',
+              admin_verified: false,
+              moderation_status: 'pending',
+              created_by_user_id: 2,
+              creator_display_name: 'Alice',
+              admin_review_note: ''
+            }
+          ],
+          pending_questions: [
+            {
+              question_id: 11,
+              module_id: 3,
+              module_full_slug: 'norwegian/vocabulary/noun2en',
+              prompt: 'hund',
+              question_type: 'single_text',
+              rank: 1,
+              accepted_answers: [['dog']],
+              segments: [],
+              admin_verified: false,
+              moderation_status: 'pending',
+              created_by_user_id: 2,
+              creator_display_name: 'Alice',
+              admin_review_note: ''
+            },
+            {
+              question_id: 12,
+              module_id: 3,
+              module_full_slug: 'norwegian/vocabulary/noun2en',
+              prompt: 'katt',
+              question_type: 'single_text',
+              rank: 2,
+              accepted_answers: [['cat']],
+              segments: [],
+              admin_verified: false,
+              moderation_status: 'pending',
+              created_by_user_id: 2,
+              creator_display_name: 'Alice',
+              admin_review_note: ''
+            }
+          ],
+          pending_revisions: [
+            {
+              proposal_id: 21,
+              question_id: 5,
+              proposer_user_id: 3,
+              proposer_display_name: 'Bob',
+              status: 'pending',
+              delete_requested: false,
+              admin_review_note: '',
+              module_id: 3,
+              module_full_slug: 'norwegian/vocabulary/noun2en',
+              current_prompt: 'dag',
+              current_question_type: 'single_text',
+              current_accepted_answers: [['day']],
+              current_segments: [],
+              proposed_prompt: 'dagen',
+              proposed_question_type: 'single_text',
+              proposed_accepted_answers: [['the day']],
+              proposed_segments: []
+            }
+          ]
+        }),
+        onModerationAction: moderationSpy,
+        onBulkQuestionModeration: bulkSpy
+      }
+    });
+
+    expect(screen.getByRole('button', { name: /Pending modules/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Pending uploaded questions/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Pending revisions/i })).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: /Pending modules/i }));
+    expect(screen.getByRole('heading', { name: 'Pending modules' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+
+    await user.click(screen.getByRole('button', { name: /Pending revisions/i }));
+    expect(screen.getByRole('heading', { name: 'Pending revisions' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+
+    await user.click(screen.getByRole('button', { name: /Pending uploaded questions/i }));
+    expect(screen.getByRole('heading', { name: 'Pending uploaded questions' })).toBeTruthy();
+    expect(screen.getByText('norwegian/vocabulary/noun2en')).toBeTruthy();
+
+    await user.click(screen.getByLabelText('Select all pending questions in norwegian/vocabulary/noun2en'));
+    await user.click(screen.getByRole('button', { name: 'Approve selected' }));
+
+    expect(bulkSpy).toHaveBeenCalledWith([11, 12], { action: 'approve', note: '' });
+    expect(await screen.findByText('Approved 2 questions.')).toBeTruthy();
+
+    await user.click(screen.getAllByRole('button', { name: 'Request changes' })[0]);
+    expect(moderationSpy).toHaveBeenCalledWith('question', 11, { action: 'changes_requested', note: '' });
+  });
+
+  it('reports partial bulk failures without removing the remaining selection', async () => {
+    const user = userEvent.setup();
+    const bulkSpy = vi.fn().mockResolvedValue({ succeeded: 1, failed: 1 });
+
+    render(ModerationQueuePanel, {
+      props: {
+        moderationQueue: buildModerationQueue({
+          pending_questions: [
+            {
+              question_id: 31,
+              module_id: 9,
+              module_full_slug: 'science/chemistry',
+              prompt: 'H2O',
+              question_type: 'single_text',
+              rank: 1,
+              accepted_answers: [['water']],
+              segments: [],
+              admin_verified: false,
+              moderation_status: 'pending',
+              created_by_user_id: 4,
+              creator_display_name: 'Chris',
+              admin_review_note: ''
+            },
+            {
+              question_id: 32,
+              module_id: 9,
+              module_full_slug: 'science/chemistry',
+              prompt: 'NaCl',
+              question_type: 'single_text',
+              rank: 2,
+              accepted_answers: [['salt']],
+              segments: [],
+              admin_verified: false,
+              moderation_status: 'pending',
+              created_by_user_id: 4,
+              creator_display_name: 'Chris',
+              admin_review_note: ''
+            }
+          ]
+        }),
+        onModerationAction: vi.fn().mockResolvedValue(undefined),
+        onBulkQuestionModeration: bulkSpy
+      }
+    });
+
+    await user.click(screen.getByRole('button', { name: /Pending uploaded questions/i }));
+    await user.click(screen.getByLabelText('Select all pending questions in science/chemistry'));
+    await user.click(screen.getByRole('button', { name: 'Reject selected' }));
+
+    expect(bulkSpy).toHaveBeenCalledWith([31, 32], { action: 'reject', note: '' });
+    expect(await screen.findByText('Rejected 1 question. 1 could not be rejected.')).toBeTruthy();
+    expect((screen.getByLabelText('Select pending question H2O') as HTMLInputElement).checked).toBe(true);
   });
 });
 

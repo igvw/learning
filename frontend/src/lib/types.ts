@@ -4,6 +4,7 @@ export type PriorityMode = 'high' | 'mid' | 'low';
 export type UserRole = 'admin' | 'user' | 'demo';
 export type ModerationStatus = 'verified' | 'pending' | 'changes_requested' | 'rejected';
 export type ProposalStatus = 'pending' | 'changes_requested' | 'approved' | 'rejected';
+export type ModerationKind = 'module' | 'question' | 'revision';
 export type ScheduleBucket =
   | 'hot0'
   | 'hot1'
@@ -253,6 +254,11 @@ export interface UpdateUserPasswordPayload {
 export interface ModerationActionPayload {
   action: 'approve' | 'reject' | 'changes_requested';
   note: string;
+}
+
+export interface BulkModerationResult {
+  succeeded: number;
+  failed: number;
 }
 
 export interface PendingModule {

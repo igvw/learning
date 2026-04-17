@@ -97,7 +97,7 @@
           <div class="panel-header">
             <div><h3>Sign In</h3></div>
           </div>
-          <div class="admin-bar-form user-bar-form">
+          <form class="admin-bar-form user-bar-form" on:submit|preventDefault={() => void handleLoginSubmit()}>
             <label class="field">
               <span>Handle</span>
               <input type="text" bind:value={handle} placeholder="ignazio" />
@@ -107,11 +107,11 @@
               <input type="password" bind:value={password} placeholder="Password" />
             </label>
             <div class="admin-action-slot">
-              <button class="primary-button" type="button" disabled={busy} on:click={() => void handleLoginSubmit()}>
+              <button class="primary-button" type="submit" disabled={busy}>
                 {busy ? 'Signing in...' : 'Sign In'}
               </button>
             </div>
-          </div>
+          </form>
         </article>
 
         <article class="panel admin-bar-panel">
