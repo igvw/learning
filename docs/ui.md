@@ -17,7 +17,7 @@ The app has three main pages plus a shared module menu:
 - `Admin`
 - hamburger menu for module selection
 
-The header also includes the active-user badge and switcher.
+The header also includes the authenticated account badge and logout menu.
 
 ## Module Menu
 
@@ -30,16 +30,16 @@ Current behavior:
 - clicking a leaf selects it and closes the menu
 - top-level branches auto-collapse when switching roots
 
-## User Switching
+## Authentication
 
-The top-right user badge opens a small switcher menu.
+The app now starts with an auth screen instead of a user switcher.
 
 Current behavior:
 
-- badge color is stable per user
-- switching users changes quiz history, review flags, stats, and scheduling
-- if no active user exists, quiz and stats point the user to Admin
-- user creation happens in Admin
+- if no admin exists yet, the auth screen shows first-admin bootstrap
+- normal accounts sign in by handle and password
+- demo mode starts an ephemeral showcase session with no real writes
+- the top-right badge shows the current account and logout action
 
 ## Quiz Page
 
@@ -51,8 +51,8 @@ Current behavior:
 - answered cards remain visible
 - `Enter` moves through multi-input answers and submits from the last field
 - correct answers tint the card green
-- incorrect answers tint the card red and show the default accepted answer for each slot
-- correct answers that used a non-default accepted alternative expand to show all accepted answers for the question
+- incorrect answers tint the card red and show all accepted answers in the grey feedback box
+- correct answers that used a non-default accepted alternative expand that slot’s disabled input to all accepted answers
 - correct answers that used the default accepted answer do not show a separate neutral feedback box
 - the completed session becomes the review surface
 
@@ -91,9 +91,12 @@ Current table behavior:
 - when unchecked, the table shows only non-review rows
 - when checked, the table shows only review-flagged rows
 - summary cards and graphs stay based on the full module scope while the table is filtered
+- unverified uploaded questions and personal revision overlays show badges in the question table
 - chart layout is two rows:
   `Latest quiz performance` with `Entry states` on the top row, then `Spaced repetition stages`, `Retry eligibility`, and `First-time questions answered` below
 - `Spaced repetition stages` shows the full fixed ladder through `60d`
+- clicking `Spaced repetition stages` opens a detail overlay with a due-day heatmap:
+  bucket columns `<1d`, `1d`, `3d`, `7d`, `14d`, `30d`, `60d`; day rows from `Today` through the latest scheduled fixed-stage day within the next 60 local days; overdue items collapse into `Today`
 - `Retry eligibility` groups immediate availability into `<1`, keeps day buckets `1` through `7`, and groups longer availability into `>7`
 - clicking `Retry eligibility` opens a detail overlay with the next 24 local clock-hour buckets for the current `<1` group, shown in 24-hour time, and rolling weekly windows for the current `>7` group
 - review rows stay orange when shown in the filtered table
@@ -114,6 +117,9 @@ Current behavior:
 - create mode uses a `Priority` selector (`High`, `Mid`, `Low`) instead of raw rank
 - create mode keeps a live editable QML box in sync with the structured fields
 - revision mode can delete the current question after confirmation
+- regular-user revision mode on verified questions becomes a personal proposal flow:
+  module and rank stay locked, and delete becomes `Request Delete`
+- admins still edit verified questions directly
 
 Incorrect-answer history currently shows:
 
@@ -121,19 +127,23 @@ Incorrect-answer history currently shows:
 - count
 - latest incorrect time
 
-## Admin Page
+## Admin / Manage Page
 
-The Admin page owns shared-content administration.
+The third route is now role-aware instead of always being a pure admin page.
 
 Current behavior:
 
-- one `Module` section for selected-leaf edits and slash-path creation
-- leaf-module rename and instruction updates for the currently selected leaf
-- slash-path module creation with `mkdir -p` behavior
-- module instruction entry
-- user creation
-- QML import target selection
-- import defaults to the current hamburger-selected module and blocks until a leaf is chosen
+- admins see:
+  account creation and password reset
+  global module editing
+  QML import
+  moderation queues for pending modules, pending uploaded questions, and question revision/delete proposals
+- regular users see:
+  pending leaf-module creation under verified parents
+  QML import for pending question uploads
+  editable own pending leaf modules
+  a `My contributions` list with statuses and review notes
+- demo shows the same contribution surface in a disabled/showcase form
 
 ## Import Drawer
 
@@ -154,10 +164,14 @@ Current behavior:
   - manually added answer
 - persist the import session in `sessionStorage` so refresh restores the drawer state
 - save with one button and determinate chunk progress
+- allow the drawer to be hidden while an upload keeps running in the current tab
+- show a compact header upload-status pill that reopens the drawer
 
 Current import-save behavior:
 
 - save submits the current edited rows
-- the frontend saves committable rows in 10-row chunks
+- the frontend saves committable rows in 50-row chunks
+- while a chunked upload is active, the review rows become read-only status rows
 - partial success keeps the drawer open, removes already committed rows, and revalidates the remainder
 - blocking rows stay highlighted red until edited or removed
+- in demo mode the import entry points stay visible, but saving is blocked

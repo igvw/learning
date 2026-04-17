@@ -1,3 +1,4 @@
+import json
 import re
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -9,7 +10,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 
-CURRENT_SCHEMA_VERSION = 6
+CURRENT_SCHEMA_VERSION = 8
 SCHEMA_VERSION_TABLE = "app_schema_version"
 SCHEMA_SQL = Path(__file__).with_name("schema.sql").read_text()
 
@@ -135,6 +136,23 @@ def _set_schema_version(connection: DatabaseConnection, version: int) -> None:
     )
 
 
+def _backfill_question_prompt_keys(connection: DatabaseConnection) -> None:
+    from .service.questions import question_prompt_key
+
+    rows = connection.execute(
+        """
+        SELECT id, question_type, prompt, type_config_json
+        FROM questions
+        """
+    ).fetchall()
+    for row in rows:
+        type_config = json.loads(row["type_config_json"])
+        connection.execute(
+            "UPDATE questions SET prompt_key = ? WHERE id = ?",
+            (question_prompt_key(row["question_type"], row["prompt"], type_config), row["id"]),
+        )
+
+
 def initialize_database(database_url: str) -> None:
     with connect(database_url) as connection:
         current_version = _schema_version(connection)
@@ -142,10 +160,11 @@ def initialize_database(database_url: str) -> None:
 
         if existing_tables and current_version == 0:
             raise RuntimeError("Existing PostgreSQL database has no schema version. Refusing to mutate it automatically.")
-        if current_version not in {0, 1, 2, 3, 4, 5, CURRENT_SCHEMA_VERSION}:
+        if current_version not in {0, 1, 2, 3, 4, 5, 6, 7, CURRENT_SCHEMA_VERSION}:
             raise RuntimeError(f"Unsupported PostgreSQL schema version {current_version}.")
 
-        connection.executescript(SCHEMA_SQL)
+        if current_version == 0:
+            connection.executescript(SCHEMA_SQL)
         if current_version == 1:
             connection.execute("ALTER TABLE users DROP COLUMN IF EXISTS disabled_at")
         if current_version in {1, 2, 3, 4}:
@@ -162,6 +181,113 @@ def initialize_database(database_url: str) -> None:
             connection.execute(
                 "ALTER TABLE quiz_session_items ADD COLUMN IF NOT EXISTS resolved_type_config_json TEXT"
             )
+        if current_version in {1, 2, 3, 4, 5, 6}:
+            connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user'")
+            connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT")
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS auth_sessions (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    token_hash TEXT NOT NULL UNIQUE,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    last_seen_at TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_id ON auth_sessions(user_id)")
+            connection.execute("ALTER TABLE modules DROP CONSTRAINT IF EXISTS modules_full_slug_key")
+            connection.execute("ALTER TABLE modules ADD COLUMN IF NOT EXISTS created_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL")
+            connection.execute("ALTER TABLE modules ADD COLUMN IF NOT EXISTS admin_verified INTEGER NOT NULL DEFAULT 1")
+            connection.execute(
+                "ALTER TABLE modules ADD COLUMN IF NOT EXISTS moderation_status TEXT NOT NULL DEFAULT 'verified'"
+            )
+            connection.execute(
+                "ALTER TABLE modules ADD COLUMN IF NOT EXISTS admin_review_note TEXT NOT NULL DEFAULT ''"
+            )
+            connection.execute(
+                "ALTER TABLE modules ADD COLUMN IF NOT EXISTS reviewed_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL"
+            )
+            connection.execute("ALTER TABLE modules ADD COLUMN IF NOT EXISTS reviewed_at TEXT")
+            connection.execute(
+                "UPDATE modules SET admin_verified = COALESCE(admin_verified, 1), moderation_status = COALESCE(moderation_status, 'verified')"
+            )
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_modules_parent_id ON modules(parent_id)")
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_modules_created_by_status ON modules(created_by_user_id, admin_verified, moderation_status)"
+            )
+            connection.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_modules_verified_full_slug
+                ON modules (LOWER(full_slug))
+                WHERE admin_verified = 1
+                """
+            )
+            connection.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_modules_pending_owner_full_slug
+                ON modules (created_by_user_id, LOWER(full_slug))
+                WHERE admin_verified = 0
+                  AND created_by_user_id IS NOT NULL
+                  AND moderation_status IN ('pending', 'changes_requested')
+                """
+            )
+            connection.execute(
+                "ALTER TABLE questions ADD COLUMN IF NOT EXISTS created_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL"
+            )
+            connection.execute("ALTER TABLE questions ADD COLUMN IF NOT EXISTS admin_verified INTEGER NOT NULL DEFAULT 1")
+            connection.execute(
+                "ALTER TABLE questions ADD COLUMN IF NOT EXISTS moderation_status TEXT NOT NULL DEFAULT 'verified'"
+            )
+            connection.execute(
+                "ALTER TABLE questions ADD COLUMN IF NOT EXISTS admin_review_note TEXT NOT NULL DEFAULT ''"
+            )
+            connection.execute(
+                "ALTER TABLE questions ADD COLUMN IF NOT EXISTS reviewed_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL"
+            )
+            connection.execute("ALTER TABLE questions ADD COLUMN IF NOT EXISTS reviewed_at TEXT")
+            connection.execute(
+                "UPDATE questions SET admin_verified = COALESCE(admin_verified, 1), moderation_status = COALESCE(moderation_status, 'verified')"
+            )
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_questions_module_id ON questions(module_id)")
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_questions_created_by_status ON questions(created_by_user_id, admin_verified, moderation_status)"
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS question_revision_proposals (
+                    id BIGSERIAL PRIMARY KEY,
+                    question_id BIGINT NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+                    proposer_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    prompt TEXT NOT NULL,
+                    question_type TEXT NOT NULL,
+                    type_config_json TEXT NOT NULL,
+                    delete_requested INTEGER NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    admin_review_note TEXT NOT NULL DEFAULT '',
+                    reviewed_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+                    reviewed_at TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(question_id, proposer_user_id)
+                )
+                """
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_question_revision_proposals_proposer ON question_revision_proposals(proposer_user_id, status)"
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_question_revision_proposals_question ON question_revision_proposals(question_id, status)"
+            )
+        if current_version in {1, 2, 3, 4, 5, 6, 7}:
+            connection.execute("ALTER TABLE questions ADD COLUMN IF NOT EXISTS prompt_key TEXT")
+            _backfill_question_prompt_keys(connection)
+            connection.execute("ALTER TABLE questions ALTER COLUMN prompt_key SET NOT NULL")
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_questions_module_prompt_key ON questions(module_id, prompt_key)")
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_questions_prompt_key ON questions(prompt_key)")
+        if current_version != 0:
+            connection.executescript(SCHEMA_SQL)
         _set_schema_version(connection, CURRENT_SCHEMA_VERSION)
         connection.commit()
 

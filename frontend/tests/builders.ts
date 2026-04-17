@@ -1,5 +1,8 @@
 import type {
+  AuthActor,
   ModuleNode,
+  MyContributions,
+  ModerationQueue,
   QuestionImportResult,
   QuestionImportReviewRow,
   QuestionImportRowPayload,
@@ -17,6 +20,19 @@ export function buildUser(overrides: Partial<User> = {}): User {
     id: 1,
     handle: 'user-a',
     display_name: 'User A',
+    role: 'user',
+    created_at: '2026-04-05T10:00:00Z',
+    ...overrides
+  };
+}
+
+export function buildAuthActor(overrides: Partial<AuthActor> = {}): AuthActor {
+  return {
+    id: 1,
+    handle: 'user-a',
+    display_name: 'User A',
+    role: 'user',
+    is_demo: false,
     created_at: '2026-04-05T10:00:00Z',
     ...overrides
   };
@@ -33,6 +49,10 @@ export function buildModuleNode(
     slug: 'biology',
     full_slug: 'biology',
     instruction: '',
+    admin_verified: true,
+    moderation_status: 'verified',
+    created_by_user_id: null,
+    creator_display_name: null,
     children: overrides.children ?? [],
     ...overrides
   };
@@ -50,6 +70,11 @@ export function buildQuizItem(overrides: Partial<QuizItem> = {}): QuizItem {
     question_type: 'single_text',
     rank: 1,
     type_config: overrides.type_config ?? { expected_slots: 1 },
+    admin_verified: true,
+    moderation_status: 'verified',
+    created_by_user_id: null,
+    creator_display_name: null,
+    viewer_proposal: null,
     submitted_answer: null,
     is_correct: null,
     ...overrides
@@ -92,7 +117,7 @@ export function buildQuestionSchedule(overrides: Partial<QuestionSchedule> = {})
 }
 
 export function buildQuestionRow(
-  overrides: Partial<QuestionRow> & {
+  overrides: Omit<Partial<QuestionRow>, 'schedule'> & {
     schedule?: Partial<QuestionSchedule>;
   } = {}
 ): QuestionRow {
@@ -110,6 +135,11 @@ export function buildQuestionRow(
     first_asked_at: null,
     last_asked_at: null,
     review_flag: false,
+    admin_verified: true,
+    moderation_status: 'verified',
+    created_by_user_id: null,
+    creator_display_name: null,
+    viewer_proposal: null,
     accepted_answers: [['answer']],
     segments: [],
     recent_incorrect_answers: [],
@@ -119,7 +149,7 @@ export function buildQuestionRow(
 }
 
 export function buildStatsResponse(
-  overrides: Partial<StatsResponse> & {
+  overrides: Omit<Partial<StatsResponse>, 'summary' | 'recent_sessions' | 'questions'> & {
     summary?: Partial<StatsResponse['summary']>;
     recent_sessions?: RecentSession[];
     questions?: QuestionRow[];
@@ -185,5 +215,23 @@ export function buildImportResult(
     committed: false,
     committed_count: 0,
     ...resultOverrides
+  };
+}
+
+export function buildModerationQueue(overrides: Partial<ModerationQueue> = {}): ModerationQueue {
+  return {
+    pending_modules: [],
+    pending_questions: [],
+    pending_revisions: [],
+    ...overrides
+  };
+}
+
+export function buildMyContributions(overrides: Partial<MyContributions> = {}): MyContributions {
+  return {
+    modules: [],
+    questions: [],
+    revisions: [],
+    ...overrides
   };
 }

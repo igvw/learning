@@ -13,26 +13,34 @@ The current container deployment is:
 
 ## Environment Variables
 
+- `POSTGRES_DB`
+  Database name for the `postgres` container. Required in `.env`.
+- `POSTGRES_USER`
+  Database user for the `postgres` container. Required in `.env`.
+- `POSTGRES_PASSWORD`
+  Database password for the `postgres` container. Required in `.env`.
+- `POSTGRES_PORT`
+  Host port published for PostgreSQL. Sample `.env.example` value: `5432`.
 - `LEARNING_APP_PORT`
-  Host port published by Docker Compose. Default: `8000`
+  Host port published by Docker Compose. Sample `.env.example` value: `8000`.
 - `LEARNING_APP_IMAGE`
-  Published GHCR image used by the app service. Default: `ghcr.io/igvw/learning-app:latest`
-- `LEARNING_APP_DATABASE_URL`
-  PostgreSQL connection string used by the app container.
+  Published GHCR image used by the app service. Sample `.env.example` value: `ghcr.io/igvw/learning-app:latest`.
+- `LEARNING_APP_ENV`
+  Runtime environment label. Sample `.env.example` value: `production`.
+- `LEARNING_APP_INSTANCE_KEY`
+  Browser storage namespace and health metadata key. Sample `.env.example` value: `published`.
 - `LEARNING_APP_SEED_ON_BOOT`
-  When `true`, startup imports any missing seed content from `content/modules`. Default: `true`
+  When `true`, startup imports any missing seed content from `content/modules`. Sample `.env.example` value: `true`.
 - `LEARNING_APP_CORS_ORIGINS`
   Optional comma-separated list of allowed origins when the frontend is served from a different host.
-- `LEARNING_APP_ENV`
-  Runtime environment label. Compose sets this to `production`.
-- `POSTGRES_DB`
-  Default database name for the `postgres` container.
-- `POSTGRES_USER`
-  Default database user for the `postgres` container.
-- `POSTGRES_PASSWORD`
-  Default database password for the `postgres` container.
-- `POSTGRES_PORT`
-  Host port published for PostgreSQL. Default: `5432`
+- `LEARNING_APP_BOOTSTRAP_ADMIN_HANDLE`
+  Optional first-admin handle. When all three bootstrap admin vars are present and no admin exists yet, startup creates that first admin automatically.
+- `LEARNING_APP_BOOTSTRAP_ADMIN_DISPLAY_NAME`
+  Optional first-admin display name used by env bootstrap.
+- `LEARNING_APP_BOOTSTRAP_ADMIN_PASSWORD`
+  Optional first-admin password used by env bootstrap.
+- `LEARNING_APP_DATABASE_URL`
+  Optional full PostgreSQL connection string. When unset, the backend can build a local connection URL from `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD`.
 
 ## Local Development
 
@@ -112,7 +120,14 @@ docker compose -f docker-compose.deploy.yml pull
 docker compose -f docker-compose.deploy.yml up -d
 ```
 
-The app will listen on `http://127.0.0.1:${LEARNING_APP_PORT:-8000}`.
+With the sample `.env`, the app listens on `http://127.0.0.1:8000`.
+
+The sample `.env.example` also boots the first admin automatically:
+
+- handle: `admin`
+- password: `password123`
+
+If you intentionally clear the bootstrap admin vars before first startup, the app still starts and the auth screen falls back to the manual first-admin bootstrap flow.
 
 What this means for offline use:
 

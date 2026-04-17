@@ -4,7 +4,7 @@ import random
 import unittest
 
 from backend.app.qml import parse_qml_line, render_prompt_and_answers
-from backend.app.service.common import title_from_slug
+from backend.app.service.text import title_from_slug
 from backend.app.service.schedule import (
     _bucketed_question_selection,
     _eligible_quiz_candidates,

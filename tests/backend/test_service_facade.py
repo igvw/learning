@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import unittest
 
 import backend.app.services as services
@@ -11,20 +9,41 @@ class ServiceFacadeUnitTests(unittest.TestCase):
             "ServiceError",
             "NotFoundError",
             "ValidationError",
+            "Actor",
+            "actor_to_dict",
+            "admin_exists",
+            "bootstrap_admin",
+            "bootstrap_admin_from_environment",
             "commit_question_import",
+            "create_demo_quiz_session",
+            "create_demo_session",
             "create_module",
             "create_question",
             "create_quiz_session",
             "create_user",
             "delete_question",
+            "demo_module_tree",
+            "get_actor_from_token",
+            "get_demo_stats",
             "get_module_tree",
             "get_stats",
+            "list_moderation_queue",
+            "list_my_contributions",
             "list_users",
+            "login_user",
+            "logout_session",
             "revise_question",
+            "review_module_submission",
+            "review_question_revision",
+            "review_question_submission",
+            "set_demo_review_flag",
             "set_question_review_flag",
             "submit_answer",
+            "submit_demo_answer",
             "sync_seed_content",
             "update_module",
+            "update_user_password",
+            "update_user_role",
             "validate_question_import",
         }
 

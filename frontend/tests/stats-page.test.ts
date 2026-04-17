@@ -1,5 +1,3 @@
-import './test-support';
-
 import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -11,7 +9,8 @@ import {
   buildRecoveryStageGraph,
   buildRetryEligibilityGraph,
   buildRetryEligibilityHourlyGraph,
-  buildRetryEligibilityLongRangeGraph
+  buildRetryEligibilityLongRangeGraph,
+  buildStageDueMatrixGraph
 } from '../src/lib/stats-page';
 
 describe('StatsPage', () => {
@@ -20,7 +19,11 @@ describe('StatsPage', () => {
     const localIso = (year: number, monthIndex: number, day: number, hours: number, minutes = 0): string =>
       new Date(year, monthIndex, day, hours, minutes, 0).toISOString();
 
-    const buildRetryQuestion = (questionId: number, prompt: string, schedule: Parameters<typeof buildQuestionRow>[0]['schedule']) =>
+    const buildRetryQuestion = (
+      questionId: number,
+      prompt: string,
+      schedule: NonNullable<Parameters<typeof buildQuestionRow>[0]>['schedule']
+    ) =>
       buildQuestionRow({
         question_id: questionId,
         prompt,
@@ -327,6 +330,179 @@ describe('StatsPage', () => {
     expect(graph.days.map((day) => day.count)).toEqual([1, 0, 0, 1, 0, 1, 2]);
   });
 
+  it('builds a stage due matrix and trims empty trailing days after the latest scheduled row', () => {
+    const referenceTime = new Date(2026, 3, 5, 10, 30, 0);
+    const localIso = (year: number, monthIndex: number, day: number, hours: number, minutes = 0): string =>
+      new Date(year, monthIndex, day, hours, minutes, 0).toISOString();
+
+    const graph = buildStageDueMatrixGraph([
+      buildQuestionRow({
+        question_id: 1,
+        schedule: {
+          bucket: 'cooling',
+          logical_bucket: '1h',
+          interval_step: 0,
+          next_due_at: localIso(2026, 3, 5, 12, 0)
+        }
+      }),
+      buildQuestionRow({
+        question_id: 2,
+        schedule: {
+          bucket: 'cooling',
+          logical_bucket: '12h',
+          interval_step: 3,
+          next_due_at: localIso(2026, 3, 6, 8, 0)
+        }
+      }),
+      buildQuestionRow({
+        question_id: 3,
+        schedule: {
+          bucket: 'due_review',
+          logical_bucket: '3d',
+          interval_step: 5,
+          next_due_at: null,
+          retry_pending: true
+        }
+      }),
+      buildQuestionRow({
+        question_id: 4,
+        schedule: {
+          bucket: 'cooling',
+          logical_bucket: '7d',
+          interval_step: 6,
+          next_due_at: localIso(2026, 3, 4, 9, 0)
+        }
+      }),
+      buildQuestionRow({
+        question_id: 5,
+        schedule: {
+          bucket: 'cooling',
+          logical_bucket: '14d',
+          interval_step: 7,
+          next_due_at: localIso(2026, 3, 8, 10, 0)
+        }
+      }),
+      buildQuestionRow({
+        question_id: 6,
+        schedule: {
+          bucket: 'cooling',
+          logical_bucket: '30d',
+          interval_step: 8,
+          next_due_at: localIso(2026, 5, 4, 10, 0)
+        }
+      }),
+      buildQuestionRow({
+        question_id: 7,
+        schedule: {
+          bucket: 'cooling',
+          logical_bucket: 'review',
+          next_due_at: localIso(2026, 3, 5, 10, 0)
+        }
+      }),
+      buildQuestionRow({
+        question_id: 8,
+        schedule: {
+          bucket: 'mastery',
+          logical_bucket: 'mastery'
+        }
+      })
+    ], referenceTime);
+
+    expect(graph.columns.map((column) => column.label)).toEqual(['<1d', '1d', '3d', '7d', '14d', '30d', '60d']);
+    expect(graph.rows).toHaveLength(61);
+    expect(graph.rows[0]?.label).toBe('Today');
+    expect(graph.maxCount).toBe(1);
+
+    expect(graph.cells.find((cell) => cell.rowKey === 'day-0' && cell.columnKey === 'lt1d')?.count).toBe(1);
+    expect(graph.cells.find((cell) => cell.rowKey === 'day-1' && cell.columnKey === 'lt1d')?.count).toBe(1);
+    expect(graph.cells.find((cell) => cell.rowKey === 'day-0' && cell.columnKey === '3d')?.count).toBe(1);
+    expect(graph.cells.find((cell) => cell.rowKey === 'day-0' && cell.columnKey === '7d')?.count).toBe(1);
+    expect(graph.cells.find((cell) => cell.rowKey === 'day-3' && cell.columnKey === '14d')?.count).toBe(1);
+    expect(graph.cells.find((cell) => cell.rowKey === 'day-60' && cell.columnKey === '30d')?.count).toBe(1);
+    expect(graph.cells.find((cell) => cell.rowKey === 'day-0' && cell.columnKey === '60d')?.count).toBe(0);
+  });
+
+  it('removes only trailing empty rows from the stage due matrix and keeps earlier gaps', () => {
+    const referenceTime = new Date(2026, 3, 5, 10, 30, 0);
+    const localIso = (year: number, monthIndex: number, day: number, hours: number, minutes = 0): string =>
+      new Date(year, monthIndex, day, hours, minutes, 0).toISOString();
+
+    const graph = buildStageDueMatrixGraph([
+      buildQuestionRow({
+        question_id: 1,
+        schedule: {
+          bucket: 'cooling',
+          logical_bucket: '1d',
+          interval_step: 4,
+          next_due_at: localIso(2026, 3, 5, 12, 0)
+        }
+      }),
+      buildQuestionRow({
+        question_id: 2,
+        schedule: {
+          bucket: 'cooling',
+          logical_bucket: '14d',
+          interval_step: 7,
+          next_due_at: localIso(2026, 3, 8, 10, 0)
+        }
+      })
+    ], referenceTime);
+
+    expect(graph.rows).toHaveLength(4);
+    expect(graph.rows.map((row) => row.key)).toEqual(['day-0', 'day-1', 'day-2', 'day-3']);
+    expect(graph.cells.find((cell) => cell.rowKey === 'day-1' && cell.columnKey === '1d')?.count).toBe(0);
+    expect(graph.cells.find((cell) => cell.rowKey === 'day-2' && cell.columnKey === '1d')?.count).toBe(0);
+    expect(graph.cells.find((cell) => cell.rowKey === 'day-3' && cell.columnKey === '14d')?.count).toBe(1);
+    expect(graph.cells.find((cell) => cell.rowKey === 'day-4' && cell.columnKey === '14d')).toBeUndefined();
+  });
+
+  it('returns no visible rows when no fixed-stage questions are scheduled in the matrix horizon', () => {
+    const referenceTime = new Date(2026, 3, 5, 10, 30, 0);
+    const localIso = (year: number, monthIndex: number, day: number, hours: number, minutes = 0): string =>
+      new Date(year, monthIndex, day, hours, minutes, 0).toISOString();
+
+    const graph = buildStageDueMatrixGraph([
+      buildQuestionRow({
+        question_id: 1,
+        schedule: {
+          bucket: 'cooling',
+          logical_bucket: 'review',
+          next_due_at: localIso(2026, 3, 5, 10, 0)
+        }
+      }),
+      buildQuestionRow({
+        question_id: 2,
+        schedule: {
+          bucket: 'mastery',
+          logical_bucket: 'mastery'
+        }
+      }),
+      buildQuestionRow({
+        question_id: 3,
+        schedule: {
+          bucket: 'cooling',
+          logical_bucket: '30d',
+          interval_step: 8,
+          next_due_at: null,
+          retry_pending: false
+        }
+      }),
+      buildQuestionRow({
+        question_id: 4,
+        schedule: {
+          bucket: 'cooling',
+          logical_bucket: '60d',
+          interval_step: 9,
+          next_due_at: localIso(2026, 5, 10, 10, 0)
+        }
+      })
+    ], referenceTime);
+
+    expect(graph.rows).toHaveLength(0);
+    expect(graph.cells).toHaveLength(0);
+    expect(graph.chartHeight).toBe(72);
+  });
+
   it('filters the single table to review questions, keeps graphs visible, and sorts the displayed rows', async () => {
     const user = userEvent.setup();
     const openSpy = vi.fn();
@@ -542,6 +718,7 @@ describe('StatsPage', () => {
     expect(graphLabels).toContain('>7');
     expect(view.container.querySelector('.graph-average-line title')?.textContent).toBe('83%');
     expect(screen.queryByRole('button', { name: 'Review' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Open spaced repetition stage details' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Open retry eligibility details' })).toBeTruthy();
     expect(within(mainPanel).getByRole('button', { name: 'Bucket' })).toBeTruthy();
     expect(within(mainPanel).getByRole('button', { name: 'Last seen' })).toBeTruthy();
@@ -565,6 +742,8 @@ describe('StatsPage', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-04-05T10:30:00Z'));
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const localIso = (year: number, monthIndex: number, day: number, hours: number, minutes = 0): string =>
+      new Date(year, monthIndex, day, hours, minutes, 0).toISOString();
 
     const view = render(StatsPage, {
       props: {
@@ -589,7 +768,7 @@ describe('StatsPage', () => {
                 bucket: 'cooling',
                 logical_bucket: '1d',
                 interval_step: 4,
-                next_due_at: '2026-04-05T23:00:00Z'
+                next_due_at: localIso(2026, 3, 5, 23, 0)
               }
             }),
             buildQuestionRow({
@@ -604,7 +783,7 @@ describe('StatsPage', () => {
                 bucket: 'cooling',
                 logical_bucket: '30d',
                 interval_step: 8,
-                next_due_at: '2026-05-05T10:00:00Z'
+                next_due_at: localIso(2026, 4, 5, 10, 0)
               }
             })
           ]
@@ -618,7 +797,7 @@ describe('StatsPage', () => {
     expect(dialog).toBeTruthy();
     expect(within(dialog).getByRole('img', { name: 'Retry eligibility under one day by hour' })).toBeTruthy();
     expect(within(dialog).getByRole('img', { name: 'Retry eligibility beyond seven days by week' })).toBeTruthy();
-    expect(within(dialog).getByText('10:00')).toBeTruthy();
+    expect(within(dialog).getAllByText(/\d{2}:00/).length).toBeGreaterThan(0);
 
     await user.click(within(dialog).getByRole('button', { name: 'Close' }));
     await waitFor(() => {
@@ -636,6 +815,158 @@ describe('StatsPage', () => {
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: 'Retry eligibility details' })).toBeNull();
     });
+  });
+
+  it('opens the stage detail overlay from the stages graph and closes it again', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-05T10:30:00Z'));
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const localIso = (year: number, monthIndex: number, day: number, hours: number, minutes = 0): string =>
+      new Date(year, monthIndex, day, hours, minutes, 0).toISOString();
+
+    const view = render(StatsPage, {
+      props: {
+        stats: buildStatsResponse({
+          summary: {
+            total_questions: 3,
+            total_attempts: 3,
+            total_correct: 3,
+            total_possible: 3,
+            accuracy: 1
+          },
+          questions: [
+            buildQuestionRow({
+              question_id: 1,
+              prompt: 'today due one day',
+              prompt_preview: 'today due one day',
+              attempts: 1,
+              correct_percentage: 1,
+              first_asked_at: '2026-04-04T08:00:00Z',
+              last_asked_at: '2026-04-04T08:00:00Z',
+              schedule: {
+                bucket: 'cooling',
+                logical_bucket: '1d',
+                interval_step: 4,
+                next_due_at: localIso(2026, 3, 5, 23, 0)
+              }
+            }),
+            buildQuestionRow({
+              question_id: 2,
+              prompt: 'tomorrow three day',
+              prompt_preview: 'tomorrow three day',
+              attempts: 1,
+              correct_percentage: 1,
+              first_asked_at: '2026-04-04T08:00:00Z',
+              last_asked_at: '2026-04-04T08:00:00Z',
+              schedule: {
+                bucket: 'cooling',
+                logical_bucket: '3d',
+                interval_step: 5,
+                next_due_at: localIso(2026, 3, 6, 9, 0)
+              }
+            }),
+            buildQuestionRow({
+              question_id: 3,
+              prompt: 'retry pending',
+              prompt_preview: 'retry pending',
+              attempts: 1,
+              correct_percentage: 1,
+              first_asked_at: '2026-04-04T08:00:00Z',
+              last_asked_at: '2026-04-04T08:00:00Z',
+              schedule: {
+                bucket: 'due_review',
+                logical_bucket: '7d',
+                interval_step: 6,
+                next_due_at: null,
+                retry_pending: true
+              }
+            })
+          ]
+        })
+      }
+    });
+
+    await user.click(screen.getByRole('heading', { name: 'Spaced repetition stages' }));
+
+    const dialog = screen.getByRole('dialog', { name: 'Spaced repetition stage details' });
+    expect(dialog).toBeTruthy();
+    expect(within(dialog).getByRole('img', { name: 'Spaced repetition stage due-day heatmap' })).toBeTruthy();
+    expect(within(dialog).getByText('Due-day heatmap')).toBeTruthy();
+    expect(within(dialog).getByText('Today')).toBeTruthy();
+    expect(within(dialog).getByText('<1d')).toBeTruthy();
+
+    await user.click(within(dialog).getByRole('button', { name: 'Close' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Spaced repetition stage details' })).toBeNull();
+    });
+
+    await user.click(screen.getByRole('heading', { name: 'Spaced repetition stages' }));
+    expect(screen.getByRole('dialog', { name: 'Spaced repetition stage details' })).toBeTruthy();
+
+    await user.keyboard('{Escape}');
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Spaced repetition stage details' })).toBeNull();
+    });
+
+    await user.click(screen.getByRole('heading', { name: 'Spaced repetition stages' }));
+    expect(screen.getByRole('dialog', { name: 'Spaced repetition stage details' })).toBeTruthy();
+
+    const backdrop = view.container.querySelector('.stage-detail-backdrop');
+    expect(backdrop).toBeTruthy();
+    if (backdrop) {
+      await user.click(backdrop);
+    }
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Spaced repetition stage details' })).toBeNull();
+    });
+  });
+
+  it('shows the empty stage-detail state when no fixed-stage questions are scheduled', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-05T10:30:00Z'));
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    render(StatsPage, {
+      props: {
+        stats: buildStatsResponse({
+          summary: {
+            total_questions: 2,
+            total_attempts: 2,
+            total_correct: 2,
+            total_possible: 2,
+            accuracy: 1
+          },
+          questions: [
+            buildQuestionRow({
+              question_id: 1,
+              prompt: 'review row',
+              prompt_preview: 'review row',
+              schedule: {
+                bucket: 'hot0',
+                logical_bucket: 'review',
+                retry_pending: true
+              }
+            }),
+            buildQuestionRow({
+              question_id: 2,
+              prompt: 'mastery row',
+              prompt_preview: 'mastery row',
+              schedule: {
+                bucket: 'mastery',
+                logical_bucket: 'mastery'
+              }
+            })
+          ]
+        })
+      }
+    });
+
+    await user.click(screen.getByRole('heading', { name: 'Spaced repetition stages' }));
+
+    const dialog = screen.getByRole('dialog', { name: 'Spaced repetition stage details' });
+    expect(dialog).toBeTruthy();
+    expect(within(dialog).getByText('No fixed-stage questions are currently scheduled.')).toBeTruthy();
+    expect(within(dialog).queryByRole('img', { name: 'Spaced repetition stage due-day heatmap' })).toBeNull();
   });
 
   it('shows an empty review state when the toggle is on but no review questions exist', () => {

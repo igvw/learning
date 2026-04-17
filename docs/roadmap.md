@@ -16,15 +16,16 @@ Key roadmap conclusion:
 
 ### Alpha blockers
 
-- security hardening for all user-authored text and parsing paths
-- passwords, authentication, and guest/user/admin authorization boundaries
+- finish the authenticated account rollout and moderation surfaces
+- keep the private-hosting auth/session model production-safe
 - private hosting with HTTPS and production-safe deployment defaults
 - reliable backup/restore for real hosted use
 - rank/order performance fixes so imports and bulk authoring are no longer slowed by dense integer-rank updates
+- keep a follow-up hardening pass for user-authored text and parsing paths after QML v2 replaces the current math-style surface
 
 ### Alpha scope that can continue alongside blockers
 
-- ongoing authoring and import workflow improvements
+- ongoing contribution and moderation workflow improvements
 - small UX improvements that reduce friction
 - content-building tooling improvements
 
@@ -79,6 +80,7 @@ These should come after:
 ## Assumptions
 
 - alpha is for secure private hosting, not a public-open release
+- alpha now includes moderated user contribution flows instead of only single-admin authoring
 - beta is study-tool first, not experiment-lab first
 - complete revise mode is more important than themes
 - QML v2 should follow beta study-mode needs, not lead them

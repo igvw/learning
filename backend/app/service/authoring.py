@@ -6,14 +6,18 @@ from ..config import FORCED_UNORDERED_PROMPTS
 from ..database import DatabaseConnection, execute_insert_returning_id, utc_now
 from ..qml import parse_qml_line, qml_lines_from_text
 from ..schemas import QuestionDraftIn
+from .auth import Actor
 from .catalog import (
     ensure_leaf_module,
     ensure_module_can_accept_children,
     ensure_unique_module_slug,
     ensure_user_exists,
 )
-from .common import NotFoundError, ValidationError, json_dumps, normalize_text, question_prompt_key, serialize_type_config
+from .errors import NotFoundError, ValidationError
+from .questions import serialize_type_config, stored_prompt_key
+from .text import json_dumps, normalize_text
 from .schedule import _question_attempt_history
+from .visibility import question_visible_to_actor
 
 
 def _module_question_rank_rows(connection: DatabaseConnection, module_id: int) -> list[Any]:
@@ -106,17 +110,6 @@ def _priority_insert_rank(connection: DatabaseConnection, *, user_id: int | None
     return int(unseen_rows[-1]["rank"]) + 1
 
 
-def _module_question_rows(connection: DatabaseConnection, module_id: int) -> list[Any]:
-    return connection.execute(
-        """
-        SELECT id, question_type, prompt, type_config_json
-        FROM questions
-        WHERE module_id = ?
-        """,
-        (module_id,),
-    ).fetchall()
-
-
 def ensure_unique_question_prompt(
     connection: DatabaseConnection,
     *,
@@ -124,19 +117,81 @@ def ensure_unique_question_prompt(
     question_type: str,
     prompt: str,
     type_config: dict[str, Any],
+    actor: Actor | None = None,
     exclude_question_id: int | None = None,
 ) -> None:
-    candidate_key = question_prompt_key(question_type, prompt, type_config)
-    for row in _module_question_rows(connection, module_id):
+    candidate_key = stored_prompt_key(question_type, prompt, type_config)
+    rows = connection.execute(
+        """
+        SELECT id, created_by_user_id, admin_verified, moderation_status
+        FROM questions
+        WHERE module_id = ?
+          AND prompt_key = ?
+        """,
+        (module_id, candidate_key),
+    ).fetchall()
+    for row in rows:
         if exclude_question_id is not None and row["id"] == exclude_question_id:
             continue
-        existing_type_config = json.loads(row["type_config_json"])
-        if question_prompt_key(row["question_type"], row["prompt"], existing_type_config) == candidate_key:
+        if question_visible_to_actor(row, actor):
             raise ValidationError("Prompt already exists in this leaf module.")
 
 
-def create_question(connection: DatabaseConnection, payload: QuestionDraftIn, *, user_id: int | None = None) -> dict[str, int]:
-    ensure_leaf_module(connection, payload.module_id)
+def _insert_question_record(
+    connection: DatabaseConnection,
+    *,
+    payload: QuestionDraftIn,
+    rank: int,
+    actor: Actor | None,
+) -> dict[str, Any]:
+    user_id = actor.user_id if actor and actor.user_id is not None else None
+    is_verified = actor is None or actor.role == "admin"
+    moderation_status = "verified" if is_verified else "pending"
+    type_config = serialize_type_config(payload)
+    question_id = execute_insert_returning_id(
+        connection,
+        """
+        INSERT INTO questions (
+            module_id,
+            question_type,
+            prompt,
+            prompt_key,
+            rank,
+            type_config_json,
+            created_by_user_id,
+            admin_verified,
+            moderation_status
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            payload.module_id,
+            payload.question_type,
+            payload.prompt.strip(),
+            stored_prompt_key(payload.question_type, payload.prompt, type_config),
+            rank,
+            json_dumps(type_config),
+            user_id,
+            1 if is_verified else 0,
+            moderation_status,
+        ),
+    )
+    return {
+        "question_id": question_id,
+        "admin_verified": is_verified,
+        "moderation_status": moderation_status,
+        "delete_requested": False,
+        "proposal_id": None,
+    }
+
+
+def create_question_append_only(
+    connection: DatabaseConnection,
+    payload: QuestionDraftIn,
+    *,
+    actor: Actor | None = None,
+) -> dict[str, Any]:
+    ensure_leaf_module(connection, payload.module_id, actor=actor)
     type_config = serialize_type_config(payload)
     ensure_unique_question_prompt(
         connection,
@@ -144,6 +199,22 @@ def create_question(connection: DatabaseConnection, payload: QuestionDraftIn, *,
         question_type=payload.question_type,
         prompt=payload.prompt.strip(),
         type_config=type_config,
+        actor=actor,
+    )
+    return _insert_question_record(connection, payload=payload, rank=_append_rank(connection, payload.module_id), actor=actor)
+
+
+def create_question(connection: DatabaseConnection, payload: QuestionDraftIn, *, actor: Actor | None = None) -> dict[str, Any]:
+    user_id = actor.user_id if actor and actor.user_id is not None else None
+    ensure_leaf_module(connection, payload.module_id, actor=actor)
+    type_config = serialize_type_config(payload)
+    ensure_unique_question_prompt(
+        connection,
+        module_id=payload.module_id,
+        question_type=payload.question_type,
+        prompt=payload.prompt.strip(),
+        type_config=type_config,
+        actor=actor,
     )
     insert_rank = (
         _priority_insert_rank(connection, user_id=user_id, module_id=payload.module_id, priority_mode=payload.priority_mode)
@@ -152,27 +223,22 @@ def create_question(connection: DatabaseConnection, payload: QuestionDraftIn, *,
     )
     insert_rank = _clamp_insert_rank(connection, module_id=payload.module_id, rank=insert_rank)
     _shift_ranks_for_insert(connection, module_id=payload.module_id, insert_rank=insert_rank)
-    question_id = execute_insert_returning_id(
-        connection,
-        """
-        INSERT INTO questions (module_id, question_type, prompt, rank, type_config_json)
-        VALUES (?, ?, ?, ?, ?)
-        """,
-        (
-            payload.module_id,
-            payload.question_type,
-            payload.prompt.strip(),
-            insert_rank,
-            json_dumps(type_config),
-        ),
-    )
-    return {"question_id": question_id}
+    return _insert_question_record(connection, payload=payload, rank=insert_rank, actor=actor)
 
 
 def _question_row(connection: DatabaseConnection, question_id: int) -> Any:
     return connection.execute(
         """
-        SELECT id, module_id, rank
+        SELECT
+            id,
+            module_id,
+            rank,
+            question_type,
+            prompt,
+            type_config_json,
+            created_by_user_id,
+            admin_verified,
+            moderation_status
         FROM questions
         WHERE id = ?
         """,
@@ -187,9 +253,14 @@ def _require_question_row(connection: DatabaseConnection, question_id: int) -> A
     return row
 
 
-def revise_question(connection: DatabaseConnection, question_id: int, payload: QuestionDraftIn, *, reset_stats: bool) -> dict[str, int]:
+def _apply_verified_question_revision(
+    connection: DatabaseConnection,
+    *,
+    question_id: int,
+    payload: QuestionDraftIn,
+    reset_stats: bool,
+) -> None:
     current = _require_question_row(connection, question_id)
-
     ensure_leaf_module(connection, payload.module_id)
     type_config = serialize_type_config(payload)
     ensure_unique_question_prompt(
@@ -229,27 +300,359 @@ def revise_question(connection: DatabaseConnection, question_id: int, payload: Q
             module_id = ?,
             question_type = ?,
             prompt = ?,
+            prompt_key = ?,
             rank = ?,
-            type_config_json = ?
+            type_config_json = ?,
+            admin_review_note = '',
+            reviewed_by_user_id = NULL,
+            reviewed_at = NULL
         WHERE id = ?
         """,
         (
             payload.module_id,
             payload.question_type,
             payload.prompt.strip(),
+            stored_prompt_key(payload.question_type, payload.prompt, type_config),
             target_rank,
             json_dumps(type_config),
             question_id,
         ),
     )
     connection.execute("DELETE FROM user_review_flags WHERE question_id = ?", (question_id,))
-    return {"question_id": question_id}
 
 
-def delete_question(connection: DatabaseConnection, question_id: int) -> dict[str, int]:
+def apply_import_revision(connection: DatabaseConnection, *, question_id: int, payload: QuestionDraftIn) -> None:
     _require_question_row(connection, question_id)
-    delete_question_and_close_rank_gap(connection, question_id)
-    return {"question_id": question_id}
+    ensure_leaf_module(connection, payload.module_id)
+    type_config = serialize_type_config(payload)
+    ensure_unique_question_prompt(
+        connection,
+        module_id=payload.module_id,
+        question_type=payload.question_type,
+        prompt=payload.prompt.strip(),
+        type_config=type_config,
+        exclude_question_id=question_id,
+    )
+    connection.execute(
+        """
+        UPDATE questions
+        SET
+            question_type = ?,
+            prompt = ?,
+            prompt_key = ?,
+            type_config_json = ?,
+            admin_review_note = '',
+            reviewed_by_user_id = NULL,
+            reviewed_at = NULL
+        WHERE id = ?
+        """,
+        (
+            payload.question_type,
+            payload.prompt.strip(),
+            stored_prompt_key(payload.question_type, payload.prompt, type_config),
+            json_dumps(type_config),
+            question_id,
+        ),
+    )
+    connection.execute("DELETE FROM user_review_flags WHERE question_id = ?", (question_id,))
+
+
+def relocate_question_for_import(
+    connection: DatabaseConnection,
+    *,
+    question_id: int,
+    payload: QuestionDraftIn,
+    target_rank: int,
+) -> int:
+    current = _require_question_row(connection, question_id)
+    ensure_leaf_module(connection, payload.module_id)
+    type_config = serialize_type_config(payload)
+    ensure_unique_question_prompt(
+        connection,
+        module_id=payload.module_id,
+        question_type=payload.question_type,
+        prompt=payload.prompt.strip(),
+        type_config=type_config,
+        exclude_question_id=question_id,
+    )
+    connection.execute(
+        """
+        UPDATE questions
+        SET
+            module_id = ?,
+            question_type = ?,
+            prompt = ?,
+            prompt_key = ?,
+            rank = ?,
+            type_config_json = ?,
+            admin_review_note = '',
+            reviewed_by_user_id = NULL,
+            reviewed_at = NULL
+        WHERE id = ?
+        """,
+        (
+            payload.module_id,
+            payload.question_type,
+            payload.prompt.strip(),
+            stored_prompt_key(payload.question_type, payload.prompt, type_config),
+            target_rank,
+            json_dumps(type_config),
+            question_id,
+        ),
+    )
+    connection.execute("DELETE FROM user_review_flags WHERE question_id = ?", (question_id,))
+    return int(current["module_id"])
+
+
+def close_rank_gaps(connection: DatabaseConnection, module_ids: set[int]) -> None:
+    for module_id in sorted(module_ids):
+        _remove_rank_gap(connection, module_id=module_id, exclude_question_id=-1)
+
+
+def _proposal_payload(
+    *,
+    question_id: int,
+    proposer_user_id: int,
+    payload: QuestionDraftIn,
+    delete_requested: bool,
+) -> tuple[Any, ...]:
+    type_config = serialize_type_config(payload)
+    now = utc_now()
+    return (
+        question_id,
+        proposer_user_id,
+        payload.prompt.strip(),
+        payload.question_type,
+        json_dumps(type_config),
+        1 if delete_requested else 0,
+        "pending",
+        "",
+        now,
+        now,
+    )
+
+
+def _upsert_question_revision_proposal(
+    connection: DatabaseConnection,
+    *,
+    question_id: int,
+    actor: Actor,
+    payload: QuestionDraftIn,
+    delete_requested: bool,
+) -> dict[str, Any]:
+    existing = connection.execute(
+        """
+        SELECT id
+        FROM question_revision_proposals
+        WHERE question_id = ? AND proposer_user_id = ?
+        """,
+        (question_id, actor.user_id),
+    ).fetchone()
+    if existing is None:
+        proposal_id = execute_insert_returning_id(
+            connection,
+            """
+            INSERT INTO question_revision_proposals (
+                question_id,
+                proposer_user_id,
+                prompt,
+                question_type,
+                type_config_json,
+                delete_requested,
+                status,
+                admin_review_note,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            _proposal_payload(
+                question_id=question_id,
+                proposer_user_id=int(actor.user_id),
+                payload=payload,
+                delete_requested=delete_requested,
+            ),
+        )
+    else:
+        proposal_id = int(existing["id"])
+        connection.execute(
+            """
+            UPDATE question_revision_proposals
+            SET
+                prompt = ?,
+                question_type = ?,
+                type_config_json = ?,
+                delete_requested = ?,
+                status = 'pending',
+                admin_review_note = '',
+                reviewed_by_user_id = NULL,
+                reviewed_at = NULL,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                payload.prompt.strip(),
+                payload.question_type,
+                json_dumps(serialize_type_config(payload)),
+                1 if delete_requested else 0,
+                utc_now(),
+                proposal_id,
+            ),
+        )
+    return {"proposal_id": proposal_id, "question_id": question_id}
+
+
+def revise_question(
+    connection: DatabaseConnection,
+    question_id: int,
+    payload: QuestionDraftIn,
+    *,
+    reset_stats: bool,
+    actor: Actor | None = None,
+) -> dict[str, Any]:
+    current = _require_question_row(connection, question_id)
+    if actor is None or actor.role == "admin":
+        _apply_verified_question_revision(connection, question_id=question_id, payload=payload, reset_stats=reset_stats)
+        return {
+            "question_id": question_id,
+            "proposal_id": None,
+            "admin_verified": True,
+            "moderation_status": "verified",
+            "delete_requested": False,
+        }
+
+    if bool(current["admin_verified"]):
+        if payload.module_id != int(current["module_id"]):
+            raise ValidationError("Regular-user revisions cannot move a verified question to another module.")
+        if int(payload.rank) != int(current["rank"]):
+            raise ValidationError("Regular-user revisions cannot change rank for a verified question.")
+        proposal = _upsert_question_revision_proposal(
+            connection,
+            question_id=question_id,
+            actor=actor,
+            payload=payload,
+            delete_requested=False,
+        )
+        return {
+            "question_id": question_id,
+            "proposal_id": proposal["proposal_id"],
+            "admin_verified": True,
+            "moderation_status": "verified",
+            "delete_requested": False,
+        }
+
+    if actor.user_id is None or current["created_by_user_id"] != actor.user_id:
+        raise ValidationError("You can only revise your own pending questions.")
+
+    ensure_leaf_module(connection, payload.module_id, actor=actor)
+    type_config = serialize_type_config(payload)
+    ensure_unique_question_prompt(
+        connection,
+        module_id=payload.module_id,
+        question_type=payload.question_type,
+        prompt=payload.prompt.strip(),
+        type_config=type_config,
+        actor=actor,
+        exclude_question_id=question_id,
+    )
+    target_rank = _clamp_insert_rank(
+        connection,
+        module_id=payload.module_id,
+        rank=int(payload.rank),
+        exclude_question_id=question_id,
+    )
+    if int(current["module_id"]) != payload.module_id:
+        _remove_rank_gap(connection, module_id=int(current["module_id"]), exclude_question_id=question_id)
+        _shift_ranks_for_insert(connection, module_id=payload.module_id, insert_rank=target_rank)
+    else:
+        _remove_rank_gap(connection, module_id=payload.module_id, exclude_question_id=question_id)
+        _shift_ranks_for_insert(
+            connection,
+            module_id=payload.module_id,
+            insert_rank=target_rank,
+            exclude_question_id=question_id,
+        )
+    connection.execute(
+        """
+        UPDATE questions
+        SET
+            module_id = ?,
+            question_type = ?,
+            prompt = ?,
+            prompt_key = ?,
+            rank = ?,
+            type_config_json = ?,
+            moderation_status = 'pending',
+            admin_review_note = '',
+            reviewed_by_user_id = NULL,
+            reviewed_at = NULL
+        WHERE id = ?
+        """,
+        (
+            payload.module_id,
+            payload.question_type,
+            payload.prompt.strip(),
+            stored_prompt_key(payload.question_type, payload.prompt, type_config),
+            target_rank,
+            json_dumps(type_config),
+            question_id,
+        ),
+    )
+    return {
+        "question_id": question_id,
+        "proposal_id": None,
+        "admin_verified": False,
+        "moderation_status": "pending",
+        "delete_requested": False,
+    }
+
+
+def delete_question(connection: DatabaseConnection, question_id: int, *, actor: Actor | None = None) -> dict[str, Any]:
+    current = _require_question_row(connection, question_id)
+    if actor is None or actor.role == "admin":
+        delete_question_and_close_rank_gap(connection, question_id)
+        return {
+            "question_id": question_id,
+            "proposal_id": None,
+            "admin_verified": bool(current["admin_verified"]),
+            "moderation_status": current["moderation_status"],
+            "delete_requested": False,
+        }
+
+    if not bool(current["admin_verified"]):
+        if actor.user_id is None or current["created_by_user_id"] != actor.user_id:
+            raise ValidationError("You can only delete your own pending questions.")
+        delete_question_and_close_rank_gap(connection, question_id)
+        return {
+            "question_id": question_id,
+            "proposal_id": None,
+            "admin_verified": False,
+            "moderation_status": "pending",
+            "delete_requested": False,
+        }
+
+    proposal_payload = QuestionDraftIn(
+        module_id=int(current["module_id"]),
+        prompt=current["prompt"],
+        question_type=current["question_type"],
+        rank=int(current["rank"]),
+        accepted_answers=json.loads(current["type_config_json"]).get("accepted_answers", []),
+        segments=json.loads(current["type_config_json"]).get("segments", []),
+    )
+    proposal = _upsert_question_revision_proposal(
+        connection,
+        question_id=question_id,
+        actor=actor,
+        payload=proposal_payload,
+        delete_requested=True,
+    )
+    return {
+        "question_id": question_id,
+        "proposal_id": proposal["proposal_id"],
+        "admin_verified": True,
+        "moderation_status": "verified",
+        "delete_requested": True,
+    }
 
 
 def set_question_review_flag(
@@ -382,11 +785,16 @@ def delete_question_and_close_rank_gap(connection: DatabaseConnection, question_
 
 
 def _existing_prompt_keys(connection: DatabaseConnection, module_id: int) -> set[str]:
-    existing_rows = _module_question_rows(connection, module_id)
-    return {
-        question_prompt_key(row["question_type"], row["prompt"], json.loads(row["type_config_json"]))
-        for row in existing_rows
-    }
+    rows = connection.execute(
+        """
+        SELECT prompt_key
+        FROM questions
+        WHERE module_id = ?
+          AND moderation_status <> 'rejected'
+        """,
+        (module_id,),
+    ).fetchall()
+    return {row["prompt_key"] for row in rows}
 
 
 def backfill_session_scores(connection: DatabaseConnection) -> None:
@@ -430,10 +838,10 @@ def backfill_question_type_defaults(connection: DatabaseConnection) -> None:
             connection.execute(
                 """
                 UPDATE questions
-                SET question_type = ?, type_config_json = ?
+                SET question_type = ?, type_config_json = ?, prompt_key = ?
                 WHERE id = ?
                 """,
-                (question_type, json_dumps(type_config), row["id"]),
+                (question_type, json_dumps(type_config), stored_prompt_key(question_type, row["prompt"], type_config), row["id"]),
             )
 
 
@@ -501,7 +909,7 @@ def sync_seed_content(connection: DatabaseConnection, content_root: Path) -> dic
         for row in qml_lines_from_text(question_file.read_text()):
             payload = QuestionDraftIn(**parse_qml_line(line=row["qml_line"], module_id=module_id, rank=row["row_number"]))
             type_config = serialize_type_config(payload)
-            prompt_key = question_prompt_key(payload.question_type, payload.prompt, type_config)
+            prompt_key = stored_prompt_key(payload.question_type, payload.prompt, type_config)
             if prompt_key in existing_prompt_keys:
                 continue
             create_question(connection, payload)

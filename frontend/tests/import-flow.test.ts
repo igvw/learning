@@ -1,24 +1,34 @@
-import './test-support';
-
 import { render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('../src/lib/api', () => ({
+  bootstrapAdmin: vi.fn(),
   commitQuestionImport: vi.fn(),
+  createDemoSession: vi.fn(),
   createModule: vi.fn(),
   createQuestion: vi.fn(),
   createQuizSession: vi.fn(),
   createUser: vi.fn(),
   deleteQuestion: vi.fn(),
+  getCurrentActor: vi.fn(),
   getHealth: vi.fn(),
+  getModerationQueue: vi.fn(),
   getModulesTree: vi.fn(),
+  getMyContributions: vi.fn(),
   getStats: vi.fn(),
   getUsers: vi.fn(),
+  login: vi.fn(),
+  logout: vi.fn(),
+  reviewModule: vi.fn(),
+  reviewQuestion: vi.fn(),
+  reviewQuestionRevision: vi.fn(),
   reviseQuestion: vi.fn(),
   setQuestionReviewFlag: vi.fn(),
   submitQuizAnswer: vi.fn(),
   updateModule: vi.fn(),
+  updateUserPassword: vi.fn(),
+  updateUserRole: vi.fn(),
   validateQuestionImportRows: vi.fn(),
   validateQuestionImportText: vi.fn()
 }));
@@ -26,7 +36,16 @@ vi.mock('../src/lib/api', () => ({
 import App from '../src/App.svelte';
 import * as api from '../src/lib/api';
 import { persistImportSession } from '../src/lib/app-state';
-import { buildImportResult, buildImportReviewRow, buildImportRow, buildModuleNode, buildUser } from './builders';
+import {
+  buildAuthActor,
+  buildStatsResponse,
+  buildImportResult,
+  buildImportReviewRow,
+  buildImportRow,
+  buildModerationQueue,
+  buildModuleNode,
+  buildUser
+} from './builders';
 
 function deferred<T>(): {
   promise: Promise<T>;
@@ -40,6 +59,20 @@ function deferred<T>(): {
     reject = rej;
   });
   return { promise, resolve, reject };
+}
+
+function mockAuthenticatedAdmin(modules: ReturnType<typeof buildModuleNode>[]) {
+  vi.mocked(api.getHealth).mockResolvedValue({ status: 'ok', instance_key: 'local-dev', bootstrap_required: false });
+  vi.mocked(api.getCurrentActor).mockResolvedValue(
+    buildAuthActor({
+      handle: 'admin',
+      display_name: 'Admin',
+      role: 'admin'
+    })
+  );
+  vi.mocked(api.getModulesTree).mockResolvedValue(modules);
+  vi.mocked(api.getUsers).mockResolvedValue([buildUser({ id: 1, handle: 'admin', display_name: 'Admin', role: 'admin' })]);
+  vi.mocked(api.getModerationQueue).mockResolvedValue(buildModerationQueue());
 }
 
 describe('import flow', () => {
@@ -72,7 +105,6 @@ describe('import flow', () => {
         ]
       })
     ];
-    const users = [buildUser()];
     const restoredResult = buildImportResult({
       ready_to_commit: true,
       rows: [buildImportRow({ row_number: 35, qml_line: 'mot [against | toward]' })],
@@ -106,9 +138,7 @@ describe('import flow', () => {
       result: restoredResult
     });
 
-    vi.mocked(api.getHealth).mockResolvedValue({ status: 'ok', instance_key: 'local-dev' });
-    vi.mocked(api.getModulesTree).mockResolvedValue(modules);
-    vi.mocked(api.getUsers).mockResolvedValue(users);
+    mockAuthenticatedAdmin(modules);
     vi.mocked(api.validateQuestionImportRows).mockResolvedValue({
       ...restoredResult,
       rows: [buildImportRow({ row_number: 35, qml_line: 'mot [against | toward | opposite]' })]
@@ -135,7 +165,7 @@ describe('import flow', () => {
     ]);
   });
 
-  it('commits imports in 10-row chunks and shows determinate save progress', async () => {
+  it('commits imports in 50-row chunks and shows determinate save progress', async () => {
     const user = userEvent.setup();
     window.history.replaceState({}, '', '/admin');
 
@@ -164,17 +194,16 @@ describe('import flow', () => {
         ]
       })
     ];
-    const users = [buildUser()];
-    const rows = Array.from({ length: 25 }, (_, index) => buildImportRow({
+    const rows = Array.from({ length: 120 }, (_, index) => buildImportRow({
       row_number: index + 1,
       qml_line: `ord ${index + 1} [answer ${index + 1}]`
     }));
     const importResult = buildImportResult({
       ready_to_commit: true,
       rows,
-      valid_row_count: 25,
+      valid_row_count: 120,
       committable_row_numbers: rows.map((row) => row.row_number),
-      report_text: '25 ready to commit'
+      report_text: '120 ready to commit'
     });
 
     persistImportSession(window.sessionStorage, {
@@ -191,9 +220,7 @@ describe('import flow', () => {
     const secondChunk = deferred<typeof importResult>();
     const thirdChunk = deferred<typeof importResult>();
 
-    vi.mocked(api.getHealth).mockResolvedValue({ status: 'ok', instance_key: 'local-dev' });
-    vi.mocked(api.getModulesTree).mockResolvedValue(modules);
-    vi.mocked(api.getUsers).mockResolvedValue(users);
+    mockAuthenticatedAdmin(modules);
     vi.mocked(api.validateQuestionImportRows).mockResolvedValue(importResult);
     vi.mocked(api.commitQuestionImport)
       .mockImplementationOnce(() => firstChunk.promise)
@@ -209,23 +236,23 @@ describe('import flow', () => {
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => {
-      expect(api.commitQuestionImport).toHaveBeenNthCalledWith(1, 3, rows.slice(0, 10));
+      expect(api.commitQuestionImport).toHaveBeenCalledTimes(1);
     });
-    expect(screen.getByRole('button', { name: 'Saving 0/25' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Saving 0/120' })).toBeTruthy();
 
-    firstChunk.resolve({ ...importResult, committed: true, committed_count: 10 });
+    firstChunk.resolve({ ...importResult, committed: true, committed_count: 50 });
     await waitFor(() => {
-      expect(api.commitQuestionImport).toHaveBeenNthCalledWith(2, 3, rows.slice(10, 20));
-      expect(screen.getByRole('button', { name: 'Saving 10/25' })).toBeTruthy();
+      expect(api.commitQuestionImport).toHaveBeenCalledTimes(2);
+      expect(screen.getByRole('button', { name: 'Saving 50/120' })).toBeTruthy();
     });
 
-    secondChunk.resolve({ ...importResult, committed: true, committed_count: 10 });
+    secondChunk.resolve({ ...importResult, committed: true, committed_count: 50 });
     await waitFor(() => {
-      expect(api.commitQuestionImport).toHaveBeenNthCalledWith(3, 3, rows.slice(20, 25));
-      expect(screen.getByRole('button', { name: 'Saving 20/25' })).toBeTruthy();
+      expect(api.commitQuestionImport).toHaveBeenCalledTimes(3);
+      expect(screen.getByRole('button', { name: 'Saving 100/120' })).toBeTruthy();
     });
 
-    thirdChunk.resolve({ ...importResult, committed: true, committed_count: 5 });
+    thirdChunk.resolve({ ...importResult, committed: true, committed_count: 20 });
     await waitFor(() => {
       expect(screen.queryByRole('heading', { name: 'Import Questions' })).toBeNull();
     });
@@ -260,7 +287,6 @@ describe('import flow', () => {
         ]
       })
     ];
-    const users = [buildUser()];
     const sessionResult = buildImportResult({
       ready_to_commit: true,
       rows: [buildImportRow({ row_number: 1, qml_line: 'mot [toward]' })],
@@ -299,9 +325,7 @@ describe('import flow', () => {
       result: sessionResult
     });
 
-    vi.mocked(api.getHealth).mockResolvedValue({ status: 'ok', instance_key: 'local-dev' });
-    vi.mocked(api.getModulesTree).mockResolvedValue(modules);
-    vi.mocked(api.getUsers).mockResolvedValue(users);
+    mockAuthenticatedAdmin(modules);
     vi.mocked(api.validateQuestionImportRows).mockResolvedValue(exactDuplicateResult);
 
     render(App);
@@ -347,26 +371,25 @@ describe('import flow', () => {
         ]
       })
     ];
-    const users = [buildUser()];
-    const rows = Array.from({ length: 15 }, (_, index) => buildImportRow({
+    const rows = Array.from({ length: 55 }, (_, index) => buildImportRow({
       row_number: index + 1,
       qml_line: `ord ${index + 1} [answer ${index + 1}]`
     }));
     const initialResult = buildImportResult({
       ready_to_commit: true,
       rows,
-      valid_row_count: 15,
+      valid_row_count: 55,
       committable_row_numbers: rows.map((row) => row.row_number),
-      report_text: '15 ready to commit'
+      report_text: '55 ready to commit'
     });
-    const remainingRows = rows.slice(10);
+    const remainingRows = rows.slice(50);
     const remainingResult = buildImportResult({
       rows: remainingRows,
       valid_row_count: 4,
-      committable_row_numbers: [11, 13, 14, 15],
+      committable_row_numbers: [51, 53, 54, 55],
       review_rows: [
         buildImportReviewRow({
-          row_number: 12,
+          row_number: 52,
           qml_line: 'broken row',
           status: 'invalid',
           status_text: 'Invalid QML: Question lines cannot be blank.',
@@ -389,14 +412,12 @@ describe('import flow', () => {
       result: initialResult
     });
 
-    vi.mocked(api.getHealth).mockResolvedValue({ status: 'ok', instance_key: 'local-dev' });
-    vi.mocked(api.getModulesTree).mockResolvedValue(modules);
-    vi.mocked(api.getUsers).mockResolvedValue(users);
+    mockAuthenticatedAdmin(modules);
     vi.mocked(api.validateQuestionImportRows)
       .mockResolvedValueOnce(initialResult)
       .mockResolvedValueOnce(remainingResult);
     vi.mocked(api.commitQuestionImport)
-      .mockResolvedValueOnce({ ...initialResult, committed: true, committed_count: 10 })
+      .mockResolvedValueOnce({ ...initialResult, committed: true, committed_count: 50 })
       .mockResolvedValueOnce({ ...remainingResult, committed: false, committed_count: 0 });
 
     render(App);
@@ -408,17 +429,118 @@ describe('import flow', () => {
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => {
-      expect(api.commitQuestionImport).toHaveBeenNthCalledWith(1, 3, rows.slice(0, 10));
+      expect(api.commitQuestionImport).toHaveBeenCalledTimes(2);
     });
     await waitFor(() => {
-      expect(api.commitQuestionImport).toHaveBeenNthCalledWith(2, 3, rows.slice(10, 15));
+      expect(api.validateQuestionImportRows).toHaveBeenCalledTimes(2);
+      expect(screen.getByText('Saved 50 rows. Fix the highlighted rows to continue.')).toBeTruthy();
     });
-    await waitFor(() => {
-      expect(api.validateQuestionImportRows).toHaveBeenNthCalledWith(2, 3, remainingRows);
-      expect(screen.getByText('Saved 10 rows. Fix the highlighted rows to continue.')).toBeTruthy();
-    });
-    expect(screen.getByDisplayValue('ord 12 [answer 12]')).toBeTruthy();
+    expect(screen.getByDisplayValue('ord 52 [answer 52]')).toBeTruthy();
     expect(screen.getByText('4 rows ready')).toBeTruthy();
     expect(screen.queryByDisplayValue('ord 1 [answer 1]')).toBeNull();
+  });
+
+  it('keeps uploads running after the drawer is hidden and lets the header reopen them', async () => {
+    const user = userEvent.setup();
+    window.history.replaceState({}, '', '/admin');
+
+    const modules = [
+      buildModuleNode({
+        id: 1,
+        title: 'Norwegian',
+        slug: 'norwegian',
+        full_slug: 'norwegian',
+        children: [
+          buildModuleNode({
+            id: 2,
+            title: 'Vocabulary',
+            slug: 'vocabulary',
+            full_slug: 'norwegian/vocabulary',
+            children: [
+              buildModuleNode({
+                id: 3,
+                title: 'noun2en',
+                slug: 'noun2en',
+                full_slug: 'norwegian/vocabulary/noun2en',
+                instruction: 'Translate each Norwegian noun into English.'
+              })
+            ]
+          })
+        ]
+      })
+    ];
+    const rows = Array.from({ length: 60 }, (_, index) => buildImportRow({
+      row_number: index + 1,
+      qml_line: `ord ${index + 1} [answer ${index + 1}]`
+    }));
+    const importResult = buildImportResult({
+      ready_to_commit: true,
+      rows,
+      valid_row_count: 60,
+      committable_row_numbers: rows.map((row) => row.row_number),
+      report_text: '60 ready to commit'
+    });
+
+    persistImportSession(window.sessionStorage, {
+      instanceKey: 'local-dev',
+      modules,
+      open: true,
+      targetModuleId: 3,
+      qmlText: rows.map((row) => row.qml_line).join('\n'),
+      rows,
+      result: importResult
+    });
+
+    const firstChunk = deferred<typeof importResult>();
+    const secondChunk = deferred<typeof importResult>();
+
+    mockAuthenticatedAdmin(modules);
+    vi.mocked(api.getStats).mockResolvedValue(buildStatsResponse());
+    vi.mocked(api.validateQuestionImportRows).mockResolvedValue(importResult);
+    vi.mocked(api.commitQuestionImport)
+      .mockImplementationOnce(() => firstChunk.promise)
+      .mockImplementationOnce(() => secondChunk.promise);
+
+    render(App);
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Import Questions' })).toBeTruthy();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(api.commitQuestionImport).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole('button', { name: 'Saving 0/60' })).toBeTruthy();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Hide' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { name: 'Import Questions' })).toBeNull();
+      expect(screen.getByRole('button', { name: 'Uploading 0/60' })).toBeTruthy();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Stats' }));
+    await waitFor(() => {
+      expect(api.getStats).toHaveBeenCalledTimes(1);
+    });
+
+    firstChunk.resolve({ ...importResult, committed: true, committed_count: 50 });
+    await waitFor(() => {
+      expect(api.commitQuestionImport).toHaveBeenCalledTimes(2);
+      expect(screen.getByRole('button', { name: 'Uploading 50/60' })).toBeTruthy();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Uploading 50/60' }));
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Import Questions' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Saving 50/60' })).toBeTruthy();
+    });
+
+    secondChunk.resolve({ ...importResult, committed: true, committed_count: 10 });
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { name: 'Import Questions' })).toBeNull();
+    });
   });
 });

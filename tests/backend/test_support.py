@@ -11,6 +11,7 @@ from backend.app.database import get_connection, initialize_database
 from backend.app.main import create_app
 from backend.app.schemas import QuestionDraftIn
 from backend.app.services import create_module, create_question, sync_seed_content
+from backend.app.settings import auth_cookie_name
 from backend.app.settings import CONTENT_DIR, resolve_database_url
 
 
@@ -72,6 +73,8 @@ def reset_test_database(database_url: str) -> None:
         connection.execute(
             """
             TRUNCATE TABLE
+                question_revision_proposals,
+                auth_sessions,
                 quiz_session_items,
                 quiz_sessions,
                 user_review_flags,
@@ -96,17 +99,46 @@ class PostgresBackendTestCase(unittest.TestCase):
             sync_seed_content(connection, Path(CONTENT_DIR))
         self.database_url = TEST_DATABASE_URL
         self.client = TestClient(create_app(database_url=TEST_DATABASE_URL, content_root=CONTENT_DIR))
+        self._user_auth_headers: dict[int, dict[str, str]] = {}
+        bootstrap_response = self.client.post(
+            "/api/auth/bootstrap-admin",
+            json={"handle": "admin", "display_name": "Admin", "password": "password123"},
+        )
+        self.assertEqual(bootstrap_response.status_code, 200)
+        self.admin_user = bootstrap_response.json()
+        self.admin_headers = self._cookie_headers_from_response(bootstrap_response)
+        self.client.cookies.clear()
 
-    def create_user(self, handle: str = "alice", display_name: str = "Alice") -> dict[str, object]:
+    def _cookie_headers_from_response(self, response) -> dict[str, str]:
+        token = response.cookies.get(auth_cookie_name())
+        return {"Cookie": f"{auth_cookie_name()}={token}"} if token else {}
+
+    def create_user(
+        self,
+        handle: str = "alice",
+        display_name: str = "Alice",
+        *,
+        role: str = "user",
+        password: str = "password123",
+    ) -> dict[str, object]:
         response = self.client.post(
             "/api/users",
-            json={"handle": handle, "display_name": display_name},
+            json={"handle": handle, "display_name": display_name, "role": role, "password": password},
+            headers=self.admin_headers,
         )
         self.assertEqual(response.status_code, 200)
-        return response.json()
+        created = response.json()
+        login_response = self.client.post(
+            "/api/auth/login",
+            json={"handle": handle, "password": password},
+        )
+        self.assertEqual(login_response.status_code, 200)
+        self._user_auth_headers[int(created["id"])] = self._cookie_headers_from_response(login_response)
+        self.client.cookies.clear()
+        return created
 
     def user_headers(self, user_id: int) -> dict[str, str]:
-        return {"X-User-Id": str(user_id)}
+        return self._user_auth_headers[user_id]
 
     def create_module_record(
         self,
@@ -138,6 +170,7 @@ class PostgresBackendTestCase(unittest.TestCase):
                     accepted_answers=accepted_answers,
                     segments=segments or [],
                 ),
+                actor=None,
             )
 
     def create_module_tree(self) -> dict[str, int]:
@@ -209,7 +242,7 @@ class PostgresBackendTestCase(unittest.TestCase):
             payload["qml_text"] = qml_text
         if rows is not None:
             payload["rows"] = rows
-        response = self.client.post("/api/question-imports/validate", json=payload)
+        response = self.client.post("/api/question-imports/validate", json=payload, headers=self.admin_headers)
         self.assertEqual(response.status_code, 200)
         return response.json()
 
@@ -217,6 +250,7 @@ class PostgresBackendTestCase(unittest.TestCase):
         response = self.client.post(
             "/api/question-imports/commit",
             json={"module_id": module_id, "rows": rows},
+            headers=self.admin_headers,
         )
         self.assertEqual(response.status_code, 200)
         return response.json()

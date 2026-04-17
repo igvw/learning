@@ -1,5 +1,6 @@
 <script lang="ts">
   import RetryEligibilityOverlay from './RetryEligibilityOverlay.svelte';
+  import StageDueMatrixOverlay from './StageDueMatrixOverlay.svelte';
   import type { QuestionRow, StatsResponse } from '../lib/types';
   import {
     buildAuxiliaryStageGraph,
@@ -8,6 +9,7 @@
     buildRetryEligibilityGraph,
     buildRetryEligibilityHourlyGraph,
     buildRetryEligibilityLongRangeGraph,
+    buildStageDueMatrixGraph,
     buildSessionGraph,
     emptyAuxiliaryStageGraph,
     emptyFirstSeenGraph,
@@ -15,6 +17,7 @@
     emptyRetryEligibilityGraph,
     emptyRetryEligibilityHourlyGraph,
     emptyRetryEligibilityLongRangeGraph,
+    emptyStageDueMatrixGraph,
     emptySessionGraph,
     formatBucketLabel,
     formatLastSeen,
@@ -38,6 +41,7 @@
   let sortKey: SortKey | null = null;
   let sortDirection: SortDirection = 'asc';
   let retryDetailOpen = false;
+  let stageDetailOpen = false;
 
   function handleSort(nextSortKey: SortKey): void {
     const definition = sortDefinitions.find((candidate) => candidate.key === nextSortKey);
@@ -60,6 +64,7 @@
   }
 
   function openRetryDetail(): void {
+    stageDetailOpen = false;
     retryDetailOpen = true;
   }
 
@@ -67,6 +72,18 @@
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       openRetryDetail();
+    }
+  }
+
+  function openStageDetail(): void {
+    retryDetailOpen = false;
+    stageDetailOpen = true;
+  }
+
+  function handleStageDetailKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      openStageDetail();
     }
   }
 
@@ -86,8 +103,10 @@
     ? buildRetryEligibilityLongRangeGraph(stats.questions)
     : emptyRetryEligibilityLongRangeGraph;
   $: firstSeenGraph = stats ? buildFirstSeenGraph(stats.questions) : emptyFirstSeenGraph;
+  $: stageDueMatrixGraph = stats ? buildStageDueMatrixGraph(stats.questions) : emptyStageDueMatrixGraph;
   $: if (!stats) {
     retryDetailOpen = false;
+    stageDetailOpen = false;
   }
 </script>
 
@@ -228,7 +247,15 @@
         </div>
       </div>
 
-      <div class="panel stats-chart-panel stats-chart-panel-stages">
+      <div
+        class="panel stats-chart-panel stats-chart-panel-stages graph-launch-panel"
+        role="button"
+        tabindex="0"
+        aria-haspopup="dialog"
+        aria-label="Open spaced repetition stage details"
+        on:click={openStageDetail}
+        on:keydown={handleStageDetailKeydown}
+      >
         <div class="panel-header">
           <div><h3>Spaced repetition stages</h3></div>
         </div>
@@ -405,6 +432,11 @@
                   <td>
                     <div class="question-cell">
                       <span>{question.prompt_preview}</span>
+                      {#if !question.admin_verified}
+                        <span class="inline-status-chip">Unverified</span>
+                      {:else if question.viewer_proposal}
+                        <span class="inline-status-chip">My proposal</span>
+                      {/if}
                     </div>
                   </td>
                   <td>{formatBucketLabel(question)}</td>
@@ -428,6 +460,11 @@
   <button class="floating-action" type="button" aria-label="Create question" on:click={onOpenCreate}>+</button>
 </section>
 
+<StageDueMatrixOverlay
+  open={stageDetailOpen}
+  graph={stageDueMatrixGraph}
+  onClose={() => (stageDetailOpen = false)}
+/>
 <RetryEligibilityOverlay
   open={retryDetailOpen}
   hourlyGraph={retryEligibilityHourlyGraph}

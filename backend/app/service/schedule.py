@@ -4,7 +4,7 @@ from typing import Any
 
 from ..config import FULL_CREDIT_TOLERANCE, SCHEDULE_INTERVALS
 from ..database import DatabaseConnection
-from .common import add_interval_to_timestamp, is_full_credit, normalize_text, parse_iso_timestamp
+from .time_utils import add_interval_to_timestamp, is_full_credit, parse_iso_timestamp
 
 
 def _review_flags_by_question(

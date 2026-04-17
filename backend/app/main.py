@@ -1,96 +1,44 @@
-from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from .database import DatabaseConnection, get_connection, initialize_database
-from .schemas import (
-    CommitQuestionImportIn,
-    CreateModuleIn,
-    HealthOut,
-    ModuleNodeOut,
-    QuestionDraftIn,
-    QuestionImportResultOut,
-    QuestionMutationOut,
-    QuestionReviewFlagIn,
-    QuestionReviewFlagOut,
-    QuestionRevisionIn,
-    QuizSessionCreateIn,
-    StatsResponseOut,
-    SubmitAnswerIn,
-    SubmitAnswerOut,
-    UpdateModuleIn,
-    UserCreateIn,
-    UserOut,
-    ValidateQuestionImportIn,
-    QuizSessionOut,
-)
-from .services import (
-    ServiceError,
-    commit_question_import,
-    create_module,
-    create_question,
-    create_quiz_session,
-    create_user,
-    delete_question,
-    get_module_tree,
-    get_stats,
-    list_users,
-    revise_question,
-    set_question_review_flag,
-    submit_answer,
-    sync_seed_content,
-    update_module,
-    validate_question_import,
-)
-from .settings import CONTENT_DIR, FRONTEND_DIST_DIR, cors_origins, instance_key, resolve_database_url, seed_on_boot
-
-
-def _database_connection(request: Request) -> Iterator[DatabaseConnection]:
-    with get_connection(request.app.state.database_url) as connection:
-        yield connection
-
-
-def _service_error_response(_: Request, error: ServiceError) -> JSONResponse:
-    return JSONResponse(status_code=error.status_code, content={"detail": str(error)})
-
-
-def _require_user_id(x_user_id: int | None = Header(default=None, alias="X-User-Id")) -> int:
-    if x_user_id is None:
-        raise HTTPException(status_code=400, detail="X-User-Id header is required.")
-    return x_user_id
-
-
-def _find_module_node(module_tree: list[dict], module_id: int) -> dict | None:
-    stack = list(module_tree)
-    while stack:
-        node = stack.pop()
-        if node["id"] == module_id:
-            return node
-        stack.extend(node["children"])
-    return None
+from .api.dependencies import service_error_response
+from .api.routers import ALL_ROUTERS
+from .database import get_connection, initialize_database
+from .services import ServiceError, bootstrap_admin_from_environment, sync_seed_content
+from .settings import CONTENT_DIR, FRONTEND_DIST_DIR, cors_origins, resolve_database_url, seed_on_boot
 
 
 def create_app(
     database_url: str | Path | None = None,
     content_root: str | Path | None = None,
 ) -> FastAPI:
+    explicit_database_url = None
+    if database_url is not None:
+        cleaned_database_url = str(database_url).strip()
+        if cleaned_database_url:
+            explicit_database_url = cleaned_database_url
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        initialize_database(app.state.database_url)
-        if seed_on_boot():
-            with get_connection(app.state.database_url) as connection:
+        resolved_database_url = resolve_database_url(app.state.database_url_input)
+        app.state.database_url = resolved_database_url
+        initialize_database(resolved_database_url)
+        with get_connection(resolved_database_url) as connection:
+            bootstrap_admin_from_environment(connection)
+            if seed_on_boot():
                 sync_seed_content(connection, app.state.content_root)
         yield
 
     app = FastAPI(title="Learning App API", lifespan=lifespan)
-    app.state.database_url = resolve_database_url(database_url)
+    app.state.database_url_input = explicit_database_url
+    app.state.database_url = explicit_database_url
     app.state.content_root = Path(content_root).resolve() if content_root else CONTENT_DIR
-    app.add_exception_handler(ServiceError, _service_error_response)
+    app.add_exception_handler(ServiceError, service_error_response)
 
     allowed_origins = cors_origins()
     if allowed_origins:
@@ -102,152 +50,8 @@ def create_app(
             allow_headers=["*"],
         )
 
-    @app.get("/api/health", response_model=HealthOut)
-    def health() -> dict[str, str]:
-        return {"status": "ok", "instance_key": instance_key()}
-
-    @app.get("/api/modules/tree", response_model=list[ModuleNodeOut])
-    def modules_tree(connection: DatabaseConnection = Depends(_database_connection)) -> list[dict]:
-        return get_module_tree(connection)
-
-    @app.get("/api/users", response_model=list[UserOut])
-    def users_list(connection: DatabaseConnection = Depends(_database_connection)) -> list[dict]:
-        return list_users(connection)
-
-    @app.post("/api/users", response_model=UserOut)
-    def users_create(payload: UserCreateIn, connection: DatabaseConnection = Depends(_database_connection)) -> dict:
-        return create_user(connection, handle=payload.handle, display_name=payload.display_name)
-
-    @app.post("/api/modules", response_model=ModuleNodeOut)
-    def modules_create(payload: CreateModuleIn, connection: DatabaseConnection = Depends(_database_connection)) -> dict:
-        module = create_module(
-            connection,
-            title=payload.title,
-            parent_id=payload.parent_id,
-            instruction=payload.instruction,
-        )
-        created_node = _find_module_node(get_module_tree(connection), module["id"])
-        if created_node is not None:
-            return created_node
-        raise HTTPException(status_code=500, detail="Module creation did not return a created node.")
-
-    @app.patch("/api/modules/{module_id}", response_model=ModuleNodeOut)
-    def modules_update(
-        module_id: int,
-        payload: UpdateModuleIn,
-        connection: DatabaseConnection = Depends(_database_connection),
-    ) -> dict:
-        module = update_module(
-            connection,
-            module_id=module_id,
-            title=payload.title,
-            instruction=payload.instruction,
-        )
-        updated_node = _find_module_node(get_module_tree(connection), module["id"])
-        if updated_node is not None:
-            return updated_node
-        raise HTTPException(status_code=500, detail="Module update did not return an updated node.")
-
-    @app.post("/api/quiz-sessions", response_model=QuizSessionOut)
-    def quiz_sessions_create(
-        payload: QuizSessionCreateIn,
-        user_id: int = Depends(_require_user_id),
-        connection: DatabaseConnection = Depends(_database_connection),
-    ) -> dict:
-        return create_quiz_session(
-            connection,
-            user_id=user_id,
-            module_id=payload.module_id,
-            count=payload.count,
-        )
-
-    @app.post("/api/quiz-sessions/{session_id}/items/{item_id}/submit", response_model=SubmitAnswerOut)
-    def quiz_sessions_submit(
-        session_id: int,
-        item_id: int,
-        payload: SubmitAnswerIn,
-        user_id: int = Depends(_require_user_id),
-        connection: DatabaseConnection = Depends(_database_connection),
-    ) -> dict:
-        return submit_answer(
-            connection,
-            user_id=user_id,
-            session_id=session_id,
-            item_id=item_id,
-            answers=payload.answers,
-        )
-
-    @app.get("/api/stats", response_model=StatsResponseOut)
-    def stats(
-        module_id: int | None = None,
-        review_only: bool = Query(default=False),
-        user_id: int = Depends(_require_user_id),
-        connection: DatabaseConnection = Depends(_database_connection),
-    ) -> dict:
-        return get_stats(
-            connection,
-            user_id=user_id,
-            module_id=module_id,
-            review_only=review_only,
-        )
-
-    @app.post("/api/questions", response_model=QuestionMutationOut)
-    def questions_create(
-        payload: QuestionDraftIn,
-        x_user_id: int | None = Header(default=None, alias="X-User-Id"),
-        connection: DatabaseConnection = Depends(_database_connection),
-    ) -> dict:
-        return create_question(connection, payload, user_id=x_user_id)
-
-    @app.post("/api/questions/{question_id}/revisions", response_model=QuestionMutationOut)
-    def questions_revise(
-        question_id: int,
-        payload: QuestionRevisionIn,
-        connection: DatabaseConnection = Depends(_database_connection),
-    ) -> dict:
-        draft = QuestionDraftIn(**payload.model_dump(exclude={"reset_stats"}))
-        return revise_question(connection, question_id, draft, reset_stats=payload.reset_stats)
-
-    @app.delete("/api/questions/{question_id}", response_model=QuestionMutationOut)
-    def questions_delete(question_id: int, connection: DatabaseConnection = Depends(_database_connection)) -> dict:
-        return delete_question(connection, question_id)
-
-    @app.patch("/api/questions/{question_id}/review-flag", response_model=QuestionReviewFlagOut)
-    def questions_review_flag(
-        question_id: int,
-        payload: QuestionReviewFlagIn,
-        user_id: int = Depends(_require_user_id),
-        connection: DatabaseConnection = Depends(_database_connection),
-    ) -> dict:
-        return set_question_review_flag(
-            connection,
-            user_id=user_id,
-            question_id=question_id,
-            review_flag=payload.review_flag,
-        )
-
-    @app.post("/api/question-imports/validate", response_model=QuestionImportResultOut)
-    def question_imports_validate(
-        payload: ValidateQuestionImportIn,
-        connection: DatabaseConnection = Depends(_database_connection),
-    ) -> dict:
-        return validate_question_import(
-            connection,
-            module_id=payload.module_id,
-            qml_text=payload.qml_text,
-            rows=[row.model_dump() for row in payload.rows] if payload.rows else None,
-        )
-
-    @app.post("/api/question-imports/commit", response_model=QuestionImportResultOut)
-    def question_imports_commit(
-        payload: CommitQuestionImportIn,
-        connection: DatabaseConnection = Depends(_database_connection),
-    ) -> dict:
-        return commit_question_import(
-            connection,
-            module_id=payload.module_id,
-            rows=[row.model_dump() for row in payload.rows],
-        )
+    for router in ALL_ROUTERS:
+        app.include_router(router)
 
     assets_dir = FRONTEND_DIST_DIR / "assets"
     if assets_dir.exists():

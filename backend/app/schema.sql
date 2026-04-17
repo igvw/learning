@@ -1,31 +1,71 @@
+CREATE TABLE IF NOT EXISTS users (
+    id BIGSERIAL PRIMARY KEY,
+    handle TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'user',
+    password_hash TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS auth_sessions (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_id ON auth_sessions(user_id);
+
 CREATE TABLE IF NOT EXISTS modules (
     id BIGSERIAL PRIMARY KEY,
     parent_id BIGINT REFERENCES modules(id) ON DELETE SET NULL,
     slug TEXT NOT NULL,
-    full_slug TEXT NOT NULL UNIQUE,
+    full_slug TEXT NOT NULL,
     instruction TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    created_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    admin_verified INTEGER NOT NULL DEFAULT 1,
+    moderation_status TEXT NOT NULL DEFAULT 'verified',
+    admin_review_note TEXT NOT NULL DEFAULT '',
+    reviewed_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    reviewed_at TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_modules_parent_id ON modules(parent_id);
+CREATE INDEX IF NOT EXISTS idx_modules_created_by_status
+    ON modules(created_by_user_id, admin_verified, moderation_status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_modules_verified_full_slug
+    ON modules (LOWER(full_slug))
+    WHERE admin_verified = 1;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_modules_pending_owner_full_slug
+    ON modules (created_by_user_id, LOWER(full_slug))
+    WHERE admin_verified = 0
+      AND created_by_user_id IS NOT NULL
+      AND moderation_status IN ('pending', 'changes_requested');
 
 CREATE TABLE IF NOT EXISTS questions (
     id BIGSERIAL PRIMARY KEY,
     module_id BIGINT NOT NULL REFERENCES modules(id) ON DELETE CASCADE,
     question_type TEXT NOT NULL,
     prompt TEXT NOT NULL,
+    prompt_key TEXT NOT NULL,
     rank INTEGER NOT NULL,
-    type_config_json TEXT NOT NULL
+    type_config_json TEXT NOT NULL,
+    created_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    admin_verified INTEGER NOT NULL DEFAULT 1,
+    moderation_status TEXT NOT NULL DEFAULT 'verified',
+    admin_review_note TEXT NOT NULL DEFAULT '',
+    reviewed_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    reviewed_at TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_questions_module_id ON questions(module_id);
-
-CREATE TABLE IF NOT EXISTS users (
-    id BIGSERIAL PRIMARY KEY,
-    handle TEXT NOT NULL UNIQUE,
-    display_name TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
+CREATE INDEX IF NOT EXISTS idx_questions_module_prompt_key ON questions(module_id, prompt_key);
+CREATE INDEX IF NOT EXISTS idx_questions_prompt_key ON questions(prompt_key);
+CREATE INDEX IF NOT EXISTS idx_questions_created_by_status
+    ON questions(created_by_user_id, admin_verified, moderation_status);
 
 CREATE TABLE IF NOT EXISTS user_review_flags (
     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -37,6 +77,28 @@ CREATE TABLE IF NOT EXISTS user_review_flags (
 
 CREATE INDEX IF NOT EXISTS idx_user_review_flags_review
     ON user_review_flags(user_id, review_flag);
+
+CREATE TABLE IF NOT EXISTS question_revision_proposals (
+    id BIGSERIAL PRIMARY KEY,
+    question_id BIGINT NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+    proposer_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    prompt TEXT NOT NULL,
+    question_type TEXT NOT NULL,
+    type_config_json TEXT NOT NULL,
+    delete_requested INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending',
+    admin_review_note TEXT NOT NULL DEFAULT '',
+    reviewed_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    reviewed_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(question_id, proposer_user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_question_revision_proposals_proposer
+    ON question_revision_proposals(proposer_user_id, status);
+CREATE INDEX IF NOT EXISTS idx_question_revision_proposals_question
+    ON question_revision_proposals(question_id, status);
 
 CREATE TABLE IF NOT EXISTS quiz_sessions (
     id BIGSERIAL PRIMARY KEY,

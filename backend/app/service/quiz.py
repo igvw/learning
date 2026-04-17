@@ -3,19 +3,11 @@ import random
 from typing import Any
 
 from ..database import DatabaseConnection, execute_insert_returning_id, utc_now
+from .auth import Actor
 from .catalog import ensure_user_exists, get_scope_module_ids
-from .common import (
-    NotFoundError,
-    ValidationError,
-    accepted_answer_groups,
-    canonical_answers,
-    default_answers,
-    json_dumps,
-    normalize_text,
-    public_type_config,
-    resolved_runtime,
-    score_possible,
-)
+from .errors import NotFoundError, ValidationError
+from .questions import accepted_answer_groups, canonical_answers, default_answers, public_type_config, resolved_runtime, score_possible
+from .text import json_dumps, normalize_text
 from .schedule import (
     _bucketed_question_selection,
     _eligible_quiz_candidates,
@@ -26,6 +18,7 @@ from .schedule import (
     _review_flags_by_question,
     _schedule_snapshot_from_attempts,
 )
+from .visibility import list_effective_question_rows
 
 
 def create_quiz_session(
@@ -34,28 +27,12 @@ def create_quiz_session(
     user_id: int,
     module_id: int | None,
     count: int,
+    actor: Actor | None = None,
     rng: random.Random | None = None,
 ) -> dict[str, Any]:
     ensure_user_exists(connection, user_id)
-    scope_module_ids = get_scope_module_ids(connection, module_id)
-    placeholders = ",".join("?" for _ in scope_module_ids) or "NULL"
-    candidate_rows = connection.execute(
-        f"""
-        SELECT
-            q.id AS question_id,
-            q.module_id,
-            m.instruction AS module_instruction,
-            q.prompt,
-            q.question_type,
-            q.rank,
-            q.type_config_json
-        FROM questions AS q
-        JOIN modules AS m ON m.id = q.module_id
-        WHERE q.module_id IN ({placeholders})
-        ORDER BY q.id
-        """,
-        tuple(scope_module_ids),
-    ).fetchall()
+    scope_module_ids = get_scope_module_ids(connection, module_id, actor=actor)
+    candidate_rows = list_effective_question_rows(connection, actor=actor, scope_module_ids=scope_module_ids)
 
     question_ids = [row["question_id"] for row in candidate_rows]
     review_flags = _review_flags_by_question(connection, user_id=user_id, question_ids=question_ids)
@@ -105,11 +82,10 @@ def create_quiz_session(
 
     items: list[dict[str, Any]] = []
     for index, row in enumerate(chosen_rows, start=1):
-        type_config = json.loads(row["type_config_json"])
         resolved_prompt, resolved_type_config = resolved_runtime(
             row["question_type"],
             row["prompt"],
-            type_config,
+            row["type_config"],
             rng=rng,
         )
         connection.execute(
@@ -129,7 +105,7 @@ def create_quiz_session(
                 row["question_id"],
                 score_possible(resolved_type_config),
                 resolved_prompt,
-                json_dumps(resolved_type_config),
+                json_dumps({**resolved_type_config, "__question_type__": row["question_type"]}),
             ),
         )
         items.append(
@@ -144,6 +120,11 @@ def create_quiz_session(
                 "question_type": row["question_type"],
                 "rank": row["rank"],
                 "type_config": public_type_config(row["question_type"], resolved_type_config),
+                "admin_verified": bool(row["admin_verified"]),
+                "moderation_status": row["moderation_status"],
+                "created_by_user_id": row["created_by_user_id"],
+                "creator_display_name": row["creator_display_name"],
+                "viewer_proposal": row["viewer_proposal"],
                 "submitted_answer": None,
                 "is_correct": None,
                 "score_earned": None,
@@ -273,9 +254,10 @@ def submit_answer(
     if row["score_earned"] is not None:
         raise ValidationError("Quiz session item has already been answered.")
 
-    type_config = json.loads(row["resolved_type_config_json"] or row["type_config_json"])
+    resolved_type_config = json.loads(row["resolved_type_config_json"] or row["type_config_json"])
+    question_type = resolved_type_config.pop("__question_type__", row["question_type"])
     is_correct, earned_score, possible_score_value, slot_results, matched_default_answers = evaluate_answers(
-        row["question_type"], type_config, answers
+        question_type, resolved_type_config, answers
     )
     answered_at = utc_now()
     connection.execute(
@@ -308,9 +290,9 @@ def submit_answer(
         "score_earned": earned_score,
         "score_possible": possible_score_value,
         "slot_results": slot_results,
-        "canonical_answers": canonical_answers(type_config),
-        "default_answers": default_answers(type_config),
-        "accepted_answer_groups": accepted_answer_groups(type_config),
+        "canonical_answers": canonical_answers(resolved_type_config),
+        "default_answers": default_answers(resolved_type_config),
+        "accepted_answer_groups": accepted_answer_groups(resolved_type_config),
         "matched_default_answers": matched_default_answers,
         "session_completed": session_completed,
         "submitted_answer": answers,

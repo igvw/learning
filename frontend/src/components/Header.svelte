@@ -1,46 +1,72 @@
 <script lang="ts">
-  import type { RouteName, User } from '../lib/types';
+  import type { AuthActor, RouteName, User } from '../lib/types';
 
   export let currentRoute: RouteName = 'quiz';
+  export let currentActor: AuthActor | null = null;
   export let users: User[] = [];
   export let activeUserId: number | null = null;
   export let onNavigate: (route: RouteName) => void = () => {};
   export let onToggleMenu: () => void = () => {};
+  export let onLogout: () => Promise<void> | void = () => {};
   export let onSelectUser: (userId: number) => void = () => {};
+  export let importStatusVisible = false;
+  export let importStatusLabel = '';
+  export let importStatusDetail = '';
+  export let importStatusTone: 'progress' | 'info' | 'error' = 'progress';
+  export let onOpenImportStatus: () => void = () => {};
+
   let userMenuOpen = false;
 
-  function activeUser(usersList: User[], userId: number | null): User | null {
-    if (userId === null) {
-      return null;
-    }
-    return usersList.find((user) => user.id === userId) ?? null;
-  }
-
-  function userInitial(user: User | null): string {
-    const value = user?.display_name?.trim() || user?.handle?.trim() || '';
+  function userInitial(actor: AuthActor | null): string {
+    const value = actor?.display_name?.trim() || actor?.handle?.trim() || '';
     return value ? value[0].toUpperCase() : '?';
   }
 
-  function userBadgeStyle(user: User | null): string {
-    if (!user) {
+  function actorBadgeStyle(actor: AuthActor | null): string {
+    if (!actor) {
       return '--user-badge-bg: rgba(115, 115, 125, 0.28); --user-badge-border: rgba(161, 161, 170, 0.34); --user-badge-text: #e4e4e7;';
     }
 
-    const seed = `${user.id}:${user.handle}:${user.display_name}`;
+    const seed = `${actor.handle}:${actor.role}:${actor.display_name}`;
     let hash = 0;
     for (let index = 0; index < seed.length; index += 1) {
       hash = (hash * 31 + seed.charCodeAt(index)) % 360;
     }
-    const hue = hash;
-    return `--user-badge-bg: hsla(${hue}, 72%, 52%, 0.28); --user-badge-border: hsla(${hue}, 86%, 70%, 0.44); --user-badge-text: hsl(${hue}, 95%, 92%);`;
+    return `--user-badge-bg: hsla(${hash}, 72%, 52%, 0.28); --user-badge-border: hsla(${hash}, 86%, 70%, 0.44); --user-badge-text: hsl(${hash}, 95%, 92%);`;
   }
 
-  function handleSelectUser(userId: number): void {
-    onSelectUser(userId);
+  async function handleLogout(): Promise<void> {
     userMenuOpen = false;
+    await onLogout();
   }
 
-  $: selectedUser = activeUser(users, activeUserId);
+  function legacyActor(usersList: User[], userId: number | null): AuthActor | null {
+    if (userId === null) {
+      return null;
+    }
+    const user = usersList.find((candidate) => candidate.id === userId);
+    if (!user) {
+      return null;
+    }
+    return {
+      id: user.id,
+      handle: user.handle,
+      display_name: user.display_name,
+      role: user.role,
+      is_demo: false,
+      created_at: user.created_at
+    };
+  }
+
+  function handleLegacySelect(userId: number): void {
+    userMenuOpen = false;
+    onSelectUser(userId);
+  }
+
+  $: manageLabel = currentActor?.role === 'admin' ? 'Admin' : 'Manage';
+  $: legacySelectedActor = legacyActor(users, activeUserId);
+  $: displayedActor = currentActor ?? legacySelectedActor;
+  $: legacySwitcherMode = activeUserId !== null && users.length > 0;
 </script>
 
 <svelte:window
@@ -66,47 +92,46 @@
   </div>
 
   <nav class="main-nav" aria-label="Primary">
-    <button
-      type="button"
-      class:active={currentRoute === 'quiz'}
-      on:click={() => onNavigate('quiz')}
-    >
+    <button type="button" class:active={currentRoute === 'quiz'} on:click={() => onNavigate('quiz')}>
       Quiz
     </button>
-    <button
-      type="button"
-      class:active={currentRoute === 'stats'}
-      on:click={() => onNavigate('stats')}
-    >
+    <button type="button" class:active={currentRoute === 'stats'} on:click={() => onNavigate('stats')}>
       Stats
     </button>
-    <button
-      type="button"
-      class:active={currentRoute === 'admin'}
-      on:click={() => onNavigate('admin')}
-    >
-      Admin
+    <button type="button" class:active={currentRoute === 'admin'} on:click={() => onNavigate('admin')}>
+      {manageLabel}
     </button>
   </nav>
 
   <div class="header-user-tools">
+    {#if importStatusVisible}
+      <button
+        type="button"
+        class={`header-import-status tone-${importStatusTone}`}
+        title={importStatusDetail || importStatusLabel}
+        on:click={onOpenImportStatus}
+      >
+        <span class="header-import-status-indicator" aria-hidden="true"></span>
+        <span>{importStatusLabel}</span>
+      </button>
+    {/if}
+
     <div class="user-menu-shell">
       <button
         type="button"
         class="user-avatar user-avatar-button"
-        style={userBadgeStyle(selectedUser)}
+        style={actorBadgeStyle(displayedActor)}
         aria-haspopup="menu"
         aria-expanded={userMenuOpen}
-        aria-label={selectedUser ? `Open user menu for ${selectedUser.display_name}` : 'Open user menu'}
-        title={selectedUser ? selectedUser.display_name : 'No active user'}
+        aria-label={displayedActor ? `Open user menu for ${displayedActor.display_name}` : 'Open account menu'}
         on:click|stopPropagation={() => (userMenuOpen = !userMenuOpen)}
       >
-        {userInitial(selectedUser)}
+        {userInitial(displayedActor)}
       </button>
 
-      {#if userMenuOpen}
-        <div class="user-menu" role="menu" aria-label="User menu" tabindex="-1">
-          {#if users.length > 0}
+      {#if userMenuOpen && displayedActor}
+        {#if legacySwitcherMode}
+          <div class="user-menu" role="menu" aria-label="User menu" tabindex="-1">
             <p class="user-menu-title">Switch user</p>
             {#each users as user (user.id)}
               <button
@@ -115,7 +140,7 @@
                 class:active={user.id === activeUserId}
                 role="menuitemradio"
                 aria-checked={user.id === activeUserId}
-                on:click={() => handleSelectUser(user.id)}
+                on:click={() => handleLegacySelect(user.id)}
               >
                 <span>{user.display_name}</span>
                 {#if user.id === activeUserId}
@@ -123,10 +148,18 @@
                 {/if}
               </button>
             {/each}
-          {:else}
-            <p class="user-menu-empty">Create a user in Admin.</p>
-          {/if}
-        </div>
+          </div>
+        {:else}
+          <div class="user-menu" role="menu" aria-label="Account menu" tabindex="-1">
+            <p class="user-menu-title">{displayedActor.display_name}</p>
+            <p class="user-menu-empty">
+              {displayedActor.role}{displayedActor.is_demo ? ' account (ephemeral demo)' : ' account'}
+            </p>
+            <button type="button" class="user-menu-item" role="menuitem" on:click={() => void handleLogout()}>
+              <span>Log out</span>
+            </button>
+          </div>
+        {/if}
       {/if}
     </div>
   </div>

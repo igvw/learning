@@ -57,7 +57,7 @@ function containsVariableBinding(text: string): boolean {
 
 function findTrailingBox(line: string): { start: number; opening: '[' | '{'; content: string } | null {
   const stripped = line.trimEnd();
-  const closing = stripped.at(-1);
+  const closing = stripped[stripped.length - 1];
   if (closing !== ']' && closing !== '}') {
     return null;
   }

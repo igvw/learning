@@ -1,5 +1,3 @@
-import './test-support';
-
 import { render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -246,7 +244,7 @@ describe('QuizPage', () => {
 
     expect(answeredCard?.className).toContain('correct');
     expect(answeredInput.className).toContain('answer-correct');
-    expect(answeredInput).toHaveValue('Nile');
+    expect((answeredInput as HTMLInputElement).value).toBe('Nile');
     expect(screen.queryByText('nile')).toBeNull();
     expect(screen.queryByText('nile / the nile')).toBeNull();
     expect(screen.queryByRole('list')).toBeNull();
@@ -288,7 +286,7 @@ describe('QuizPage', () => {
     });
 
     const answeredInput = screen.getByRole('textbox');
-    expect(answeredInput).toHaveValue('nile / the nile');
+    expect((answeredInput as HTMLInputElement).value).toBe('nile / the nile');
     expect(screen.queryByRole('list')).toBeNull();
     expect(screen.queryByText('nile / the nile')).toBeNull();
   });
@@ -337,9 +335,9 @@ describe('QuizPage', () => {
     expect(inputs[0].className).toContain('answer-correct');
     expect(inputs[1].className).toContain('answer-correct');
     expect(inputs[2].className).toContain('answer-incorrect');
-    expect(inputs[0]).toHaveValue('head');
-    expect(inputs[1]).toHaveValue('thorax');
-    expect(inputs[2]).toHaveValue('legs');
+    expect((inputs[0] as HTMLInputElement).value).toBe('head');
+    expect((inputs[1] as HTMLInputElement).value).toBe('thorax');
+    expect((inputs[2] as HTMLInputElement).value).toBe('legs');
     expect(screen.getByText('head / skull')).toBeTruthy();
     expect(screen.getByText('thorax')).toBeTruthy();
     expect(screen.getByText('abdomen')).toBeTruthy();
@@ -387,9 +385,9 @@ describe('QuizPage', () => {
     });
 
     const inputs = view.getAllByRole('textbox');
-    expect(inputs[0]).toHaveValue('head / skull');
-    expect(inputs[1]).toHaveValue('thorax');
-    expect(inputs[2]).toHaveValue('abdomen');
+    expect((inputs[0] as HTMLInputElement).value).toBe('head / skull');
+    expect((inputs[1] as HTMLInputElement).value).toBe('thorax');
+    expect((inputs[2] as HTMLInputElement).value).toBe('abdomen');
     expect(screen.queryByRole('list')).toBeNull();
   });
 });

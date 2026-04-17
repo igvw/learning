@@ -1,5 +1,3 @@
-import './test-support';
-
 import { describe, expect, it } from 'vitest';
 
 import { buildQuizItem, buildQuizSession } from './builders';

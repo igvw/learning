@@ -5,11 +5,15 @@ from test_support import PostgresBackendTestCase
 class ImportApiTests(PostgresBackendTestCase):
     def test_same_tree_reimport_moves_question_and_preserves_progress(self) -> None:
         module_ids = self.create_module_tree()
+        self.create_question_record(module_ids["target"], "først", [["first"]], rank=1)
+        self.create_question_record(module_ids["target"], "andre", [["second"]], rank=2)
         question_id = self.create_question_record(
             module_ids["source_a"],
             "hund",
             [["dog"]],
+            rank=1,
         )["question_id"]
+        self.create_question_record(module_ids["source_a"], "katt", [["cat"]], rank=2)
 
         user = self.create_user()
         session = self.start_quiz_session(user["id"], module_ids["source_a"], 1)
@@ -29,13 +33,58 @@ class ImportApiTests(PostgresBackendTestCase):
         self.assertTrue(commit_payload["committed"])
 
         source_stats = self.get_stats_payload(user["id"], module_ids["source_a"])
-        self.assertEqual(source_stats["questions"], [])
+        self.assertEqual(len(source_stats["questions"]), 1)
+        self.assertEqual(source_stats["questions"][0]["prompt"], "katt")
+        self.assertEqual(source_stats["questions"][0]["rank"], 1)
 
         target_stats = self.get_stats_payload(user["id"], module_ids["target"])
-        self.assertEqual(len(target_stats["questions"]), 1)
-        self.assertEqual(target_stats["questions"][0]["question_id"], question_id)
-        self.assertEqual(target_stats["questions"][0]["attempts"], 1)
-        self.assertFalse(target_stats["questions"][0]["review_flag"])
+        self.assertEqual(len(target_stats["questions"]), 3)
+        moved_question = next(question for question in target_stats["questions"] if question["question_id"] == question_id)
+        self.assertEqual(moved_question["attempts"], 1)
+        self.assertFalse(moved_question["review_flag"])
+
+        with get_connection(self.database_url) as connection:
+            target_prompts = [
+                (row["prompt"], row["rank"])
+                for row in connection.execute(
+                    "SELECT prompt, rank FROM questions WHERE module_id = ? ORDER BY rank ASC, id ASC",
+                    (module_ids["target"],),
+                ).fetchall()
+            ]
+            source_prompts = [
+                (row["prompt"], row["rank"])
+                for row in connection.execute(
+                    "SELECT prompt, rank FROM questions WHERE module_id = ? ORDER BY rank ASC, id ASC",
+                    (module_ids["source_a"],),
+                ).fetchall()
+            ]
+        self.assertEqual(target_prompts, [("først", 1), ("andre", 2), ("hund", 3)])
+        self.assertEqual(source_prompts, [("katt", 1)])
+
+    def test_new_imported_rows_append_after_existing_questions_in_upload_order(self) -> None:
+        norwegian = self.create_module_record("Norwegian")
+        target = self.create_module_record("Target", norwegian["id"])
+        self.create_question_record(target["id"], "alfa", [["alpha"]], rank=1)
+        self.create_question_record(target["id"], "beta", [["beta"]], rank=2)
+
+        commit_payload = self.commit_import_payload(
+            target["id"],
+            [
+                {"row_number": 10, "qml_line": "gamma [gamma]"},
+                {"row_number": 20, "qml_line": "delta [delta]"},
+            ],
+        )
+        self.assertTrue(commit_payload["committed"])
+
+        with get_connection(self.database_url) as connection:
+            prompts = [
+                (row["prompt"], row["rank"])
+                for row in connection.execute(
+                    "SELECT prompt, rank FROM questions WHERE module_id = ? ORDER BY rank ASC, id ASC",
+                    (target["id"],),
+                ).fetchall()
+            ]
+        self.assertEqual(prompts, [("alfa", 1), ("beta", 2), ("gamma", 3), ("delta", 4)])
 
     def test_exact_duplicate_in_target_leaf_is_omitted_from_review_rows(self) -> None:
         norwegian = self.create_module_record("Norwegian")
@@ -84,6 +133,7 @@ class ImportApiTests(PostgresBackendTestCase):
         self.assertEqual(target_stats["questions"][0]["attempts"], 1)
         self.assertFalse(target_stats["questions"][0]["review_flag"])
         self.assertEqual(target_stats["questions"][0]["accepted_answers"], [["against", "toward"]])
+        self.assertEqual(target_stats["questions"][0]["rank"], 1)
 
     def test_same_leaf_exact_noop_duplicate_has_no_side_effects(self) -> None:
         norwegian = self.create_module_record("Norwegian")

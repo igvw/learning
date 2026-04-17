@@ -1,5 +1,3 @@
-import './test-support';
-
 import { describe, expect, it, vi } from 'vitest';
 
 import { buildModuleNode } from './builders';
@@ -25,7 +23,7 @@ describe('module paths', () => {
       })
     ];
 
-    const createSpy = vi.fn(async ({ title, parent_id, instruction }) => {
+    const createSpy = vi.fn(async ({ title, parent_id: _parentId, instruction }) => {
       const id = title === 'nouns_to_english' ? 3 : 4;
       const fullSlug =
         title === 'nouns_to_english'

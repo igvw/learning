@@ -9,8 +9,8 @@ class QuizApiTests(PostgresBackendTestCase):
             "/api/quiz-sessions",
             json={"module_id": 5, "count": 2},
         )
-        self.assertEqual(unauthenticated.status_code, 400)
-        self.assertEqual(unauthenticated.json()["detail"], "X-User-Id header is required.")
+        self.assertEqual(unauthenticated.status_code, 401)
+        self.assertEqual(unauthenticated.json()["detail"], "Authentication is required.")
 
         session = self.start_quiz_session(user["id"], 5, 2)
         self.assertEqual(session["module_id"], 5)

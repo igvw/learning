@@ -1,0 +1,5 @@
+target-version = "py314"
+line-length = 160
+
+[lint]
+select = ["F"]

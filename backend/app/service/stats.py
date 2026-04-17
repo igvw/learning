@@ -1,9 +1,9 @@
-import json
 from typing import Any
 
 from ..database import DatabaseConnection, utc_now
+from .auth import Actor
 from .catalog import ensure_user_exists, get_scope_module_ids
-from .common import preview_prompt
+from .questions import preview_prompt
 from .schedule import (
     _iso_timestamp_sort_value,
     _latest_scored_session_id,
@@ -14,6 +14,7 @@ from .schedule import (
     _review_flags_by_question,
     _schedule_snapshot_from_attempts,
 )
+from .visibility import list_effective_question_rows
 
 
 def get_stats(
@@ -22,28 +23,11 @@ def get_stats(
     user_id: int,
     module_id: int | None,
     review_only: bool,
+    actor: Actor | None = None,
 ) -> dict[str, Any]:
     ensure_user_exists(connection, user_id)
-    scope_ids = get_scope_module_ids(connection, module_id)
-    placeholders = ",".join("?" for _ in scope_ids) or "NULL"
-
-    question_rows = connection.execute(
-        f"""
-        SELECT
-            q.id AS question_id,
-            q.module_id,
-            m.full_slug AS module_full_slug,
-            q.prompt,
-            q.question_type,
-            q.rank,
-            q.type_config_json
-        FROM questions AS q
-        JOIN modules AS m ON m.id = q.module_id
-        WHERE q.module_id IN ({placeholders})
-        ORDER BY q.id ASC
-        """,
-        tuple(scope_ids),
-    ).fetchall()
+    scope_ids = get_scope_module_ids(connection, module_id, actor=actor)
+    question_rows = list_effective_question_rows(connection, actor=actor, scope_module_ids=scope_ids)
 
     question_ids = [row["question_id"] for row in question_rows]
     review_flags = _review_flags_by_question(connection, user_id=user_id, question_ids=question_ids)
@@ -78,7 +62,7 @@ def get_stats(
             now=now,
             latest_scored_session_id=latest_scored_session_id,
         )
-        type_config = json.loads(row["type_config_json"])
+        type_config = row["type_config"]
         denominator = stats["correct_count"] + stats["incorrect_count"]
         questions.append(
             {
@@ -94,6 +78,11 @@ def get_stats(
                 "first_asked_at": stats["first_asked_at"],
                 "last_asked_at": stats["last_asked_at"],
                 "review_flag": review_flag,
+                "admin_verified": bool(row["admin_verified"]),
+                "moderation_status": row["moderation_status"],
+                "created_by_user_id": row["created_by_user_id"],
+                "creator_display_name": row["creator_display_name"],
+                "viewer_proposal": row["viewer_proposal"],
                 "accepted_answers": type_config["accepted_answers"],
                 "segments": type_config.get("segments", []),
                 "recent_incorrect_answers": recent_incorrect_answers.get(row["question_id"], []),

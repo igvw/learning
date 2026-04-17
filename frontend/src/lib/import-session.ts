@@ -1,4 +1,4 @@
-import { cloneImportRows, draftImportRowsFromResult } from './import-rows';
+import { draftImportRowsFromResult } from './import-rows';
 import type { QuestionImportResult, QuestionImportRowPayload } from './types';
 
 export type ImportSaveStatusTone = 'error' | 'info' | '';
@@ -8,7 +8,7 @@ export interface ImportSaveStatus {
   tone: ImportSaveStatusTone;
 }
 
-export const IMPORT_COMMIT_CHUNK_SIZE = 10;
+export const IMPORT_COMMIT_CHUNK_SIZE = 50;
 
 export function initialImportDraftRows(result: QuestionImportResult): QuestionImportRowPayload[] {
   return draftImportRowsFromResult(result);

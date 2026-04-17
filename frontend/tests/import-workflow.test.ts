@@ -1,5 +1,3 @@
-import './test-support';
-
 import { describe, expect, it, vi } from 'vitest';
 
 import { buildImportResult, buildImportReviewRow, buildImportRow } from './builders';

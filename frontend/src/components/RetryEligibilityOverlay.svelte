@@ -21,7 +21,7 @@
 {#if open}
   <div class="modal-backdrop retry-detail-backdrop" role="presentation" on:click={onClose}>
     <div class="modal-shell retry-detail-shell" role="presentation" on:click|stopPropagation>
-      <section class="panel modal-panel retry-detail-panel" role="dialog" aria-modal="true" aria-labelledby="retry-detail-title">
+      <div class="panel modal-panel retry-detail-panel" role="dialog" aria-modal="true" aria-labelledby="retry-detail-title">
         <div class="panel-header sticky retry-detail-header">
           <div>
             <p class="eyebrow">Retry detail</p>
@@ -134,7 +134,7 @@
             {/if}
           </section>
         </div>
-      </section>
+      </div>
     </div>
   </div>
 {/if}

@@ -1,5 +1,3 @@
-import './test-support';
-
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -8,20 +6,12 @@ import AdminPage from '../src/components/AdminPage.svelte';
 import EditorDrawer from '../src/components/EditorDrawer.svelte';
 import ImportDrawer from '../src/components/ImportDrawer.svelte';
 import type { ModuleNode, QuestionImportResult } from '../src/lib/types';
+import { buildAuthActor, buildModuleNode, buildQuestionRow } from './builders';
 
 describe('EditorDrawer', () => {
   it('shows type-specific ghost text in create mode', async () => {
     const user = userEvent.setup();
-    const modules: ModuleNode[] = [
-      {
-        id: 1,
-        title: 'Geography',
-        slug: 'geography',
-        full_slug: 'geography',
-        instruction: '',
-        children: []
-      }
-    ];
+    const modules: ModuleNode[] = [buildModuleNode({ id: 1, title: 'Geography', slug: 'geography', full_slug: 'geography' })];
 
     render(EditorDrawer, {
       props: {
@@ -63,39 +53,36 @@ describe('EditorDrawer', () => {
 
   it('shows dense revision fields and aggregated incorrect answers without duplicate module UI', () => {
     const modules: ModuleNode[] = [
-      {
+      buildModuleNode({
         id: 1,
         title: 'Norwegian',
         slug: 'norwegian',
         full_slug: 'norwegian',
-        instruction: '',
         children: [
-          {
+          buildModuleNode({
             id: 2,
             title: 'Vocabulary',
             slug: 'vocabulary',
             full_slug: 'norwegian/vocabulary',
-            instruction: '',
             children: [
-              {
+              buildModuleNode({
                 id: 3,
                 title: 'noun2en',
                 slug: 'noun2en',
                 full_slug: 'norwegian/vocabulary/noun2en',
-                instruction: 'Translate the Norwegian term into English.',
-                children: []
-              }
+                instruction: 'Translate the Norwegian term into English.'
+              })
             ]
-          }
+          })
         ]
-      }
+      })
     ];
 
     render(EditorDrawer, {
       props: {
         open: true,
         modules,
-        editingQuestion: {
+        editingQuestion: buildQuestionRow({
           question_id: 30,
           module_id: 3,
           module_full_slug: 'norwegian/vocabulary/noun2en',
@@ -130,7 +117,7 @@ describe('EditorDrawer', () => {
               latest_answered_at: '2026-04-03T08:00:00Z'
             }
           ]
-        },
+        }),
         saving: false,
         onClose: vi.fn(),
         onSave: vi.fn(),
@@ -154,39 +141,36 @@ describe('EditorDrawer', () => {
     const deleteSpy = vi.fn().mockResolvedValue(undefined);
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     const modules: ModuleNode[] = [
-      {
+      buildModuleNode({
         id: 1,
         title: 'Norwegian',
         slug: 'norwegian',
         full_slug: 'norwegian',
-        instruction: '',
         children: [
-          {
+          buildModuleNode({
             id: 2,
             title: 'Vocabulary',
             slug: 'vocabulary',
             full_slug: 'norwegian/vocabulary',
-            instruction: '',
             children: [
-              {
+              buildModuleNode({
                 id: 3,
                 title: 'weekday2en',
                 slug: 'weekday2en',
                 full_slug: 'norwegian/vocabulary/weekday2en',
-                instruction: 'Translate the weekday into English.',
-                children: []
-              }
+                instruction: 'Translate the weekday into English.'
+              })
             ]
-          }
+          })
         ]
-      }
+      })
     ];
 
     render(EditorDrawer, {
       props: {
         open: true,
         modules,
-        editingQuestion: {
+        editingQuestion: buildQuestionRow({
           question_id: 41,
           module_id: 3,
           module_full_slug: 'norwegian/vocabulary/weekday2en',
@@ -210,7 +194,7 @@ describe('EditorDrawer', () => {
             retry_pending: false
           },
           recent_incorrect_answers: []
-        },
+        }),
         saving: false,
         deleting: false,
         onClose: vi.fn(),
@@ -219,9 +203,9 @@ describe('EditorDrawer', () => {
       }
     });
 
-    await user.click(screen.getByRole('button', { name: 'Delete Question' }));
+    await user.click(screen.getByRole('button', { name: 'Request Delete' }));
 
-    expect(confirmSpy).toHaveBeenCalledWith('Delete this question and its progress history?');
+    expect(confirmSpy).toHaveBeenCalledWith('Request deletion for this verified question?');
     expect(deleteSpy).toHaveBeenCalledWith(41);
 
     confirmSpy.mockRestore();
@@ -232,82 +216,92 @@ describe('AdminPage', () => {
   it('creates users from admin, updates the selected leaf module, creates a module, and offers leaf-module import', async () => {
     const user = userEvent.setup();
     const createUserSpy = vi.fn().mockResolvedValue({
+      id: 10,
+      handle: 'alice',
+      display_name: 'Alice',
+      role: 'user',
+      created_at: '2026-04-05T10:00:00Z'
+    });
+    const createSpy = vi.fn().mockResolvedValue(
+      buildModuleNode({
+        id: 8,
+        title: 'Norwegian',
+        slug: 'norwegian',
+        full_slug: 'norwegian',
+        instruction: 'Translate the Norwegian term into English.'
+      })
+    );
+    const updateSpy = vi.fn().mockResolvedValue(
+      buildModuleNode({
+        id: 2,
+        title: 'Safety Checks',
+        slug: 'safety_checks',
+        full_slug: 'nursing/safety_checks',
+        instruction: 'List each safety check before continuing.'
+      })
+    );
+    const updateRoleSpy = vi.fn().mockResolvedValue({
       id: 9,
       handle: 'ignazio',
       display_name: 'Ignazio',
+      role: 'admin',
       created_at: '2026-04-05T10:00:00Z'
     });
-    const createSpy = vi.fn().mockResolvedValue({
-      id: 8,
-      title: 'Norwegian',
-      slug: 'norwegian',
-      full_slug: 'norwegian',
-      instruction: 'Translate the Norwegian term into English.',
-      children: []
-    });
-    const updateSpy = vi.fn().mockResolvedValue({
-      id: 2,
-      title: 'Safety Checks',
-      slug: 'safety_checks',
-      full_slug: 'nursing/safety_checks',
-      instruction: 'List each safety check before continuing.',
-      children: []
-    });
+    const updatePasswordSpy = vi.fn().mockResolvedValue(undefined);
     const openImportSpy = vi.fn();
     const modules: ModuleNode[] = [
-      {
+      buildModuleNode({
         id: 1,
         title: 'Nursing',
         slug: 'nursing',
         full_slug: 'nursing',
-        instruction: '',
         children: [
-          {
+          buildModuleNode({
             id: 2,
             title: 'Checks',
             slug: 'checks',
             full_slug: 'nursing/checks',
-            instruction: 'List the safety checks in order.',
-            children: []
-          },
-          {
+            instruction: 'List the safety checks in order.'
+          }),
+          buildModuleNode({
             id: 3,
             title: 'Definitions',
             slug: 'definitions',
             full_slug: 'nursing/definitions',
-            instruction: 'Define the nursing term in plain language.',
-            children: []
-          }
+            instruction: 'Define the nursing term in plain language.'
+          })
         ]
-      }
+      })
     ];
 
     render(AdminPage, {
       props: {
+        currentActor: buildAuthActor({ handle: 'admin', display_name: 'Admin', role: 'admin' }),
         modules,
-        users: [],
-        activeUser: null,
+        users: [{ id: 9, handle: 'ignazio', display_name: 'Ignazio', role: 'user', created_at: '2026-04-05T10:00:00Z' }],
         selectedModuleId: 2,
+        moderationQueue: { pending_modules: [], pending_questions: [], pending_revisions: [] },
         onCreateUser: createUserSpy,
+        onUpdateUserRole: updateRoleSpy,
+        onUpdateUserPassword: updatePasswordSpy,
         onCreateModule: createSpy,
         onUpdateModule: updateSpy,
         onOpenImport: openImportSpy
       }
     });
 
-    expect(screen.queryByText('Current modules')).toBeNull();
-    expect(screen.getByRole('heading', { name: 'Module' })).toBeTruthy();
-    expect(screen.getByText('Selected Leaf Module')).toBeTruthy();
-    expect(screen.getByRole('heading', { name: 'Create Module' })).toBeTruthy();
-    expect(screen.getByRole('heading', { name: 'Create User' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Catalog and moderation' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Accounts' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Modules' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Import QML' })).toBeTruthy();
-    expect(screen.queryByText('Users')).toBeNull();
-    expect(screen.queryByText('Question import')).toBeNull();
-    expect(screen.getAllByText(/Imports will create questions directly in/).length).toBeGreaterThan(0);
+    expect(screen.getByText('Selected leaf module')).toBeTruthy();
+    expect(screen.getByText('Create module')).toBeTruthy();
+    expect(screen.queryByText('Current modules')).toBeNull();
 
     expect(screen.getByRole('button', { name: 'Save Module' }).className).toContain('primary-button');
     expect(screen.getByRole('button', { name: 'Create Module' }).className).toContain('primary-button');
-    expect(screen.getByRole('button', { name: 'Create User' }).className).toContain('primary-button');
+    expect(screen.getByRole('button', { name: 'Create Account' }).className).toContain('primary-button');
+    expect(screen.getByRole('button', { name: 'Save Role' }).className).toContain('primary-button');
     expect(screen.getByRole('button', { name: 'Import QML' }).className).toContain('primary-button');
 
     const titleInput = screen.getByDisplayValue('Checks');
@@ -324,23 +318,47 @@ describe('AdminPage', () => {
     });
     expect(await screen.findByText('Module ready: nursing/safety_checks.')).toBeTruthy();
 
-    await user.type(screen.getByPlaceholderText('ignazio'), 'ignazio');
-    await user.type(screen.getByPlaceholderText('Ignazio'), 'Ignazio');
-    await user.click(screen.getByRole('button', { name: 'Create User' }));
+    const confirmPasswordInputs = screen.getAllByLabelText('Confirm password');
+    await user.type(screen.getByLabelText('Handle'), 'alice');
+    await user.type(screen.getByLabelText('Display name'), 'Alice');
+    await user.type(screen.getByLabelText('Password'), 'password123');
+    await user.type(confirmPasswordInputs[0], 'password999');
+    expect((screen.getByRole('button', { name: 'Create Account' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText('Passwords must match before creating an account.')).toBeTruthy();
+    await user.clear(confirmPasswordInputs[0]);
+    await user.type(confirmPasswordInputs[0], 'password123');
+    await user.click(screen.getByRole('button', { name: 'Create Account' }));
     expect(createUserSpy).toHaveBeenCalledWith({
-      handle: 'ignazio',
-      display_name: 'Ignazio'
+      handle: 'alice',
+      display_name: 'Alice',
+      role: 'user',
+      password: 'password123'
     });
-    expect(await screen.findByText('User ready: Ignazio.')).toBeTruthy();
+    expect(await screen.findByText('Account ready: Alice.')).toBeTruthy();
 
-    const selects = screen.getAllByRole('combobox');
-    await user.selectOptions(selects[1], '3');
+    await user.selectOptions(screen.getByLabelText('Manage account'), '9');
+    await user.selectOptions(screen.getAllByLabelText('Role')[1], 'admin');
+    await user.click(screen.getByRole('button', { name: 'Save Role' }));
+    expect(updateRoleSpy).toHaveBeenCalledWith(9, 'admin');
+    expect(await screen.findByText('Role updated for Ignazio.')).toBeTruthy();
+
+    await user.type(screen.getByLabelText('New password'), 'new-password123');
+    await user.type(confirmPasswordInputs[1], 'new-password999');
+    expect((screen.getByRole('button', { name: 'Update Password' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText('Passwords must match before updating a password.')).toBeTruthy();
+    await user.clear(confirmPasswordInputs[1]);
+    await user.type(confirmPasswordInputs[1], 'new-password123');
+    await user.click(screen.getByRole('button', { name: 'Update Password' }));
+    expect(updatePasswordSpy).toHaveBeenCalledWith(9, 'new-password123');
+    expect(await screen.findByText('Password updated.')).toBeTruthy();
+
+    await user.selectOptions(screen.getByLabelText('Import target'), '3');
     await user.click(screen.getByRole('button', { name: 'Import QML' }));
     expect(openImportSpy).toHaveBeenCalledWith(3);
 
     await user.type(screen.getByPlaceholderText('norwegian/vocabulary/nouns_to_english'), 'Vocabulary');
-    await user.selectOptions(selects[0], '1');
-    await user.type(screen.getByLabelText('Create instruction'), 'Use the Norwegian term as the prompt.');
+    await user.selectOptions(screen.getByLabelText('Parent module'), '1');
+    await user.type(screen.getAllByLabelText('Instruction')[1], 'Use the Norwegian term as the prompt.');
     await user.click(screen.getByRole('button', { name: 'Create Module' }));
 
     expect(createSpy).toHaveBeenCalledWith({
@@ -349,7 +367,7 @@ describe('AdminPage', () => {
       instruction: 'Use the Norwegian term as the prompt.'
     });
 
-    expect(await screen.findByText('Module path ready: norwegian.')).toBeTruthy();
+    expect(await screen.findByText('Module ready: norwegian.')).toBeTruthy();
   });
 });
 
@@ -357,14 +375,13 @@ describe('ImportDrawer', () => {
   it('submits edited rows through Save, shows blocking status, and removes rows locally', async () => {
     const user = userEvent.setup();
     const commitSpy = vi.fn().mockResolvedValue(undefined);
-    const moduleNode: ModuleNode = {
+    const moduleNode: ModuleNode = buildModuleNode({
       id: 12,
       title: 'noun2en',
       slug: 'noun2en',
       full_slug: 'norwegian/vocabulary/noun2en',
-      instruction: 'Translate each Norwegian noun into English.',
-      children: []
-    };
+      instruction: 'Translate each Norwegian noun into English.'
+    });
     const result: QuestionImportResult = {
       ready_to_commit: false,
       rows: [
@@ -535,14 +552,13 @@ describe('ImportDrawer', () => {
   it('saves edited relocation rows directly without a separate revalidate step', async () => {
     const user = userEvent.setup();
     const commitSpy = vi.fn().mockResolvedValue(undefined);
-    const moduleNode: ModuleNode = {
+    const moduleNode: ModuleNode = buildModuleNode({
       id: 20,
       title: 'target',
       slug: 'target',
       full_slug: 'norwegian/vocabulary/target',
-      instruction: 'Target module.',
-      children: []
-    };
+      instruction: 'Target module.'
+    });
     const result: QuestionImportResult = {
       ready_to_commit: true,
       rows: [{ row_number: 3, qml_line: 'hund [dog | canine | pooch]' }],
@@ -606,14 +622,13 @@ describe('ImportDrawer', () => {
   it('shows an inline nothing-to-save message for exact-duplicate-only imports', async () => {
     const user = userEvent.setup();
     const commitSpy = vi.fn().mockResolvedValue(undefined);
-    const moduleNode: ModuleNode = {
+    const moduleNode: ModuleNode = buildModuleNode({
       id: 30,
       title: 'target',
       slug: 'target',
       full_slug: 'norwegian/vocabulary/target',
-      instruction: 'Target module.',
-      children: []
-    };
+      instruction: 'Target module.'
+    });
     const result: QuestionImportResult = {
       ready_to_commit: false,
       rows: [{ row_number: 1, qml_line: 'år [year]' }],
@@ -656,14 +671,13 @@ describe('ImportDrawer', () => {
   it('publishes draft text and edited review rows so a parent can persist them', async () => {
     const user = userEvent.setup();
     const draftSpy = vi.fn();
-    const moduleNode: ModuleNode = {
+    const moduleNode: ModuleNode = buildModuleNode({
       id: 31,
       title: 'target',
       slug: 'target',
       full_slug: 'norwegian/vocabulary/target',
-      instruction: 'Target module.',
-      children: []
-    };
+      instruction: 'Target module.'
+    });
     const result: QuestionImportResult = {
       ready_to_commit: true,
       rows: [{ row_number: 4, qml_line: 'mot [toward]' }],
@@ -738,14 +752,13 @@ describe('ImportDrawer', () => {
 
   it('keeps answer chips responsive when the parent echoes draft rows back after every click', async () => {
     const user = userEvent.setup();
-    const moduleNode: ModuleNode = {
+    const moduleNode: ModuleNode = buildModuleNode({
       id: 32,
       title: 'target',
       slug: 'target',
       full_slug: 'norwegian/vocabulary/target',
-      instruction: 'Target module.',
-      children: []
-    };
+      instruction: 'Target module.'
+    });
     const result: QuestionImportResult = {
       ready_to_commit: true,
       rows: [{ row_number: 4, qml_line: 'mot [toward]' }],
@@ -796,7 +809,7 @@ describe('ImportDrawer', () => {
         onCommit: vi.fn()
       });
     };
-    const handleDraftChange = (qmlText: string, rows: { row_number: number; qml_line: string }[]): void => {
+    const handleDraftChange = (_qmlText: string, rows: { row_number: number; qml_line: string }[]): void => {
       echoedRows = rows.map((row) => ({ ...row }));
       void rerenderWithEcho();
     };

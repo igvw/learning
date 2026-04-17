@@ -13,8 +13,10 @@ See also:
 The database is organized around:
 
 - shared study content
+- moderation state around shared study content
 - user-owned quiz history
 - user-owned review state
+- authenticated account sessions
 
 The current runtime database is PostgreSQL.
 
@@ -28,6 +30,9 @@ Each module keeps:
 - `slug`
 - `full_slug`
 - `instruction`
+- `created_by_user_id`
+- `admin_verified`
+- `moderation_status`
 - `created_at`
 
 Important choices:
@@ -45,25 +50,37 @@ Each question keeps:
 - `module_id`
 - `question_type`
 - `prompt`
+- `prompt_key`
 - `rank`
 - `type_config_json`
+- `created_by_user_id`
+- `admin_verified`
+- `moderation_status`
 
 Important choices:
 
-- only current question state is stored
-- question content is shared, not user-specific
-- ordinary create/revise duplicate checks happen per leaf module in app logic
-- import review can also match same-prompt questions elsewhere in the same top-level module tree
+- new uploaded questions are first-class pending rows until admin verification
+- verified question content is shared, but regular-user revisions and delete requests live in proposals
+- `prompt_key` stores the normalized duplicate-matching identity used for indexed question lookups
+- ordinary create/revise duplicate checks happen per leaf module through indexed `prompt_key` lookups
+- import review can also match same-prompt questions elsewhere in the same top-level module tree through `prompt_key` lookups
+- import-created and import-relocated questions append at the end of the target leaf; `rank` remains the exposed ordering hint for now
 
-## Users And Review Flags
+## Users, Sessions, And Review Flags
 
-`users` stores the study users.
+`users` stores real authenticated accounts.
 
 Each user keeps:
 
 - `handle`
 - `display_name`
+- `role`
+- `password_hash`
 - `created_at`
+
+`auth_sessions` stores server-issued login sessions for real accounts.
+
+`question_revision_proposals` stores regular-user revisions and delete requests against verified shared questions.
 
 `user_review_flags` stores user-specific review state keyed by `(user_id, question_id)`.
 
@@ -129,6 +146,8 @@ Current behavior:
 - users own quiz sessions
 - quiz sessions own quiz session items
 - users own review flags over shared questions
+- users also own auth sessions
+- users can own pending modules, pending uploaded questions, and revision proposals
 
 That split keeps the durable model relatively small:
 

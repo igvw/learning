@@ -21,12 +21,13 @@ class ModuleApiTests(PostgresBackendTestCase):
                 "title": "Animals to English",
                 "instruction": "Translate the animal term into English.",
             },
+            headers=self.admin_headers,
         )
         self.assertEqual(rename_response.status_code, 200)
         self.assertEqual(rename_response.json()["full_slug"], "norwegian/animals_to_english")
         self.assertEqual(rename_response.json()["instruction"], "Translate the animal term into English.")
 
-        tree_response = self.client.get("/api/modules/tree")
+        tree_response = self.client.get("/api/modules/tree", headers=self.admin_headers)
         self.assertEqual(tree_response.status_code, 200)
         renamed_parent = next(node for node in tree_response.json() if node["id"] == norwegian["id"])
         self.assertEqual(renamed_parent["full_slug"], "norwegian")
@@ -39,6 +40,10 @@ class ModuleApiTests(PostgresBackendTestCase):
                     "slug": "animals_to_english",
                     "full_slug": "norwegian/animals_to_english",
                     "instruction": "Translate the animal term into English.",
+                    "admin_verified": True,
+                    "moderation_status": "verified",
+                    "created_by_user_id": None,
+                    "creator_display_name": None,
                     "children": [],
                 }
             ],
@@ -56,6 +61,7 @@ class ModuleApiTests(PostgresBackendTestCase):
         rename_response = self.client.patch(
             f"/api/modules/{norwegian['id']}",
             json={"title": "Language", "instruction": ""},
+            headers=self.admin_headers,
         )
         self.assertEqual(rename_response.status_code, 400)
         self.assertEqual(rename_response.json()["detail"], "Only leaf modules can be renamed.")
@@ -82,9 +88,18 @@ class ModuleApiTests(PostgresBackendTestCase):
         self.submit_quiz_item(user["id"], session["id"], first_item["id"], ["Monday"])
         self.set_review_flag(user["id"], first_question_id, True)
 
-        delete_response = self.client.delete(f"/api/questions/{first_question_id}")
+        delete_response = self.client.delete(f"/api/questions/{first_question_id}", headers=self.admin_headers)
         self.assertEqual(delete_response.status_code, 200)
-        self.assertEqual(delete_response.json(), {"question_id": first_question_id})
+        self.assertEqual(
+            delete_response.json(),
+            {
+                "question_id": first_question_id,
+                "proposal_id": None,
+                "admin_verified": True,
+                "moderation_status": "verified",
+                "delete_requested": False,
+            },
+        )
 
         stats_payload = self.get_stats_payload(user["id"], weekdays["id"])
         remaining_questions = stats_payload["questions"]
@@ -92,6 +107,6 @@ class ModuleApiTests(PostgresBackendTestCase):
         self.assertEqual(remaining_questions[0]["question_id"], second_question_id)
         self.assertEqual(remaining_questions[0]["rank"], 1)
 
-        missing_response = self.client.delete(f"/api/questions/{first_question_id}")
+        missing_response = self.client.delete(f"/api/questions/{first_question_id}", headers=self.admin_headers)
         self.assertEqual(missing_response.status_code, 404)
         self.assertEqual(missing_response.json()["detail"], f"Question {first_question_id} was not found.")

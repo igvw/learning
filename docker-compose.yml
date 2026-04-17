@@ -2,11 +2,11 @@ services:
   postgres:
     image: postgres:16-bookworm
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-learning}
-      POSTGRES_USER: ${POSTGRES_USER:-learning}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-learning}
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_PORT:?Set POSTGRES_PORT in .env}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -25,13 +25,16 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      LEARNING_APP_ENV: production
-      LEARNING_APP_INSTANCE_KEY: local-dev
-      LEARNING_APP_DATABASE_URL: postgresql://${POSTGRES_USER:-learning}:${POSTGRES_PASSWORD:-learning}@postgres:5432/${POSTGRES_DB:-learning}
-      LEARNING_APP_SEED_ON_BOOT: ${LEARNING_APP_SEED_ON_BOOT:-true}
+      LEARNING_APP_ENV: ${LEARNING_APP_ENV:?Set LEARNING_APP_ENV in .env}
+      LEARNING_APP_INSTANCE_KEY: ${LEARNING_APP_INSTANCE_KEY:?Set LEARNING_APP_INSTANCE_KEY in .env}
+      LEARNING_APP_DATABASE_URL: postgresql://${POSTGRES_USER:?Set POSTGRES_USER in .env}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:?Set POSTGRES_DB in .env}
+      LEARNING_APP_SEED_ON_BOOT: ${LEARNING_APP_SEED_ON_BOOT:?Set LEARNING_APP_SEED_ON_BOOT in .env}
       LEARNING_APP_CORS_ORIGINS: ${LEARNING_APP_CORS_ORIGINS:-}
+      LEARNING_APP_BOOTSTRAP_ADMIN_HANDLE: ${LEARNING_APP_BOOTSTRAP_ADMIN_HANDLE-}
+      LEARNING_APP_BOOTSTRAP_ADMIN_DISPLAY_NAME: ${LEARNING_APP_BOOTSTRAP_ADMIN_DISPLAY_NAME-}
+      LEARNING_APP_BOOTSTRAP_ADMIN_PASSWORD: ${LEARNING_APP_BOOTSTRAP_ADMIN_PASSWORD-}
     ports:
-      - "${LEARNING_APP_PORT:-8000}:8000"
+      - "${LEARNING_APP_PORT:?Set LEARNING_APP_PORT in .env}:8000"
     healthcheck:
       test:
         [

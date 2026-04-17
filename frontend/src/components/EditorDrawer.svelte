@@ -17,6 +17,7 @@
     type MultiSlot
   } from '../lib/editor-draft';
   import type {
+    AuthActor,
     ModuleNode,
     PriorityMode,
     QuestionDraftPayload,
@@ -30,6 +31,7 @@
   export let editingQuestion: QuestionRow | null = null;
   export let saving = false;
   export let deleting = false;
+  export let currentActor: AuthActor | null = null;
   export let onClose: () => void = () => {};
   export let onSave: (payload: QuestionDraftPayload, resetStats: boolean) => Promise<void> = async () => {
     throw new Error('Question save handler is not configured.');
@@ -157,7 +159,11 @@
       return;
     }
     if (typeof window !== 'undefined') {
-      const confirmed = window.confirm('Delete this question and its progress history?');
+      const confirmed = window.confirm(
+        isVerifiedNonAdminEdit
+          ? 'Request deletion for this verified question?'
+          : 'Delete this question and its progress history?'
+      );
       if (!confirmed) {
         return;
       }
@@ -192,7 +198,18 @@
   $: selectedModuleIsLeaf = selectedModuleOption?.isLeaf ?? false;
   $: editorBusy = saving || deleting;
   $: showDeleteAction = Boolean(editingQuestion);
+  $: isAdmin = currentActor?.role === 'admin';
+  $: isVerifiedNonAdminEdit = Boolean(editingQuestion && !isAdmin && editingQuestion.admin_verified);
+  $: moduleSelectionLocked = isVerifiedNonAdminEdit;
+  $: rankLocked = isVerifiedNonAdminEdit;
   $: primaryActionLabel = saving ? 'Saving...' : editingQuestion ? 'Save Revision' : 'Create Question';
+  $: deleteActionLabel = deleting
+    ? isVerifiedNonAdminEdit
+      ? 'Requesting...'
+      : 'Deleting...'
+    : isVerifiedNonAdminEdit
+      ? 'Request Delete'
+      : 'Delete Question';
   $: marker = `${open}:${editingQuestion?.question_id ?? 'new'}:${defaultModuleId ?? 'none'}:${moduleOptions.map((option) => option.id).join(',')}`;
   $: if (open && marker !== localMarker) {
     localMarker = marker;
@@ -233,6 +250,10 @@
           <div class="banner error">{formError}</div>
         {/if}
 
+        {#if isVerifiedNonAdminEdit}
+          <div class="banner info">This is a personal revision proposal. Module placement and rank stay global until an admin approves it.</div>
+        {/if}
+
         {#if !editingQuestion && qmlError}
           <div class="banner error">{qmlError}</div>
         {/if}
@@ -243,7 +264,7 @@
               <div class="editor-card-grid">
                 <label class="field editor-field-wide">
                   <span>Module</span>
-                  <select bind:value={moduleId}>
+                  <select bind:value={moduleId} disabled={moduleSelectionLocked}>
                     {#each moduleOptions as option (option.id)}
                       <option value={option.id}>{option.label}</option>
                     {/each}
@@ -271,7 +292,7 @@
 
                   <label class="field editor-field-small">
                     <span>Rank</span>
-                    <input type="number" min="1" step="1" bind:value={rank} />
+                    <input type="number" min="1" step="1" bind:value={rank} disabled={rankLocked} />
                   </label>
                 {:else}
                   <label class="field">
@@ -304,7 +325,7 @@
                 </label>
               </div>
 
-              {#if editingQuestion}
+              {#if editingQuestion && isAdmin}
                 <label class="checkbox-field dense-checkbox-field">
                   <input type="checkbox" bind:checked={resetStats} />
                   <span>Reset stats for this revision</span>
@@ -382,7 +403,7 @@
                   disabled={editorBusy}
                   on:click={() => void handleDelete()}
                 >
-                  {deleting ? 'Deleting...' : 'Delete Question'}
+                  {deleteActionLabel}
                 </button>
               {/if}
               <button

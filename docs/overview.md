@@ -11,6 +11,7 @@ For the current system spec, see:
 For supporting docs, see:
 
 - [Roadmap](roadmap.md)
+- [Architecture](architecture.md)
 - [Spaced Repetition](spaced-repetition.md)
 - [Question Markup DSL](question-markup.md)
 - [Question Markup LLM Prompt](question-markup-llm-prompt.md)
@@ -23,6 +24,7 @@ For supporting docs, see:
 Learning App is a keyboard-first study tool for facts, language, and procedural knowledge. It separates shared content from user-owned progress:
 
 - shared content lives in modules and questions
+- shared content can be pending, contributor-owned, or verified
 - user progress comes from quiz history
 - review flags are user-specific
 
@@ -62,13 +64,14 @@ Questions belong to one leaf module and support:
 - `ordered_multi`
 - `inline_cloze`
 
-Questions are edited in place. `rank` is the authoring and default ordering hint.
+Verified questions are shared. Regular-user revisions and delete requests now flow through personal proposals until an admin approves them. `rank` remains the authoring and default ordering hint for the shared catalog.
 
 ### Users And Progress
 
-The app is multi-user over shared content.
+The app is multi-user over shared content and authenticated accounts.
 
-- users share modules and questions
+- verified modules and questions are shared
+- users can also own pending uploads and revision proposals
 - quiz history is user-owned
 - review flags are user-owned
 - stats and scheduling are derived per user
@@ -85,15 +88,16 @@ The serving algorithm is described in [Spaced Repetition](spaced-repetition.md).
 
 ### Content And Import
 
-Content can come from repo seed files and from Admin flows.
+Content can come from repo seed files, admin flows, and moderated user contributions.
 
 Current behavior:
 
 - repo seed content imports from `content/modules/**/questions.dsl`
-- Admin imports use pasted QML or `.qml` files targeted at one leaf module
+- admin and contributor imports use pasted QML or `.qml` files targeted at one leaf module
 - exact duplicate import rows are omitted and summarized
 - same-leaf duplicate rows can revise the existing question in place
 - same-tree prompt matches can move an existing question into a different leaf while keeping its quiz history and derived scheduling
+- import-created and import-relocated questions append at the end of the target leaf in batch order
 - invalid or conflicting rows stay in review until they are edited or removed
 - leaf modules can be renamed from Admin without changing the underlying module id
 - the current question-line format is described in [Question Markup DSL](question-markup.md)
@@ -121,12 +125,11 @@ The stats page combines:
 
 ### Admin
 
-The Admin page owns shared-content administration:
+The third route is now role-aware:
 
-- leaf-module rename and instruction updates
-- module creation
-- user creation
-- question import with review and chunked save progress
+- admins get account management, shared-content management, and moderation queues
+- regular users get pending module/question authoring plus a view of their own submissions
+- demo shows the same contribution affordances in a non-persistent showcase mode
 
 ## Documentation Principle
 

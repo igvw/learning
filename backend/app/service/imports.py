@@ -3,9 +3,16 @@ from typing import Any
 
 from ..qml import QMLError, parse_qml_line, qml_lines_from_text
 from ..schemas import QuestionDraftIn
-from .authoring import create_question, revise_question
+from .auth import Actor
+from .authoring import (
+    apply_import_revision,
+    close_rank_gaps,
+    create_question_append_only,
+    relocate_question_for_import,
+)
 from .catalog import ensure_leaf_module
-from .common import ValidationError, answer_blocks, build_qml_line, question_prompt_key, serialize_type_config
+from .errors import ValidationError
+from .questions import answer_blocks, build_qml_line, serialize_type_config, stored_prompt_key
 
 
 def _top_level_root(full_slug: str) -> str:
@@ -77,23 +84,35 @@ def _target_module_context(connection: Any, module_id: int) -> dict[str, Any]:
     }
 
 
-def _existing_questions_in_root(connection: Any, root_slug: str) -> list[dict[str, Any]]:
+def _existing_questions_for_prompt_keys(
+    connection: Any,
+    *,
+    module_id: int,
+    root_slug: str,
+    prompt_keys: set[str],
+) -> list[dict[str, Any]]:
+    if not prompt_keys:
+        return []
+
+    placeholders = ",".join("?" for _ in prompt_keys)
     rows = connection.execute(
-        """
+        f"""
         SELECT
             q.id AS question_id,
             q.module_id,
             m.full_slug AS module_full_slug,
             q.question_type,
             q.prompt,
+            q.prompt_key,
             q.rank,
             q.type_config_json
         FROM questions AS q
         JOIN modules AS m ON m.id = q.module_id
-        WHERE m.full_slug = ? OR m.full_slug LIKE ?
+        WHERE q.prompt_key IN ({placeholders})
+          AND (q.module_id = ? OR m.full_slug = ? OR m.full_slug LIKE ?)
         ORDER BY q.id ASC
         """,
-        (root_slug, f"{root_slug}/%"),
+        (*sorted(prompt_keys), module_id, root_slug, f"{root_slug}/%"),
     ).fetchall()
 
     existing_rows: list[dict[str, Any]] = []
@@ -108,7 +127,7 @@ def _existing_questions_in_root(connection: Any, root_slug: str) -> list[dict[st
                 "prompt": row["prompt"],
                 "rank": row["rank"],
                 "type_config": parsed_type_config,
-                "prompt_key": question_prompt_key(row["question_type"], row["prompt"], parsed_type_config),
+                "prompt_key": row["prompt_key"],
                 "qml_line": build_qml_line(row["question_type"], row["prompt"], parsed_type_config),
                 "answer_blocks": answer_blocks(parsed_type_config),
             }
@@ -191,13 +210,12 @@ def _review_row(
 
 
 def _classify_existing_and_relocation_rows(
-    connection: Any,
     *,
+    context: dict[str, Any],
     module_id: int,
     parsed_rows: list[dict[str, Any]],
+    existing_rows: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    context = _target_module_context(connection, module_id)
-    existing_rows = _existing_questions_in_root(connection, context["root_slug"])
     target_rows_by_prompt: dict[str, list[dict[str, Any]]] = {}
     same_tree_rows_by_prompt: dict[str, list[dict[str, Any]]] = {}
 
@@ -268,7 +286,6 @@ def _classify_existing_and_relocation_rows(
             row["commit_action"] = {
                 "kind": "revise_existing",
                 "question_id": match["question_id"],
-                "rank": match["rank"],
             }
             continue
 
@@ -334,7 +351,7 @@ def _classify_existing_and_relocation_rows(
         row["commit_action"] = {
             "kind": "relocate_existing",
             "question_id": match["question_id"],
-            "rank": row["row_number"],
+            "source_module_id": match["module_id"],
         }
     return parsed_rows
 
@@ -398,7 +415,7 @@ def _validate_question_import_rows(
             payload = draft.model_dump()
             type_config = serialize_type_config(draft)
             imported_answer_blocks = answer_blocks(type_config)
-            prompt_key = question_prompt_key(draft.question_type, draft.prompt, type_config)
+            prompt_key = stored_prompt_key(draft.question_type, draft.prompt, type_config)
         except (QMLError, ValueError) as error:
             issues.append(str(error))
         parsed_rows.append(
@@ -414,7 +431,20 @@ def _validate_question_import_rows(
             }
         )
 
-    parsed_rows = _classify_existing_and_relocation_rows(connection, module_id=module_id, parsed_rows=parsed_rows)
+    context = _target_module_context(connection, module_id)
+    prompt_keys = {row["prompt_key"] for row in parsed_rows if row["prompt_key"]}
+    existing_rows = _existing_questions_for_prompt_keys(
+        connection,
+        module_id=module_id,
+        root_slug=context["root_slug"],
+        prompt_keys=prompt_keys,
+    )
+    parsed_rows = _classify_existing_and_relocation_rows(
+        context=context,
+        module_id=module_id,
+        parsed_rows=parsed_rows,
+        existing_rows=existing_rows,
+    )
     parsed_rows = _classify_same_upload_duplicates(parsed_rows)
 
     review_rows = [row["review_row"] for row in parsed_rows if row.get("review_row")]
@@ -429,19 +459,118 @@ def _validate_question_import_rows(
     return result, valid_rows
 
 
-def _commit_import_row(connection: Any, row: dict[str, Any]) -> None:
-    action = row["commit_action"]
-    payload_dict = dict(row["payload"])
-    if action["kind"] == "create":
-        create_question(connection, QuestionDraftIn(**payload_dict))
-        return
+def _commit_import_rows(connection: Any, *, module_id: int, valid_rows: list[dict[str, Any]], actor: Actor | None = None) -> int:
+    committed_count = 0
+    next_rank = connection.execute(
+        "SELECT COALESCE(MAX(rank), 0) + 1 AS next_rank FROM questions WHERE module_id = ?",
+        (module_id,),
+    ).fetchone()["next_rank"]
+    source_modules_to_compact: set[int] = set()
 
-    payload_dict["rank"] = action["rank"]
-    revise_question(
-        connection,
-        action["question_id"],
-        QuestionDraftIn(**payload_dict),
-        reset_stats=False,
+    for row in valid_rows:
+        action = row["commit_action"]
+        payload = QuestionDraftIn(**row["payload"])
+        if action["kind"] == "create":
+            create_question_append_only(connection, payload, actor=actor)
+            next_rank += 1
+        elif action["kind"] == "revise_existing":
+            apply_import_revision(connection, question_id=action["question_id"], payload=payload)
+        else:
+            source_module_id = relocate_question_for_import(
+                connection,
+                question_id=action["question_id"],
+                payload=QuestionDraftIn(**{**row["payload"], "rank": int(next_rank)}),
+                target_rank=int(next_rank),
+            )
+            source_modules_to_compact.add(source_module_id)
+            next_rank += 1
+        committed_count += 1
+
+    close_rank_gaps(connection, source_modules_to_compact)
+    return committed_count
+
+
+def _validate_user_question_import_rows(
+    connection: Any,
+    *,
+    module_id: int,
+    rows: list[dict[str, Any]],
+    actor: Actor,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    ensure_leaf_module(connection, module_id, actor=actor)
+    normalized_rows = _normalize_import_rows(rows)
+    valid_rows: list[dict[str, Any]] = []
+    review_rows: list[dict[str, Any]] = []
+    exact_duplicate_count = 0
+    seen_prompt_keys: set[str] = set()
+
+    for row in normalized_rows:
+        try:
+            payload = QuestionDraftIn(**parse_qml_line(line=row["qml_line"], module_id=module_id, rank=row["row_number"]))
+            type_config = serialize_type_config(payload)
+            prompt_key = stored_prompt_key(payload.question_type, payload.prompt, type_config)
+            if prompt_key in seen_prompt_keys:
+                exact_duplicate_count += 1
+                continue
+            seen_prompt_keys.add(prompt_key)
+
+            existing = connection.execute(
+                """
+                SELECT 1
+                FROM questions AS q
+                WHERE q.module_id = ?
+                  AND q.prompt_key = ?
+                  AND q.moderation_status <> 'rejected'
+                  AND (
+                    q.admin_verified = 1
+                    OR (q.created_by_user_id = ? AND q.admin_verified = 0 AND q.moderation_status IN ('pending', 'changes_requested'))
+                  )
+                LIMIT 1
+                """,
+                (module_id, prompt_key, actor.user_id),
+            ).fetchone()
+            if existing is not None:
+                review_rows.append(
+                    _review_row(
+                        row_number=row["row_number"],
+                        qml_line=row["qml_line"],
+                        status="duplicate",
+                        status_text="This prompt already exists in your visible scope. User imports only create new pending questions.",
+                        editable=True,
+                        blocking=True,
+                        imported_answer_blocks=answer_blocks(type_config),
+                    )
+                )
+                continue
+            valid_rows.append(
+                {
+                    "row_number": row["row_number"],
+                    "qml_line": row["qml_line"],
+                    "payload": payload.model_dump(),
+                    "commit_action": {"kind": "create"},
+                }
+            )
+        except (QMLError, ValueError) as error:
+            review_rows.append(
+                _review_row(
+                    row_number=row["row_number"],
+                    qml_line=row["qml_line"],
+                    status="invalid",
+                    status_text=f"Invalid QML: {error}",
+                    editable=True,
+                    blocking=True,
+                    imported_answer_blocks=[],
+                )
+            )
+
+    return (
+        _result_payload(
+            normalized_rows=normalized_rows,
+            valid_rows=valid_rows,
+            review_rows=review_rows,
+            exact_duplicate_count=exact_duplicate_count,
+        ),
+        valid_rows,
     )
 
 
@@ -451,12 +580,21 @@ def validate_question_import(
     module_id: int,
     qml_text: str | None = None,
     rows: list[dict[str, Any]] | None = None,
+    actor: Actor | None = None,
 ) -> dict[str, Any]:
     try:
         normalized_rows = qml_lines_from_text(qml_text) if qml_text is not None else _normalize_import_rows(rows or [])
     except QMLError as error:
         raise ValidationError(str(error)) from error
-    result, _ = _validate_question_import_rows(connection, module_id=module_id, rows=normalized_rows)
+    if actor is not None and actor.role != "admin":
+        result, _ = _validate_user_question_import_rows(
+            connection,
+            module_id=module_id,
+            rows=normalized_rows,
+            actor=actor,
+        )
+    else:
+        result, _ = _validate_question_import_rows(connection, module_id=module_id, rows=normalized_rows)
     return result
 
 
@@ -465,17 +603,23 @@ def commit_question_import(
     *,
     module_id: int,
     rows: list[dict[str, Any]],
+    actor: Actor | None = None,
 ) -> dict[str, Any]:
-    result, valid_rows = _validate_question_import_rows(connection, module_id=module_id, rows=rows)
+    if actor is not None and actor.role != "admin":
+        result, valid_rows = _validate_user_question_import_rows(
+            connection,
+            module_id=module_id,
+            rows=rows,
+            actor=actor,
+        )
+    else:
+        result, valid_rows = _validate_question_import_rows(connection, module_id=module_id, rows=rows)
     if any(review_row["blocking"] for review_row in result["review_rows"]):
         return result
     if not valid_rows:
         return result
 
-    committed_count = 0
-    for row in valid_rows:
-        _commit_import_row(connection, row)
-        committed_count += 1
+    committed_count = _commit_import_rows(connection, module_id=module_id, valid_rows=valid_rows, actor=actor)
 
     return {
         **result,

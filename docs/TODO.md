@@ -4,17 +4,18 @@ This file is the short tracker. The fuller alpha-to-beta product roadmap lives i
 
 ## Alpha blockers
 
-- Harden all user-authored text and parsing paths
-- Add passwords, authentication, and guest/user/admin authorization
-- Make private hosting production-safe with HTTPS and security defaults
+- Finish the authenticated account rollout and moderation UX
+- Add private-hosting production safety with HTTPS and security defaults
 - Add reliable backup and restore for hosted use
 - Fix rank/order performance so imports and bulk authoring scale better
+- Keep a follow-up hardening pass for user-authored text and parsing paths after the planned QML rework lands
 
 ## Alpha work that can continue in parallel
 
-- Improve authoring and import workflows
+- Improve the new contribution and moderation workflows
 - Make small UX improvements that reduce friction
 - Improve content-building tooling
+- Replace the custom schema-version system with `yoyo-migrations` before the next substantial database migration
 
 ## Beta focus
 
@@ -32,3 +33,4 @@ This file is the short tracker. The fuller alpha-to-beta product roadmap lives i
 - Retention comparisons across variants
 - Bucket-structure experimentation
 - Persisted or cached schedule state if history-derived scheduling becomes a real scale bottleneck
+- Revisit deeper input hardening once QML v2 settles and the math-style surface is gone

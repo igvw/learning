@@ -6,6 +6,9 @@ from pydantic import BaseModel, Field, model_validator
 type QuestionType = Literal["single_text", "multi_text", "ordered_multi", "inline_cloze", "computed_text"]
 type PriorityMode = Literal["high", "mid", "low"]
 type QuestionImportReviewStatus = Literal["invalid", "duplicate", "relocation", "info", "conflict"]
+type UserRole = Literal["admin", "user", "demo"]
+type ModerationStatus = Literal["verified", "pending", "changes_requested", "rejected"]
+type ProposalStatus = Literal["pending", "changes_requested", "approved", "rejected"]
 type ScheduleBucket = Literal[
     "hot0",
     "hot1",
@@ -24,6 +27,10 @@ class ModuleNodeOut(BaseModel):
     slug: str
     full_slug: str
     instruction: str = ""
+    admin_verified: bool = True
+    moderation_status: ModerationStatus = "verified"
+    created_by_user_id: int | None = None
+    creator_display_name: str | None = None
     children: list["ModuleNodeOut"] = Field(default_factory=list)
 
 
@@ -41,18 +48,123 @@ class UpdateModuleIn(BaseModel):
 class UserCreateIn(BaseModel):
     handle: str = Field(min_length=1, max_length=60)
     display_name: str = Field(min_length=1, max_length=120)
+    role: UserRole = "user"
+    password: str = Field(min_length=8, max_length=200)
 
 
 class UserOut(BaseModel):
     id: int
     handle: str
     display_name: str
+    role: UserRole
     created_at: str
 
 
 class HealthOut(BaseModel):
     status: str
     instance_key: str
+    bootstrap_required: bool = False
+
+
+class AuthBootstrapAdminIn(BaseModel):
+    handle: str = Field(min_length=1, max_length=60)
+    display_name: str = Field(min_length=1, max_length=120)
+    password: str = Field(min_length=8, max_length=200)
+
+
+class AuthLoginIn(BaseModel):
+    handle: str = Field(min_length=1, max_length=60)
+    password: str = Field(min_length=1, max_length=200)
+
+
+class AuthActorOut(BaseModel):
+    id: int | None = None
+    handle: str
+    display_name: str
+    role: UserRole
+    is_demo: bool = False
+    created_at: str | None = None
+
+
+class UserPasswordUpdateIn(BaseModel):
+    password: str = Field(min_length=8, max_length=200)
+
+
+class UserRoleUpdateIn(BaseModel):
+    role: Literal["admin", "user"]
+
+
+class ViewerProposalStateOut(BaseModel):
+    proposal_id: int
+    status: ProposalStatus
+    delete_requested: bool = False
+    admin_review_note: str = ""
+
+
+class ModerationActionIn(BaseModel):
+    action: Literal["approve", "reject", "changes_requested"]
+    note: str = ""
+
+
+class PendingModuleOut(BaseModel):
+    id: int
+    title: str
+    full_slug: str
+    parent_id: int | None = None
+    instruction: str = ""
+    admin_verified: bool = False
+    moderation_status: ModerationStatus
+    created_by_user_id: int | None = None
+    creator_display_name: str | None = None
+    admin_review_note: str = ""
+
+
+class PendingQuestionOut(BaseModel):
+    question_id: int
+    module_id: int
+    module_full_slug: str
+    prompt: str
+    question_type: QuestionType
+    rank: int
+    accepted_answers: list[list[str]]
+    segments: list[str]
+    admin_verified: bool = False
+    moderation_status: ModerationStatus
+    created_by_user_id: int | None = None
+    creator_display_name: str | None = None
+    admin_review_note: str = ""
+
+
+class QuestionRevisionProposalOut(BaseModel):
+    proposal_id: int
+    question_id: int
+    proposer_user_id: int
+    proposer_display_name: str | None = None
+    status: ProposalStatus
+    delete_requested: bool = False
+    admin_review_note: str = ""
+    module_id: int
+    module_full_slug: str
+    current_prompt: str
+    current_question_type: QuestionType
+    current_accepted_answers: list[list[str]]
+    current_segments: list[str]
+    proposed_prompt: str
+    proposed_question_type: QuestionType
+    proposed_accepted_answers: list[list[str]]
+    proposed_segments: list[str]
+
+
+class ModerationQueueOut(BaseModel):
+    pending_modules: list[PendingModuleOut] = Field(default_factory=list)
+    pending_questions: list[PendingQuestionOut] = Field(default_factory=list)
+    pending_revisions: list[QuestionRevisionProposalOut] = Field(default_factory=list)
+
+
+class MyContributionsOut(BaseModel):
+    modules: list[PendingModuleOut] = Field(default_factory=list)
+    questions: list[PendingQuestionOut] = Field(default_factory=list)
+    revisions: list[QuestionRevisionProposalOut] = Field(default_factory=list)
 
 
 class QuizSessionCreateIn(BaseModel):
@@ -71,6 +183,11 @@ class QuizItemOut(BaseModel):
     question_type: QuestionType
     rank: int
     type_config: dict[str, Any]
+    admin_verified: bool = True
+    moderation_status: ModerationStatus = "verified"
+    created_by_user_id: int | None = None
+    creator_display_name: str | None = None
+    viewer_proposal: ViewerProposalStateOut | None = None
     submitted_answer: list[str] | None = None
     is_correct: bool | None = None
     score_earned: float | None = None
@@ -147,6 +264,10 @@ class QuestionRevisionIn(QuestionDraftIn):
 
 class QuestionMutationOut(BaseModel):
     question_id: int
+    proposal_id: int | None = None
+    admin_verified: bool = True
+    moderation_status: ModerationStatus = "verified"
+    delete_requested: bool = False
 
 
 class QuestionReviewFlagIn(BaseModel):
@@ -199,6 +320,11 @@ class QuestionRowOut(BaseModel):
     first_asked_at: str | None = None
     last_asked_at: str | None = None
     review_flag: bool
+    admin_verified: bool = True
+    moderation_status: ModerationStatus = "verified"
+    created_by_user_id: int | None = None
+    creator_display_name: str | None = None
+    viewer_proposal: ViewerProposalStateOut | None = None
     accepted_answers: list[list[str]]
     segments: list[str]
     recent_incorrect_answers: list[dict[str, Any]] = Field(default_factory=list)

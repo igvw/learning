@@ -79,7 +79,7 @@
   }
 
   function handleToggleAnswer(row: QuestionImportReviewRow, choice: AnswerChoice): void {
-    if (!row.editable) {
+    if (!row.editable || busy) {
       return;
     }
     updateQmlLine(
@@ -165,7 +165,7 @@
             <p class="eyebrow">QML import</p>
             <h2>Import Questions</h2>
           </div>
-          <button type="button" class="ghost-button" on:click={onClose}>Close</button>
+          <button type="button" class="ghost-button" on:click={onClose}>{busy ? 'Hide' : 'Close'}</button>
         </div>
 
         {#if errorMessage}
@@ -179,6 +179,9 @@
               <h3>{moduleNode?.title ?? 'No module selected'}</h3>
               {#if moduleNode?.full_slug}
                 <p class="module-path"><code>{moduleNode.full_slug}</code></p>
+              {/if}
+              {#if moduleNode && !moduleNode.admin_verified}
+                <p class="muted-copy import-summary-note">Pending module</p>
               {/if}
             </div>
             {#if moduleNode?.instruction}
@@ -269,6 +272,7 @@
                                       class="qml-line-input"
                                       type="text"
                                       value={currentRowValue(row.row_number, row.qml_line)}
+                                      disabled={busy}
                                       on:input={(event) => updateQmlLine(row.row_number, (event.currentTarget as HTMLInputElement).value)}
                                     />
                                   {:else}
@@ -278,6 +282,7 @@
                                 <button
                                   class="import-remove-button"
                                   type="button"
+                                  disabled={busy}
                                   aria-label={`Remove row ${row.row_number}`}
                                   on:click={() => void handleDiscardRow(row.row_number)}
                                 >
@@ -301,7 +306,7 @@
                                                 class={`answer-block-chip answer-choice-button ${answerChoiceSourceClass(choice)}`}
                                                 class:selected-answer-choice={answerSelected(row, choice)}
                                                 type="button"
-                                                disabled={!row.editable}
+                                                disabled={!row.editable || busy}
                                                 title={answerChoiceSourceLabel(choice)}
                                                 aria-label={`Toggle ${answerChoiceSourceLabel(choice).toLowerCase()} ${choice.text} in QML row ${row.row_number}`}
                                                 on:click={() => handleToggleAnswer(row, choice)}

@@ -16,6 +16,7 @@ export type RetryEligibilityGraph = ReturnType<typeof buildRetryEligibilityGraph
 export type RetryEligibilityHourlyGraph = ReturnType<typeof buildRetryEligibilityHourlyGraph>;
 export type RetryEligibilityLongRangeGraph = ReturnType<typeof buildRetryEligibilityLongRangeGraph>;
 export type FirstSeenGraph = ReturnType<typeof buildFirstSeenGraph>;
+export type StageDueMatrixGraph = ReturnType<typeof buildStageDueMatrixGraph>;
 
 export const sortDefinitions: SortDefinition[] = [
   { key: 'rank', label: 'Rank', defaultDirection: 'asc' },
@@ -89,6 +90,19 @@ export const emptyFirstSeenGraph = {
   axisY: 168,
   plotLeft: 20,
   plotRight: 340
+};
+
+export const emptyStageDueMatrixGraph = {
+  columns: [],
+  rows: [],
+  cells: [],
+  maxCount: 0,
+  chartWidth: 640,
+  chartHeight: 94,
+  plotLeft: 84,
+  plotRight: 620,
+  plotTop: 52,
+  plotBottom: 74
 };
 
 export function formatScore(value: number): string {
@@ -290,9 +304,19 @@ const recoveryStageDefinitions = [
   { key: '30d', label: '30d', fillColor: 'hsl(236, 78%, 66%)' },
   { key: '60d', label: '60d', fillColor: 'hsl(252, 72%, 70%)' }
 ] as const;
+const stageDueMatrixColumnDefinitions = [
+  { key: 'lt1d', label: '<1d' },
+  { key: '1d', label: '1d' },
+  { key: '3d', label: '3d' },
+  { key: '7d', label: '7d' },
+  { key: '14d', label: '14d' },
+  { key: '30d', label: '30d' },
+  { key: '60d', label: '60d' }
+] as const;
 
 const fixedRetryBucketLabels = recoveryStageDefinitions.map((stage) => stage.key);
 const fixedRetryBuckets = new Set(fixedRetryBucketLabels);
+const stageDueMatrixDayCount = 61;
 const retryEligibilityDayDefinitions = [
   { key: 'lt1', label: '<1', fillColor: 'hsl(22, 92%, 58%)' },
   { key: 'day1', label: '1', fillColor: 'hsl(34, 90%, 58%)' },
@@ -305,6 +329,7 @@ const retryEligibilityDayDefinitions = [
   { key: 'gt7', label: '>7', fillColor: 'hsl(260, 70%, 70%)' }
 ] as const;
 type RetryEligibilityCategory = (typeof retryEligibilityDayDefinitions)[number]['key'];
+type StageDueMatrixColumnKey = (typeof stageDueMatrixColumnDefinitions)[number]['key'];
 type RetryEligibilityEntry = {
   dueAt: Date | null;
   category: RetryEligibilityCategory;
@@ -313,6 +338,10 @@ const dayInMs = 24 * 60 * 60 * 1000;
 const hourInMs = 60 * 60 * 1000;
 const hourlyDetailWindowCount = 24;
 const weeklyDetailWindowCount = 52;
+
+function isFixedRetryBucket(logicalBucket: QuestionRow['schedule']['logical_bucket']): logicalBucket is (typeof fixedRetryBucketLabels)[number] {
+  return fixedRetryBuckets.has(logicalBucket as (typeof fixedRetryBucketLabels)[number]);
+}
 
 export function buildRecoveryStageGraph(questions: QuestionRow[]) {
   const counts = {
@@ -390,6 +419,167 @@ export function buildRecoveryStageGraph(questions: QuestionRow[]) {
     axisY,
     plotLeft: padding.left,
     plotRight: chartWidth - padding.right
+  };
+}
+
+function stageDueMatrixColumnKey(logicalBucket: QuestionRow['schedule']['logical_bucket']): StageDueMatrixColumnKey | null {
+  switch (logicalBucket) {
+    case '1h':
+    case '3h':
+    case '6h':
+    case '12h':
+      return 'lt1d';
+    case '1d':
+    case '3d':
+    case '7d':
+    case '14d':
+    case '30d':
+    case '60d':
+      return logicalBucket;
+    default:
+      return null;
+  }
+}
+
+function formatLongDate(value: Date): string {
+  return value.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function heatmapCellFill(count: number, maxCount: number): string {
+  if (count <= 0 || maxCount <= 0) {
+    return 'rgba(148, 163, 184, 0.12)';
+  }
+  const intensity = Math.sqrt(count / maxCount);
+  const lightness = 82 - intensity * 42;
+  const alpha = 0.34 + intensity * 0.56;
+  return `hsla(201, 88%, ${lightness}%, ${alpha})`;
+}
+
+function heatmapCellTextColor(count: number, maxCount: number): string {
+  if (count <= 0 || maxCount <= 0) {
+    return 'rgba(15, 23, 42, 0.82)';
+  }
+  return count / maxCount >= 0.4 ? '#f8fafc' : 'rgba(15, 23, 42, 0.9)';
+}
+
+export function buildStageDueMatrixGraph(questions: QuestionRow[], referenceTime: Date = new Date()) {
+  const reference = new Date(referenceTime);
+  const referenceDayStart = startOfLocalDay(reference);
+  const columnDefinitions = stageDueMatrixColumnDefinitions.map((column, index) => ({
+    ...column,
+    index
+  }));
+  const rowDefinitions = Array.from({ length: stageDueMatrixDayCount }, (_, dayOffset) => {
+    const dayStart = new Date(referenceDayStart);
+    dayStart.setDate(referenceDayStart.getDate() + dayOffset);
+    return {
+      key: `day-${dayOffset}`,
+      dayOffset,
+      dayStart,
+      label: dayOffset === 0 ? 'Today' : formatShortDate(dayStart),
+      fullLabel: dayOffset === 0 ? `Today (${formatLongDate(dayStart)})` : formatLongDate(dayStart)
+    };
+  });
+  const counts = Array.from({ length: rowDefinitions.length }, () =>
+    Array.from({ length: columnDefinitions.length }, () => 0)
+  );
+
+  for (const question of questions) {
+    const columnKey = stageDueMatrixColumnKey(question.schedule.logical_bucket);
+    if (!columnKey) {
+      continue;
+    }
+
+    const columnIndex = columnDefinitions.findIndex((column) => column.key === columnKey);
+    if (columnIndex < 0) {
+      continue;
+    }
+
+    let rowIndex = 0;
+    if (!question.schedule.retry_pending) {
+      const dueAt = parseRetryDueAt(question.schedule.next_due_at);
+      if (!dueAt) {
+        continue;
+      }
+
+      const dayOffset = localDayOffset(dueAt, referenceDayStart);
+      if (dayOffset > 0) {
+        if (dayOffset >= rowDefinitions.length) {
+          continue;
+        }
+        rowIndex = dayOffset;
+      }
+    }
+
+    counts[rowIndex]![columnIndex] += 1;
+  }
+
+  const lastNonEmptyRowIndex = counts.reduce((lastIndex, rowCounts, rowIndex) => {
+    return rowCounts.some((count) => count > 0) ? rowIndex : lastIndex;
+  }, -1);
+
+  const maxCount = Math.max(...counts.flat(), 0);
+  const chartWidth = 640;
+  const padding = { top: 52, right: 20, bottom: 20, left: 84 };
+  const plotWidth = chartWidth - padding.left - padding.right;
+  const columnWidth = plotWidth / columnDefinitions.length;
+  const cellWidth = Math.max(columnWidth - 4, 20);
+  const rowHeight = 22;
+  const visibleRowCount = lastNonEmptyRowIndex >= 0 ? lastNonEmptyRowIndex + 1 : 0;
+  const visibleRows = rowDefinitions.slice(0, visibleRowCount);
+  const chartHeight = padding.top + visibleRows.length * rowHeight + padding.bottom;
+
+  return {
+    columns: columnDefinitions.map((column) => {
+      const x = padding.left + columnWidth * column.index + (columnWidth - cellWidth) / 2;
+      return {
+        key: column.key,
+        label: column.label,
+        x,
+        width: cellWidth,
+        labelX: x + cellWidth / 2
+      };
+    }),
+    rows: visibleRows.map((row, index) => {
+      const y = padding.top + index * rowHeight;
+      return {
+        key: row.key,
+        label: row.label,
+        fullLabel: row.fullLabel,
+        y,
+        height: rowHeight,
+        labelY: y + rowHeight / 2 + 4
+      };
+    }),
+    cells: visibleRows.flatMap((row, rowIndex) =>
+      columnDefinitions.map((column) => {
+        const count = counts[rowIndex]![column.index];
+        const x = padding.left + columnWidth * column.index + (columnWidth - cellWidth) / 2;
+        const y = padding.top + rowIndex * rowHeight;
+        return {
+          key: `${row.key}-${column.key}`,
+          rowKey: row.key,
+          columnKey: column.key,
+          count,
+          x,
+          y,
+          width: cellWidth,
+          height: rowHeight - 2,
+          fillColor: heatmapCellFill(count, maxCount),
+          textColor: heatmapCellTextColor(count, maxCount),
+          labelX: x + cellWidth / 2,
+          labelY: y + (rowHeight - 2) / 2 + 4,
+          title: `${column.label} due ${row.fullLabel}: ${count} question${count === 1 ? '' : 's'}`
+        };
+      })
+    ),
+    maxCount,
+    chartWidth,
+    chartHeight,
+    plotLeft: padding.left,
+    plotRight: chartWidth - padding.right,
+    plotTop: padding.top,
+    plotBottom: chartHeight - padding.bottom
   };
 }
 
@@ -486,7 +676,7 @@ function classifyRetryEligibilityQuestion(
   referenceDayStart: Date
 ): RetryEligibilityEntry | null {
   const logicalBucket = question.schedule.logical_bucket;
-  if (!fixedRetryBuckets.has(logicalBucket)) {
+  if (!isFixedRetryBucket(logicalBucket)) {
     return null;
   }
   if (question.schedule.retry_pending) {

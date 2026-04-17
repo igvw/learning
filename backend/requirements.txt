@@ -1,4 +1,8 @@
+coverage
 fastapi
 uvicorn
 httpx
+pydantic-settings
+pwdlib[argon2]
 psycopg[binary]
+ruff

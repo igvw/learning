@@ -13,13 +13,61 @@ See also:
 - all app routes live under `/api`
 - request and response bodies are JSON unless otherwise noted
 - `question_type` is one of `single_text`, `computed_text`, `multi_text`, `ordered_multi`, `inline_cloze`
-- user-scoped quiz, stats, and review routes require `X-User-Id`
+- authenticated routes use the server-side session cookie
+- `demo` uses the same route surface, but write routes reject with a demo-mode error instead of mutating the real database
+
+## Authentication
+
+### `GET /api/health`
+
+Returns:
+
+- `status`
+- `instance_key`
+- `bootstrap_required`
+
+### `POST /api/auth/bootstrap-admin`
+
+Creates the first admin account when no admin exists yet, then starts a session.
+
+Practical request shape:
+
+```json
+{
+  "handle": "admin",
+  "display_name": "Admin",
+  "password": "password123"
+}
+```
+
+### `POST /api/auth/login`
+
+Signs in a real account and sets the session cookie.
+
+### `POST /api/auth/logout`
+
+Clears the current session cookie.
+
+### `GET /api/auth/me`
+
+Returns the current authenticated actor:
+
+- `id`
+- `handle`
+- `display_name`
+- `role` (`admin`, `user`, `demo`)
+- `is_demo`
+- `created_at`
+
+### `POST /api/auth/demo-session`
+
+Starts an ephemeral demo session.
 
 ## Modules
 
 ### `GET /api/modules/tree`
 
-Returns the full module tree.
+Returns the visible module tree for the current actor.
 
 Each node includes:
 
@@ -28,6 +76,10 @@ Each node includes:
 - `slug`
 - `full_slug`
 - `instruction`
+- `admin_verified`
+- `moderation_status`
+- `created_by_user_id`
+- `creator_display_name`
 - `children`
 
 ### `POST /api/modules`
@@ -69,18 +121,47 @@ Current behavior:
 
 ### `GET /api/users`
 
-Returns the current user list.
+Admin-only. Returns the current real account list.
 
 ### `POST /api/users`
 
-Creates one study user.
+Admin-only. Creates one real account.
 
 Practical request shape:
 
 ```json
 {
   "handle": "ignazio",
-  "display_name": "Ignazio"
+  "display_name": "Ignazio",
+  "role": "user",
+  "password": "password123"
+}
+```
+
+### `POST /api/users/{user_id}/password`
+
+Admin-only. Replaces one real account password.
+
+### `GET /api/contributions/me`
+
+Returns the current regular user’s pending modules, pending uploaded questions, and revision/delete proposals.
+
+### `GET /api/moderation/queue`
+
+Admin-only. Returns pending module submissions, pending question uploads, and pending question revisions/delete requests.
+
+### `POST /api/moderation/modules/{module_id}`
+
+### `POST /api/moderation/questions/{question_id}`
+
+### `POST /api/moderation/question-revisions/{proposal_id}`
+
+Admin-only moderation actions. Request shape:
+
+```json
+{
+  "action": "approve",
+  "note": ""
 }
 ```
 
@@ -88,9 +169,7 @@ Practical request shape:
 
 ### `POST /api/quiz-sessions`
 
-Starts a quiz session for the active user.
-
-Requires `X-User-Id`.
+Starts a quiz session for the authenticated actor.
 
 Practical request shape:
 
@@ -115,6 +194,8 @@ Each quiz item includes:
 - prompt and question type
 - rank
 - normalized `type_config`
+- verification and provenance fields
+- optional viewer proposal state when a personal revision overlay is active
 - current answer state fields
 
 ### `POST /api/quiz-sessions/{session_id}/items/{item_id}/submit`
@@ -154,9 +235,7 @@ Current feedback behavior:
 
 ### `GET /api/stats`
 
-Returns stats for the selected scope and active user.
-
-Requires `X-User-Id`.
+Returns stats for the selected scope and authenticated actor.
 
 Supported query params:
 
@@ -181,6 +260,8 @@ Each question row includes:
 - `first_asked_at`
 - `last_asked_at`
 - user review flag
+- verification and provenance fields
+- optional viewer proposal state when the current actor has a personal revision overlay
 - recent aggregated incorrect answers
 - derived schedule state
 
@@ -200,6 +281,11 @@ Current schedule fields include:
 
 Creates a new question.
 
+Current role behavior:
+
+- admins create verified questions immediately
+- regular users create pending questions that are immediately usable only for themselves and visible to admins
+
 Practical request fields:
 
 - `module_id`
@@ -210,21 +296,27 @@ Practical request fields:
 - `accepted_answers`
 - optional `segments`
 
-If `priority_mode` is used, the frontend also sends `X-User-Id` so the backend can place the new question relative to that user's unseen questions.
+`priority_mode` is resolved against the authenticated actor’s own unseen questions.
 
 ### `POST /api/questions/{question_id}/revisions`
 
-Updates an existing question in place and can optionally reset history-derived stats.
+Current role behavior:
+
+- admins update the verified question in place and can optionally reset history-derived stats
+- regular users editing a verified question create or update a personal revision proposal instead
+- regular users editing their own pending uploaded question update that pending row directly
 
 ### `DELETE /api/questions/{question_id}`
 
-Deletes one question and closes the rank gap in its leaf module.
+Current role behavior:
+
+- admins delete the question immediately and close the rank gap
+- regular users delete only their own pending uploaded questions immediately
+- regular users deleting a verified question create or update a personal delete request proposal instead
 
 ### `PATCH /api/questions/{question_id}/review-flag`
 
 Sets the current user’s review flag for a question.
-
-Requires `X-User-Id`.
 
 Practical request shape:
 
@@ -249,8 +341,10 @@ Important behavior:
 - exact duplicate rows are omitted and summarized
 - same-leaf duplicate rows can revise the existing question in place
 - same-tree prompt matches can move an existing question into a different leaf while keeping question-linked progress
+- imported creates and same-tree relocations append at the end of the target leaf while preserving batch order
 - malformed or conflicting rows are returned for review
 - nothing is saved until commit succeeds
+- regular-user imports only create new pending uploaded questions; they do not revise or relocate shared verified questions
 
 Type inference:
 
@@ -327,4 +421,5 @@ Current behavior:
 - successful commits return the same result shape with:
   - `committed: true`
   - `committed_count`
-- the frontend currently uses this endpoint in 10-row chunks to show determinate save progress
+- the frontend currently uses this endpoint in 50-row chunks to show determinate save progress
+- imports can keep running in the current tab after the drawer is hidden; reopening the drawer shows the live remaining state
