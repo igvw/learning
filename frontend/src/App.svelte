@@ -9,16 +9,30 @@
   import QuizPage from './components/QuizPage.svelte';
   import StatsPage from './components/StatsPage.svelte';
   import {
-    clearImportSessionStorage,
     clearLegacySelectionStorage,
     findModuleTitle,
-    moduleIdExists,
-    persistImportSession,
     persistSelectedModule as persistSelectedModuleSelection,
-    restoreImportSession,
-    restoreSelectedModuleId,
     routeFromPath
   } from './lib/app-state';
+  import {
+    loadModulesForActor,
+    loadRoleDataForActor,
+    loadStatsForActor,
+    pathForRoute,
+    resolveHealthContext
+  } from './lib/app-shell-data';
+  import {
+    closeImportUiState,
+    importStatusSummary,
+    initialImportUiState,
+    openImportUiForModule,
+    persistImportUiState,
+    reopenImportUiState,
+    resetImportUiState,
+    restoreImportUiStateFromSession,
+    setImportUiSaveStatus,
+    updateImportUiDraft
+  } from './lib/app-shell-import';
   import { IMPORT_COMMIT_CHUNK_SIZE, initialImportDraftRows } from './lib/import-session';
   import { cloneImportRows } from './lib/import-rows';
   import { commitImportInChunks, prepareImportSave, rebuildImportStateAfterPartialSave } from './lib/import-workflow';
@@ -64,7 +78,6 @@
     ModuleNode,
     MyContributions,
     QuestionDraftPayload,
-    QuestionImportResult,
     QuestionImportRowPayload,
     QuestionRow,
     QuizSession,
@@ -104,18 +117,7 @@
   let savingQuestion = false;
   let deletingQuestion = false;
 
-  let importDrawerOpen = false;
-  let importTargetModuleId: number | null = null;
-  let importResult: QuestionImportResult | null = null;
-  let importBusy = false;
-  let importError = '';
-  let importDraftQmlText = '';
-  let importDraftRows: QuestionImportRowPayload[] = [];
-  let importSaveStatusMessage = '';
-  let importSaveStatusTone: 'error' | 'info' | '' = '';
-  let importSaveProgressTotal = 0;
-  let importSaveProgressCompleted = 0;
-  let importSessionReady = false;
+  let importState = initialImportUiState();
   let instanceKey = 'default';
 
   function findModuleNode(nodes: ModuleNode[], moduleId: number): ModuleNode | null {
@@ -146,119 +148,66 @@
     contributions = null;
     reviewOnly = false;
     moduleMenuOpen = false;
-    resetImportState(true);
-  }
-
-  function resetImportState(closeDrawer = false): void {
-    importResult = null;
-    importError = '';
-    importBusy = false;
-    importDraftQmlText = '';
-    importDraftRows = [];
-    importSaveStatusMessage = '';
-    importSaveStatusTone = '';
-    importSaveProgressTotal = 0;
-    importSaveProgressCompleted = 0;
-    if (closeDrawer) {
-      importDrawerOpen = false;
-      importTargetModuleId = null;
-    }
+    importState = resetImportUiState(importState, true);
   }
 
   function closeImportDrawer(): void {
-    if (importBusy) {
-      importDrawerOpen = false;
-      return;
-    }
-    resetImportState(true);
+    importState = closeImportUiState(importState);
   }
 
   function reopenImportDrawer(): void {
-    if (importTargetModuleId === null) {
-      return;
-    }
-    importDrawerOpen = true;
+    importState = reopenImportUiState(importState);
   }
 
   function updateImportDraft(qmlText: string, rows: QuestionImportRowPayload[]): void {
-    importDraftQmlText = qmlText;
-    importDraftRows = rows.map((row) => ({
-      row_number: row.row_number,
-      qml_line: row.qml_line
-    }));
-  }
-
-  function setImportSaveStatus(message = '', tone: 'error' | 'info' | '' = ''): void {
-    importSaveStatusMessage = message;
-    importSaveStatusTone = tone;
+    importState = updateImportUiDraft(importState, qmlText, rows);
   }
 
   function restoreImportStateFromSession(): void {
-    const restored = restoreImportSession(window.sessionStorage, {
+    importState = restoreImportUiStateFromSession({
+      state: importState,
+      storage: window.sessionStorage,
       instanceKey,
       modules
     });
-
-    resetImportState(true);
-    if (!restored) {
-      clearImportSessionStorage(window.sessionStorage, instanceKey);
-      return;
-    }
-
-    importDrawerOpen = true;
-    importTargetModuleId = restored.targetModuleId;
-    importDraftQmlText = restored.qmlText;
-    importDraftRows = restored.rows;
-    importResult = restored.result;
   }
 
   async function loadModules(): Promise<void> {
-    if (!currentActor) {
-      modules = [];
-      applySelectedModule(null);
-      return;
-    }
-
-    const loadedModules = await getModulesTree();
-    modules = loadedModules;
-    if (importTargetModuleId !== null && !moduleIdExists(loadedModules, importTargetModuleId)) {
-      importTargetModuleId = null;
-    }
-    if (loadedModules.length === 0) {
-      applySelectedModule(null);
-      return;
-    }
-    applySelectedModule(
-      restoreSelectedModuleId(window.localStorage, {
-        instanceKey,
-        modules: loadedModules,
-        selectedModuleId
-      })
-    );
+    const loadedState = await loadModulesForActor({
+      actor: currentActor,
+      getModulesTree,
+      selectedModuleId,
+      importTargetModuleId: importState.targetModuleId,
+      instanceKey,
+      storage: window.localStorage
+    });
+    modules = loadedState.modules;
+    importState = {
+      ...importState,
+      targetModuleId: loadedState.importTargetModuleId
+    };
+    applySelectedModule(loadedState.selectedModuleId);
   }
 
   async function loadRoleData(): Promise<void> {
-    if (!currentActor || currentActor.is_demo) {
-      users = [];
-      moderationQueue = null;
-      contributions = null;
-      return;
-    }
-    if (currentActor.role === 'admin') {
-      users = await getUsers();
-      moderationQueue = await getModerationQueue();
-      contributions = null;
-      return;
-    }
-    users = [];
-    moderationQueue = null;
-    contributions = await getMyContributions();
+    const roleData = await loadRoleDataForActor({
+      actor: currentActor,
+      getUsers,
+      getModerationQueue,
+      getMyContributions
+    });
+    users = roleData.users;
+    moderationQueue = roleData.moderationQueue;
+    contributions = roleData.contributions;
   }
 
   async function refreshAuthenticatedData(): Promise<void> {
     await loadModules();
     restoreImportStateFromSession();
-    importSessionReady = true;
+    importState = {
+      ...importState,
+      sessionReady: true
+    };
     await loadRoleData();
     if (currentRoute === 'stats') {
       await loadStats();
@@ -268,13 +217,9 @@
   async function resolveAuthSession(): Promise<void> {
     authLoading = true;
     authError = '';
-    try {
-      health = await getHealth();
-      instanceKey = health?.instance_key?.trim() || 'default';
-    } catch (error) {
-      console.error(error);
-      health = { status: 'ok', instance_key: 'default', bootstrap_required: false };
-    }
+    const healthContext = await resolveHealthContext(getHealth);
+    health = healthContext.health;
+    instanceKey = healthContext.instanceKey;
 
     clearLegacySelectionStorage(window.localStorage);
 
@@ -284,34 +229,30 @@
     } catch (error) {
       currentActor = null;
       resetAuthenticatedState();
-      importSessionReady = true;
+      importState = {
+        ...importState,
+        sessionReady: true
+      };
     } finally {
       authLoading = false;
     }
   }
 
   async function loadStats(): Promise<void> {
-    if (!currentActor) {
-      stats = null;
-      statsError = '';
-      statsLoading = false;
-      return;
-    }
-
     statsLoading = true;
-    statsError = '';
-    try {
-      stats = await getStats(selectedModuleId);
-    } catch (error) {
-      statsError = error instanceof Error ? error.message : 'Unable to load stats.';
-    } finally {
-      statsLoading = false;
-    }
+    const loadedStats = await loadStatsForActor({
+      actor: currentActor,
+      selectedModuleId,
+      getStats
+    });
+    stats = loadedStats.stats;
+    statsError = loadedStats.errorMessage;
+    statsLoading = false;
   }
 
   async function navigate(route: RouteName): Promise<void> {
     currentRoute = route;
-    window.history.pushState({}, '', route === 'quiz' ? '/quiz' : route === 'stats' ? '/stats' : '/admin');
+    window.history.pushState({}, '', pathForRoute(route));
     if (route === 'stats') {
       await loadStats();
     }
@@ -467,13 +408,7 @@
   }
 
   function handleOpenImportForModule(moduleId: number): void {
-    if (importBusy && importTargetModuleId !== null) {
-      importDrawerOpen = true;
-      return;
-    }
-    resetImportState();
-    importTargetModuleId = moduleId;
-    importDrawerOpen = true;
+    importState = openImportUiForModule(importState, moduleId);
   }
 
   async function handleCreateModule(payload: CreateModulePayload): Promise<ModuleNode> {
@@ -545,20 +480,31 @@
     if (!importTargetModuleNode) {
       return;
     }
-    importBusy = true;
-    importError = '';
-    setImportSaveStatus();
-    importSaveProgressTotal = 0;
-    importSaveProgressCompleted = 0;
-    importDraftQmlText = qmlText;
+    importState = {
+      ...setImportUiSaveStatus(importState),
+      busy: true,
+      error: '',
+      draftQmlText: qmlText,
+      saveProgressTotal: 0,
+      saveProgressCompleted: 0
+    };
     try {
       const nextResult = await validateQuestionImportText(importTargetModuleNode.id, qmlText);
-      importDraftRows = initialImportDraftRows(nextResult);
-      importResult = nextResult;
+      importState = {
+        ...importState,
+        draftRows: initialImportDraftRows(nextResult),
+        result: nextResult
+      };
     } catch (error) {
-      importError = error instanceof Error ? error.message : 'Unable to start this import.';
+      importState = {
+        ...importState,
+        error: error instanceof Error ? error.message : 'Unable to start this import.'
+      };
     } finally {
-      importBusy = false;
+      importState = {
+        ...importState,
+        busy: false
+      };
     }
   }
 
@@ -567,26 +513,33 @@
       return;
     }
     let queuedRows: QuestionImportRowPayload[] = [];
-    importBusy = true;
-    importError = '';
-    setImportSaveStatus();
-    importDraftRows = cloneImportRows(rows);
+    importState = {
+      ...setImportUiSaveStatus(importState),
+      busy: true,
+      error: '',
+      draftRows: cloneImportRows(rows)
+    };
     try {
       const { validatedState, draftRows, queue, saveStatus } = await prepareImportSave({
         moduleId: importTargetModuleNode.id,
         rows,
         validateRows: validateQuestionImportRows
       });
-      importResult = validatedState;
-      importDraftRows = draftRows;
+      importState = {
+        ...importState,
+        result: validatedState,
+        draftRows
+      };
       queuedRows = queue;
 
       const validationStatus =
         saveStatus ?? (queue.length === 0 ? { message: 'Nothing new to save.', tone: 'info' as const } : null);
       if (validationStatus) {
-        setImportSaveStatus(validationStatus.message, validationStatus.tone);
-        importSaveProgressTotal = 0;
-        importSaveProgressCompleted = 0;
+        importState = {
+          ...setImportUiSaveStatus(importState, validationStatus.message, validationStatus.tone),
+          saveProgressTotal: 0,
+          saveProgressCompleted: 0
+        };
         return;
       }
 
@@ -596,8 +549,11 @@
         commitRows: commitQuestionImport,
         chunkSize: IMPORT_COMMIT_CHUNK_SIZE,
         onProgress: ({ completed, total }) => {
-          importSaveProgressCompleted = completed;
-          importSaveProgressTotal = total;
+          importState = {
+            ...importState,
+            saveProgressCompleted: completed,
+            saveProgressTotal: total
+          };
         }
       });
       if (!commitResult.completed) {
@@ -607,38 +563,51 @@
           committedRows: commitResult.committedRows,
           validateRows: validateQuestionImportRows
         });
-        importDraftRows = rebuiltState.draftRows;
-        importResult = rebuiltState.validatedState;
-        setImportSaveStatus(rebuiltState.saveStatus.message, rebuiltState.saveStatus.tone);
+        importState = {
+          ...setImportUiSaveStatus(importState, rebuiltState.saveStatus.message, rebuiltState.saveStatus.tone),
+          draftRows: rebuiltState.draftRows,
+          result: rebuiltState.validatedState
+        };
         return;
       }
 
-      resetImportState(true);
+      importState = resetImportUiState(importState, true);
       await reloadAfterQuestionMutation();
     } catch (error) {
-      if (importSaveProgressCompleted > 0 && queuedRows.length > 0) {
+      if (importState.saveProgressCompleted > 0 && queuedRows.length > 0) {
         try {
-          const remainingRows = queuedRows.slice(importSaveProgressCompleted);
+          const remainingRows = queuedRows.slice(importState.saveProgressCompleted);
           const rebuiltState = await rebuildImportStateAfterPartialSave({
             moduleId: importTargetModuleNode.id,
             rows: remainingRows,
-            committedRows: importSaveProgressCompleted,
+            committedRows: importState.saveProgressCompleted,
             validateRows: validateQuestionImportRows
           });
-          importDraftRows = rebuiltState.draftRows;
-          importResult = rebuiltState.validatedState;
-          setImportSaveStatus(rebuiltState.saveStatus.message, rebuiltState.saveStatus.tone);
+          importState = {
+            ...setImportUiSaveStatus(importState, rebuiltState.saveStatus.message, rebuiltState.saveStatus.tone),
+            draftRows: rebuiltState.draftRows,
+            result: rebuiltState.validatedState
+          };
         } catch (rebuildError) {
           console.error(rebuildError);
-          importError = error instanceof Error ? error.message : 'Unable to commit this upload.';
+          importState = {
+            ...importState,
+            error: error instanceof Error ? error.message : 'Unable to commit this upload.'
+          };
         }
       } else {
-        importError = error instanceof Error ? error.message : 'Unable to commit this upload.';
+        importState = {
+          ...importState,
+          error: error instanceof Error ? error.message : 'Unable to commit this upload.'
+        };
       }
     } finally {
-      importBusy = false;
-      importSaveProgressTotal = 0;
-      importSaveProgressCompleted = 0;
+      importState = {
+        ...importState,
+        busy: false,
+        saveProgressTotal: 0,
+        saveProgressCompleted: 0
+      };
     }
   }
 
@@ -683,35 +652,15 @@
   $: selectedModuleNode = selectedModuleId === null ? null : findModuleNode(modules, selectedModuleId);
   $: selectedModuleIsLeaf = Boolean(selectedModuleNode && selectedModuleNode.children.length === 0);
   $: selectedModuleInstruction = selectedModuleNode?.instruction ?? '';
-  $: importTargetModuleNode = importTargetModuleId === null ? null : findModuleNode(modules, importTargetModuleId);
+  $: importTargetModuleNode = importState.targetModuleId === null ? null : findModuleNode(modules, importState.targetModuleId);
   $: activeActorLabel = currentActor?.display_name ?? 'Current account';
-  $: importStatusVisible =
-    importTargetModuleId !== null &&
-    !importDrawerOpen &&
-    (importBusy || Boolean(importError) || Boolean(importSaveStatusMessage));
-  $: importStatusTone = importBusy ? 'progress' : importError || importSaveStatusTone === 'error' ? 'error' : 'info';
-  $: importStatusLabel = (() => {
-    if (importBusy && importSaveProgressTotal > 0) {
-      return `Uploading ${importSaveProgressCompleted}/${importSaveProgressTotal}`;
-    }
-    if (importBusy) {
-      return importResult ? 'Saving import...' : 'Preparing import...';
-    }
-    if (importError) {
-      return 'Import failed';
-    }
-    return importSaveStatusTone === 'error' ? 'Import needs attention' : 'Import updated';
-  })();
-  $: importStatusDetail = importError || importSaveStatusMessage || importStatusLabel;
-  $: if (importSessionReady) {
-    persistImportSession(window.sessionStorage, {
+  $: importStatus = importStatusSummary(importState);
+  $: if (importState.sessionReady) {
+    persistImportUiState({
+      storage: window.sessionStorage,
       instanceKey,
       modules,
-      open: importDrawerOpen,
-      targetModuleId: importTargetModuleId,
-      qmlText: importDraftQmlText,
-      rows: importDraftRows,
-      result: importResult
+      state: importState
     });
   }
 </script>
@@ -739,10 +688,10 @@
     <Header
       currentRoute={currentRoute}
       currentActor={currentActor}
-      importStatusVisible={importStatusVisible}
-      importStatusLabel={importStatusLabel}
-      importStatusDetail={importStatusDetail}
-      importStatusTone={importStatusTone}
+      importStatusVisible={importStatus.visible}
+      importStatusLabel={importStatus.label}
+      importStatusDetail={importStatus.detail}
+      importStatusTone={importStatus.tone}
       onNavigate={navigate}
       onToggleMenu={() => (moduleMenuOpen = !moduleMenuOpen)}
       onOpenImportStatus={reopenImportDrawer}
@@ -819,17 +768,17 @@
     />
 
     <ImportDrawer
-      open={importDrawerOpen}
+      open={importState.open}
       moduleNode={importTargetModuleNode}
-      result={importResult}
-      busy={importBusy}
-      errorMessage={importError}
-      draftText={importDraftQmlText}
-      draftRows={importDraftRows}
-      saveStatusMessageOverride={importSaveStatusMessage}
-      saveStatusToneOverride={importSaveStatusTone}
-      saveProgressTotal={importSaveProgressTotal}
-      saveProgressCompleted={importSaveProgressCompleted}
+      result={importState.result}
+      busy={importState.busy}
+      errorMessage={importState.error}
+      draftText={importState.draftQmlText}
+      draftRows={importState.draftRows}
+      saveStatusMessageOverride={importState.saveStatusMessage}
+      saveStatusToneOverride={importState.saveStatusTone}
+      saveProgressTotal={importState.saveProgressTotal}
+      saveProgressCompleted={importState.saveProgressCompleted}
       onClose={closeImportDrawer}
       onDraftChange={updateImportDraft}
       onStartImport={handleStartImport}

@@ -1,4 +1,5 @@
 import './app.css';
+import './styles/shell.css';
 import './styles/admin.css';
 import './styles/stats.css';
 import './styles/imports.css';

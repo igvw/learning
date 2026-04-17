@@ -124,8 +124,6 @@
 }
 
 @media (max-width: 900px) {
-  .app-header,
-  .page-intro,
   .drawer-actions,
   .editor-layout {
     grid-template-columns: 1fr;
@@ -139,37 +137,6 @@
   .editor-field-prompt,
   .editor-field-wide {
     grid-column: auto;
-  }
-
-  .app-header {
-    padding-top: 1.2rem;
-  }
-
-  .main-nav {
-    justify-self: start;
-  }
-
-  .drawer-panel {
-    width: 100vw;
-  }
-
-  .modal-shell {
-    padding: 0;
-  }
-
-  .modal-panel {
-    width: 100vw;
-    max-height: 100vh;
-    min-height: 100vh;
-    border-radius: 0;
-  }
-
-  .import-drawer-shell {
-    position: static;
-  }
-
-  .import-drawer {
-    width: 100vw;
   }
 
   .admin-stack,
@@ -204,16 +171,6 @@
 }
 
 @media (max-width: 640px) {
-  .page-shell,
-  .app-header {
-    padding-left: 1rem;
-    padding-right: 1rem;
-  }
-
-  .page-intro {
-    align-items: start;
-  }
-
   .quiz-card-actions,
   .drawer-actions {
     align-items: start;
