@@ -17,7 +17,15 @@ describe('AuthPage', () => {
       },
     });
 
-    await user.type(screen.getByLabelText('Handle'), ' user-a ');
+    expect(screen.queryByText('Authentication')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Sign In' })).toBeNull();
+    expect(screen.getByPlaceholderText('Username')).toBeTruthy();
+    expect(screen.getByPlaceholderText('Password')).toBeTruthy();
+    expect(screen.queryByText('Sign in to continue.')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Preview demo' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Demo' }).className).toContain('review-button');
+
+    await user.type(screen.getByLabelText('Username'), ' user-a ');
     await user.type(screen.getByLabelText('Password'), 'password123');
     await user.click(screen.getByRole('button', { name: 'Sign In' }));
 
@@ -35,7 +43,7 @@ describe('AuthPage', () => {
       },
     });
 
-    await user.type(screen.getByLabelText('Handle'), ' user-a ');
+    await user.type(screen.getByLabelText('Username'), ' user-a ');
     await user.type(screen.getByLabelText('Password'), 'password123{Enter}');
 
     expect(loginSpy).toHaveBeenCalledWith({ handle: 'user-a', password: 'password123' });
@@ -52,7 +60,10 @@ describe('AuthPage', () => {
       },
     });
 
-    await user.type(screen.getByLabelText('Handle'), 'admin');
+    expect(screen.getByRole('heading', { name: 'Create admin account' })).toBeTruthy();
+    expect(screen.getByText('Create the first admin account to unlock the app.')).toBeTruthy();
+
+    await user.type(screen.getByLabelText('Username'), 'admin');
     await user.type(screen.getByLabelText('Display name'), 'Admin');
     await user.type(screen.getByLabelText('Password'), 'password123');
     await user.type(screen.getByLabelText('Confirm password'), 'password999');
@@ -73,7 +84,7 @@ describe('AuthPage', () => {
       },
     });
 
-    await user.click(screen.getByRole('button', { name: 'Try Demo' }));
+    await user.click(screen.getByRole('button', { name: 'Demo' }));
 
     expect(demoSpy).toHaveBeenCalledTimes(1);
   });

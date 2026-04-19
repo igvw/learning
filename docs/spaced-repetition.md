@@ -1,50 +1,44 @@
 # Spaced Repetition
 
-The scheduler uses two ideas at once:
+The scheduler has two layers:
 
-- `hotness` for short-term recovery
-- fixed time buckets for longer-term review
+- hot recovery for recently missed questions
+- fixed review buckets for longer-term spacing
 
-## Serving priority
+## Serving Priority
 
 1. `hot0`
 2. `hot1`
-3. due bucketed questions, shortest bucket first
+3. due fixed-bucket questions, shortest bucket first
 4. unseen questions
 
-Questions marked for review are skipped entirely. Mastery questions are ignored for now.
+Review-flagged questions are skipped. `mastery` questions are not served.
 
-## State summary
+## States
 
-- `unseen`: never answered
-- `hot0`: answered incorrectly and needs immediate follow-up
-- `hot1`: answered correctly once after `hot0`
-- `hot1_sit_out`: a `hot1` question that must miss one full quiz before it can be shown again
-- fixed buckets: `1h`, `3h`, `6h`, `12h`, `1d`, `3d`, `7d`, `14d`, `30d`, `60d` (`1h` is the lowest fixed bucket)
-- `mastery`: no longer served by the scheduler
+- `unseen`
+- `hot0`: wrong and immediately eligible again
+- `hot1`: right after `hot0`, but only after sitting out one full quiz
+- fixed buckets: `1h`, `3h`, `6h`, `12h`, `1d`, `3d`, `7d`, `14d`, `30d`, `60d`
+- `mastery`
 
-## Transitions
+`hot1_sit_out` still exists internally, but only as the implementation detail for that one-quiz gap between `hot0` and `hot1`.
 
-- `unseen` + wrong -> `hot0`
+For fixed buckets `1d` and above, availability starts at midnight on the due day in the configured app timezone. Sub-day buckets still use exact elapsed time.
+
+## Rules
+
 - `unseen` + correct -> `mastery`
-- `hot0` + correct -> `hot1`
-- unseen-origin `hot1` skips the sit-out and can be served again in the very next quiz
-- non-unseen `hot1` in the immediately preceding quiz -> `hot1_sit_out`
-- `hot1` + correct -> shortest bucket, or back to its remembered bucket, once it is served again
+- any wrong answer -> `hot0`
+- repeated wrong answers from `hot0` stay in `hot0`
+- `hot0` + correct -> sit out one full quiz, then become `hot1`
 - `hot1` + wrong -> `hot0`
-- bucketed question + correct -> next longer bucket
+- `hot1` + correct from `unseen` -> `1h`
+- `hot1` + correct from a fixed bucket with one wrong in the cycle -> same bucket
+- `hot1` + correct from a fixed bucket with more than one wrong in the cycle -> one bucket lower
+- bucketed question + immediate correct -> next longer bucket
 - highest bucket + correct -> `mastery`
-- `1h` + wrong -> `hot0`
-- higher bucket + first wrong -> wait one full quiz, then retry from that same bucket
-- bucket retry + correct -> back to the original bucket
-- bucket retry + wrong -> `hot0`
-
-If a question came from a bucket, then later recovered out of hotness:
-
-- one failure in that retry cycle -> return to the original bucket
-- more than one failure after the retry was served -> return one bucket lower
-- the shortest bucket stays at the shortest bucket
-
-This means a miss from the lowest fixed bucket goes back into hot recovery immediately and can reappear in every quiz until answered correctly. Unseen-origin recovery is even more aggressive: once the learner gets the first recovery answer right, the question is still served again immediately for confirmation instead of sitting out one quiz.
+- multiple-wrong recovery can only drop one bucket
+- `1h` never drops below `1h`
 
 Partial credit counts as wrong for scheduling. Final question order inside a quiz is still randomized after selection.

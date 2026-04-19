@@ -338,9 +338,62 @@ const dayInMs = 24 * 60 * 60 * 1000;
 const hourInMs = 60 * 60 * 1000;
 const hourlyDetailWindowCount = 24;
 const weeklyDetailWindowCount = 52;
+const zonedDatePartFormatters = new Map<string, Intl.DateTimeFormat>();
 
 function isFixedRetryBucket(logicalBucket: QuestionRow['schedule']['logical_bucket']): logicalBucket is (typeof fixedRetryBucketLabels)[number] {
   return fixedRetryBuckets.has(logicalBucket as (typeof fixedRetryBucketLabels)[number]);
+}
+
+type ZonedDateParts = {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+};
+
+function zonedDatePartFormatter(timeZone: string): Intl.DateTimeFormat {
+  const cached = zonedDatePartFormatters.get(timeZone);
+  if (cached) {
+    return cached;
+  }
+
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23'
+  });
+  zonedDatePartFormatters.set(timeZone, formatter);
+  return formatter;
+}
+
+function zonedDateParts(value: Date, timeZone: string): ZonedDateParts {
+  const parts = zonedDatePartFormatter(timeZone).formatToParts(value);
+  const values = Object.fromEntries(parts.filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]));
+  return {
+    year: Number(values.year),
+    month: Number(values.month),
+    day: Number(values.day),
+    hour: Number(values.hour),
+    minute: Number(values.minute)
+  };
+}
+
+function zonedDayNumber(value: Date, timeZone: string): number {
+  const parts = zonedDateParts(value, timeZone);
+  return Math.floor(Date.UTC(parts.year, parts.month - 1, parts.day) / dayInMs);
+}
+
+function dayNumberDate(dayNumber: number): Date {
+  return new Date(dayNumber * dayInMs);
+}
+
+function formatCalendarDay(dayNumber: number, options: Intl.DateTimeFormatOptions): string {
+  return dayNumberDate(dayNumber).toLocaleDateString(undefined, { ...options, timeZone: 'UTC' });
 }
 
 export function buildRecoveryStageGraph(questions: QuestionRow[]) {
@@ -441,8 +494,8 @@ function stageDueMatrixColumnKey(logicalBucket: QuestionRow['schedule']['logical
   }
 }
 
-function formatLongDate(value: Date): string {
-  return value.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+function formatLongDate(dayNumber: number): string {
+  return formatCalendarDay(dayNumber, { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
 function heatmapCellFill(count: number, maxCount: number): string {
@@ -462,22 +515,21 @@ function heatmapCellTextColor(count: number, maxCount: number): string {
   return count / maxCount >= 0.4 ? '#f8fafc' : 'rgba(15, 23, 42, 0.9)';
 }
 
-export function buildStageDueMatrixGraph(questions: QuestionRow[], referenceTime: Date = new Date()) {
+export function buildStageDueMatrixGraph(questions: QuestionRow[], referenceTime: Date = new Date(), timeZone = 'UTC') {
   const reference = new Date(referenceTime);
-  const referenceDayStart = startOfLocalDay(reference);
+  const referenceDayNumber = zonedDayNumber(reference, timeZone);
   const columnDefinitions = stageDueMatrixColumnDefinitions.map((column, index) => ({
     ...column,
     index
   }));
   const rowDefinitions = Array.from({ length: stageDueMatrixDayCount }, (_, dayOffset) => {
-    const dayStart = new Date(referenceDayStart);
-    dayStart.setDate(referenceDayStart.getDate() + dayOffset);
+    const dayNumber = referenceDayNumber + dayOffset;
     return {
       key: `day-${dayOffset}`,
       dayOffset,
-      dayStart,
-      label: dayOffset === 0 ? 'Today' : formatShortDate(dayStart),
-      fullLabel: dayOffset === 0 ? `Today (${formatLongDate(dayStart)})` : formatLongDate(dayStart)
+      dayNumber,
+      label: dayOffset === 0 ? 'Today' : formatCalendarDay(dayNumber, { month: 'short', day: 'numeric' }),
+      fullLabel: dayOffset === 0 ? `Today (${formatLongDate(dayNumber)})` : formatLongDate(dayNumber)
     };
   });
   const counts = Array.from({ length: rowDefinitions.length }, () =>
@@ -495,20 +547,18 @@ export function buildStageDueMatrixGraph(questions: QuestionRow[], referenceTime
       continue;
     }
 
+    const dueAt = parseRetryDueAt(question.schedule.next_due_at);
+    if (!dueAt) {
+      continue;
+    }
+
     let rowIndex = 0;
-    if (!question.schedule.retry_pending) {
-      const dueAt = parseRetryDueAt(question.schedule.next_due_at);
-      if (!dueAt) {
+    const dayOffset = zonedDayNumber(dueAt, timeZone) - referenceDayNumber;
+    if (dayOffset > 0) {
+      if (dayOffset >= rowDefinitions.length) {
         continue;
       }
-
-      const dayOffset = localDayOffset(dueAt, referenceDayStart);
-      if (dayOffset > 0) {
-        if (dayOffset >= rowDefinitions.length) {
-          continue;
-        }
-        rowIndex = dayOffset;
-      }
+      rowIndex = dayOffset;
     }
 
     counts[rowIndex]![columnIndex] += 1;
@@ -646,21 +696,10 @@ export function buildAuxiliaryStageGraph(questions: QuestionRow[]) {
   };
 }
 
-function startOfLocalDay(value: Date): Date {
-  const date = new Date(value);
-  date.setHours(0, 0, 0, 0);
-  return date;
-}
-
 function startOfLocalHour(value: Date): Date {
   const date = new Date(value);
   date.setMinutes(0, 0, 0);
   return date;
-}
-
-function localDayOffset(target: Date, referenceDayStart: Date): number {
-  const targetDayStart = startOfLocalDay(target);
-  return Math.round((targetDayStart.getTime() - referenceDayStart.getTime()) / dayInMs);
 }
 
 function parseRetryDueAt(value: string | null | undefined): Date | null {
@@ -673,14 +712,12 @@ function parseRetryDueAt(value: string | null | undefined): Date | null {
 
 function classifyRetryEligibilityQuestion(
   question: QuestionRow,
-  referenceDayStart: Date
+  referenceDayNumber: number,
+  timeZone: string
 ): RetryEligibilityEntry | null {
   const logicalBucket = question.schedule.logical_bucket;
   if (!isFixedRetryBucket(logicalBucket)) {
     return null;
-  }
-  if (question.schedule.retry_pending) {
-    return { dueAt: null, category: 'lt1' };
   }
 
   const dueAt = parseRetryDueAt(question.schedule.next_due_at);
@@ -688,7 +725,7 @@ function classifyRetryEligibilityQuestion(
     return null;
   }
 
-  const dayOffset = localDayOffset(dueAt, referenceDayStart);
+  const dayOffset = zonedDayNumber(dueAt, timeZone) - referenceDayNumber;
   if (dayOffset <= 0) {
     return { dueAt, category: 'lt1' };
   }
@@ -698,18 +735,18 @@ function classifyRetryEligibilityQuestion(
   return { dueAt, category: 'gt7' };
 }
 
-function retryEligibilityEntries(questions: QuestionRow[], referenceTime: Date): RetryEligibilityEntry[] {
-  const referenceDayStart = startOfLocalDay(referenceTime);
+function retryEligibilityEntries(questions: QuestionRow[], referenceTime: Date, timeZone: string): RetryEligibilityEntry[] {
+  const referenceDayNumber = zonedDayNumber(referenceTime, timeZone);
   return questions
-    .map((question) => classifyRetryEligibilityQuestion(question, referenceDayStart))
+    .map((question) => classifyRetryEligibilityQuestion(question, referenceDayNumber, timeZone))
     .filter((entry): entry is RetryEligibilityEntry => entry !== null);
 }
 
-export function buildRetryEligibilityGraph(questions: QuestionRow[], referenceTime: Date = new Date()) {
+export function buildRetryEligibilityGraph(questions: QuestionRow[], referenceTime: Date = new Date(), timeZone = 'UTC') {
   const reference = new Date(referenceTime);
   const counts = Array.from({ length: retryEligibilityDayDefinitions.length }, () => 0);
 
-  for (const entry of retryEligibilityEntries(questions, reference)) {
+  for (const entry of retryEligibilityEntries(questions, reference, timeZone)) {
     const index = retryEligibilityDayDefinitions.findIndex((day) => day.key === entry.category);
     if (index >= 0) {
       counts[index] += 1;
@@ -766,12 +803,16 @@ function formatDayRangeLabel(startTime: Date, endTime: Date): string {
   })} ${formatTwentyFourHourLabel(endTime)}`;
 }
 
-export function buildRetryEligibilityHourlyGraph(questions: QuestionRow[], referenceTime: Date = new Date()) {
+export function buildRetryEligibilityHourlyGraph(
+  questions: QuestionRow[],
+  referenceTime: Date = new Date(),
+  timeZone = 'UTC'
+) {
   const reference = new Date(referenceTime);
   const referenceHourStart = startOfLocalHour(reference);
   const counts = Array.from({ length: hourlyDetailWindowCount }, () => 0);
 
-  for (const entry of retryEligibilityEntries(questions, reference)) {
+  for (const entry of retryEligibilityEntries(questions, reference, timeZone)) {
     if (entry.category !== 'lt1') {
       continue;
     }
@@ -832,11 +873,15 @@ function formatShortDate(value: Date): string {
   return value.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-export function buildRetryEligibilityLongRangeGraph(questions: QuestionRow[], referenceTime: Date = new Date()) {
+export function buildRetryEligibilityLongRangeGraph(
+  questions: QuestionRow[],
+  referenceTime: Date = new Date(),
+  timeZone = 'UTC'
+) {
   const reference = new Date(referenceTime);
   const counts = Array.from({ length: weeklyDetailWindowCount }, () => 0);
 
-  for (const entry of retryEligibilityEntries(questions, reference)) {
+  for (const entry of retryEligibilityEntries(questions, reference, timeZone)) {
     if (entry.category !== 'gt7' || !entry.dueAt) {
       continue;
     }
@@ -890,19 +935,18 @@ export function buildRetryEligibilityLongRangeGraph(questions: QuestionRow[], re
   };
 }
 
-export function buildFirstSeenGraph(questions: QuestionRow[], referenceTime: Date = new Date()) {
+export function buildFirstSeenGraph(questions: QuestionRow[], referenceTime: Date = new Date(), timeZone = 'UTC') {
   const reference = new Date(referenceTime);
-  const referenceDayStart = startOfLocalDay(reference);
+  const referenceDayNumber = zonedDayNumber(reference, timeZone);
   const dayDefinitions = Array.from({ length: 7 }, (_, index) => {
     const dayOffset = 6 - index;
-    const dayStart = new Date(referenceDayStart);
-    dayStart.setDate(referenceDayStart.getDate() - dayOffset);
+    const dayNumber = referenceDayNumber - dayOffset;
     return {
       key: `day-${index}`,
-      label: dayStart.toLocaleDateString(undefined, { weekday: 'short' }),
-      fullLabel: dayStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+      label: formatCalendarDay(dayNumber, { weekday: 'short' }),
+      fullLabel: formatCalendarDay(dayNumber, { month: 'short', day: 'numeric' }),
       fillColor: `hsl(${170 + index * 8}, 74%, ${62 - index * 3}%)`,
-      dayStart
+      dayNumber
     };
   });
   const counts = Array.from({ length: dayDefinitions.length }, () => 0);
@@ -917,7 +961,7 @@ export function buildFirstSeenGraph(questions: QuestionRow[], referenceTime: Dat
       continue;
     }
 
-    const daysAgo = -localDayOffset(firstAskedAt, referenceDayStart);
+    const daysAgo = referenceDayNumber - zonedDayNumber(firstAskedAt, timeZone);
     if (daysAgo < 0 || daysAgo >= dayDefinitions.length) {
       continue;
     }

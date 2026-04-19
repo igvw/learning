@@ -15,7 +15,6 @@ type ScheduleBucket = Literal[
     "hot1_sit_out",
     "due_review",
     "cooling",
-    "bucket_retry_wait",
     "unseen",
     "mastery",
 ]
@@ -304,7 +303,6 @@ class QuestionScheduleOut(BaseModel):
     interval_step: int | None = None
     last_incorrect_at: str | None = None
     next_due_at: str | None = None
-    retry_pending: bool = False
 
 
 class QuestionRowOut(BaseModel):
@@ -332,6 +330,7 @@ class QuestionRowOut(BaseModel):
 
 
 class StatsResponseOut(BaseModel):
+    schedule_timezone: str
     summary: StatsSummaryOut
     recent_sessions: list[RecentSessionOut]
     questions: list[QuestionRowOut]

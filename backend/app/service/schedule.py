@@ -4,7 +4,8 @@ from typing import Any
 
 from ..config import FULL_CREDIT_TOLERANCE, SCHEDULE_INTERVALS
 from ..database import DatabaseConnection
-from .time_utils import add_interval_to_timestamp, is_full_credit, parse_iso_timestamp
+from ..settings import schedule_timezone
+from .time_utils import is_full_credit, parse_iso_timestamp, schedule_due_at
 
 
 def _review_flags_by_question(
@@ -104,6 +105,7 @@ def _bucket_step_after_hot_recovery(origin_step: int | None, failures_after_buck
 
 
 def _derive_schedule_state_from_attempts(attempts: list[dict[str, Any]]) -> dict[str, Any]:
+    app_schedule_timezone = schedule_timezone()
     state: dict[str, Any] = {
         "bucket": "unseen",
         "recovery_streak": None,
@@ -113,9 +115,8 @@ def _derive_schedule_state_from_attempts(attempts: list[dict[str, Any]]) -> dict
         "next_due_at": None,
         "last_answered_at": None,
         "last_session_id": None,
-        "retry_pending": False,
         "bucket_origin_step": None,
-        "failures_after_bucket_retry": 0,
+        "recovery_wrong_count": 0,
     }
 
     for attempt in attempts:
@@ -147,9 +148,8 @@ def _derive_schedule_state_from_attempts(attempts: list[dict[str, Any]]) -> dict
                         "next_due_at": None,
                         "last_answered_at": answered_at,
                         "last_session_id": session_id,
-                        "retry_pending": False,
                         "bucket_origin_step": None,
-                        "failures_after_bucket_retry": 0,
+                        "recovery_wrong_count": 0,
                     }
                 )
             continue
@@ -168,9 +168,8 @@ def _derive_schedule_state_from_attempts(attempts: list[dict[str, Any]]) -> dict
                         "next_due_at": None,
                         "last_answered_at": answered_at,
                         "last_session_id": session_id,
-                        "retry_pending": False,
                         "bucket_origin_step": None,
-                        "failures_after_bucket_retry": 0,
+                        "recovery_wrong_count": 0,
                     }
                 )
             continue
@@ -188,9 +187,8 @@ def _derive_schedule_state_from_attempts(attempts: list[dict[str, Any]]) -> dict
                             "last_answered_at": answered_at,
                             "last_session_id": session_id,
                             "next_due_at": None,
-                            "retry_pending": False,
                             "bucket_origin_step": None,
-                            "failures_after_bucket_retry": 0,
+                            "recovery_wrong_count": 0,
                         }
                     )
                 else:
@@ -203,64 +201,15 @@ def _derive_schedule_state_from_attempts(attempts: list[dict[str, Any]]) -> dict
                             "interval_step": next_step,
                             "last_answered_at": answered_at,
                             "last_session_id": session_id,
-                            "next_due_at": add_interval_to_timestamp(answered_at, SCHEDULE_INTERVALS[next_step][1]),
-                            "retry_pending": False,
+                            "next_due_at": schedule_due_at(
+                                answered_at,
+                                SCHEDULE_INTERVALS[next_step][1],
+                                timezone=app_schedule_timezone,
+                            ),
                             "bucket_origin_step": None,
-                            "failures_after_bucket_retry": 0,
+                            "recovery_wrong_count": 0,
                         }
                     )
-            else:
-                if current_step == 0:
-                    state.update(
-                        {
-                            "bucket": "hot0",
-                            "recovery_streak": 0,
-                            "recovery_origin": "bucket",
-                            "interval_step": None,
-                            "last_incorrect_at": answered_at,
-                            "last_answered_at": answered_at,
-                            "last_session_id": session_id,
-                            "next_due_at": None,
-                            "retry_pending": False,
-                            "bucket_origin_step": current_step,
-                            "failures_after_bucket_retry": 1,
-                        }
-                    )
-                else:
-                    state.update(
-                        {
-                            "bucket": "bucket_retry_wait",
-                            "recovery_streak": None,
-                            "recovery_origin": None,
-                            "interval_step": current_step,
-                            "last_incorrect_at": answered_at,
-                            "last_answered_at": answered_at,
-                            "last_session_id": session_id,
-                            "next_due_at": None,
-                            "retry_pending": True,
-                            "bucket_origin_step": current_step,
-                            "failures_after_bucket_retry": 0,
-                        }
-                    )
-            continue
-
-        if bucket == "bucket_retry_wait":
-            origin_step = int(state["bucket_origin_step"])
-            if is_correct:
-                state.update(
-                    {
-                        "bucket": "cooling",
-                        "recovery_streak": None,
-                        "recovery_origin": None,
-                        "interval_step": origin_step,
-                        "last_answered_at": answered_at,
-                        "last_session_id": session_id,
-                        "next_due_at": add_interval_to_timestamp(answered_at, SCHEDULE_INTERVALS[origin_step][1]),
-                        "retry_pending": False,
-                        "bucket_origin_step": None,
-                        "failures_after_bucket_retry": 0,
-                    }
-                )
             else:
                 state.update(
                     {
@@ -272,9 +221,8 @@ def _derive_schedule_state_from_attempts(attempts: list[dict[str, Any]]) -> dict
                         "last_answered_at": answered_at,
                         "last_session_id": session_id,
                         "next_due_at": None,
-                        "retry_pending": True,
-                        "bucket_origin_step": origin_step,
-                        "failures_after_bucket_retry": 1,
+                        "bucket_origin_step": current_step,
+                        "recovery_wrong_count": 1,
                     }
                 )
             continue
@@ -290,9 +238,9 @@ def _derive_schedule_state_from_attempts(attempts: list[dict[str, Any]]) -> dict
                     }
                 )
             else:
-                failures = state["failures_after_bucket_retry"]
-                if state["bucket_origin_step"] is not None and failures > 0:
-                    failures += 1
+                wrong_count = state["recovery_wrong_count"]
+                if state["bucket_origin_step"] is not None and state["recovery_origin"] == "bucket":
+                    wrong_count += 1
                 state.update(
                     {
                         "bucket": "hot0",
@@ -300,7 +248,7 @@ def _derive_schedule_state_from_attempts(attempts: list[dict[str, Any]]) -> dict
                         "last_incorrect_at": answered_at,
                         "last_answered_at": answered_at,
                         "last_session_id": session_id,
-                        "failures_after_bucket_retry": failures,
+                        "recovery_wrong_count": wrong_count,
                     }
                 )
             continue
@@ -309,7 +257,7 @@ def _derive_schedule_state_from_attempts(attempts: list[dict[str, Any]]) -> dict
             if is_correct:
                 resolved_step = _bucket_step_after_hot_recovery(
                     state["bucket_origin_step"],
-                    int(state["failures_after_bucket_retry"] or 0),
+                    int(state["recovery_wrong_count"] or 0),
                 )
                 state.update(
                     {
@@ -319,16 +267,19 @@ def _derive_schedule_state_from_attempts(attempts: list[dict[str, Any]]) -> dict
                         "interval_step": resolved_step,
                         "last_answered_at": answered_at,
                         "last_session_id": session_id,
-                        "next_due_at": add_interval_to_timestamp(answered_at, SCHEDULE_INTERVALS[resolved_step][1]),
-                        "retry_pending": False,
+                        "next_due_at": schedule_due_at(
+                            answered_at,
+                            SCHEDULE_INTERVALS[resolved_step][1],
+                            timezone=app_schedule_timezone,
+                        ),
                         "bucket_origin_step": None,
-                        "failures_after_bucket_retry": 0,
+                        "recovery_wrong_count": 0,
                     }
                 )
             else:
-                failures = state["failures_after_bucket_retry"]
-                if state["bucket_origin_step"] is not None and failures > 0:
-                    failures += 1
+                wrong_count = state["recovery_wrong_count"]
+                if state["bucket_origin_step"] is not None and state["recovery_origin"] == "bucket":
+                    wrong_count += 1
                 state.update(
                     {
                         "bucket": "hot0",
@@ -337,7 +288,7 @@ def _derive_schedule_state_from_attempts(attempts: list[dict[str, Any]]) -> dict
                         "last_answered_at": answered_at,
                         "last_session_id": session_id,
                         "next_due_at": None,
-                        "failures_after_bucket_retry": failures,
+                        "recovery_wrong_count": wrong_count,
                     }
                 )
             continue
@@ -359,20 +310,12 @@ def _schedule_snapshot_from_attempts(
             "last_incorrect_at": None,
             "next_due_at": None,
             "last_answered_at": None,
-            "retry_pending": False,
         }
 
     state = _derive_schedule_state_from_attempts(attempts)
     bucket = state["bucket"]
-    if (
-        bucket == "hot1"
-        and latest_scored_session_id is not None
-        and state.get("last_session_id") == latest_scored_session_id
-        and state.get("recovery_origin") != "unseen"
-    ):
+    if bucket == "hot1" and latest_scored_session_id is not None and state.get("last_session_id") == latest_scored_session_id:
         bucket = "hot1_sit_out"
-    elif bucket == "bucket_retry_wait" and latest_scored_session_id is not None and state.get("last_session_id") != latest_scored_session_id:
-        bucket = "due_review"
     elif bucket == "cooling" and state["next_due_at"] is not None and parse_iso_timestamp(state["next_due_at"]) <= parse_iso_timestamp(now):
         bucket = "due_review"
 
@@ -384,7 +327,6 @@ def _schedule_snapshot_from_attempts(
         "last_incorrect_at": state["last_incorrect_at"],
         "next_due_at": state["next_due_at"],
         "last_answered_at": state["last_answered_at"],
-        "retry_pending": bool(state.get("retry_pending", False)),
         "last_session_id": state.get("last_session_id"),
     }
 
@@ -565,7 +507,6 @@ def _bucketed_question_selection(
     due_review.sort(
         key=lambda row: (
             row.get("interval_step") if row.get("interval_step") is not None else len(SCHEDULE_INTERVALS),
-            0 if row.get("retry_pending") else 1,
             _iso_timestamp_sort_value(row.get("next_due_at")),
             row["rank"],
             row["question_id"],

@@ -2,6 +2,7 @@ import os
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import quote
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -16,6 +17,7 @@ DEFAULT_POSTGRES_HOST = "127.0.0.1"
 DEFAULT_POSTGRES_PORT = "5432"
 DEFAULT_AUTH_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30
 DEFAULT_DEMO_SESSION_TTL_SECONDS = 60 * 60 * 8
+DEFAULT_SCHEDULE_TIMEZONE = "UTC"
 _SETTINGS_ENV_NAMES = (
     "LEARNING_APP_DEV_ORIGIN",
     "LEARNING_APP_ENV",
@@ -35,6 +37,7 @@ _SETTINGS_ENV_NAMES = (
     "LEARNING_APP_AUTH_COOKIE_SECURE",
     "LEARNING_APP_AUTH_SESSION_TTL_SECONDS",
     "LEARNING_APP_DEMO_SESSION_TTL_SECONDS",
+    "LEARNING_APP_SCHEDULE_TIMEZONE",
 )
 
 
@@ -59,6 +62,7 @@ class AppSettings(BaseSettings):
     learning_app_auth_cookie_secure: bool = False
     learning_app_auth_session_ttl_seconds: int | None = None
     learning_app_demo_session_ttl_seconds: int | None = None
+    learning_app_schedule_timezone: str | None = None
 
     @field_validator(
         "learning_app_dev_origin",
@@ -75,6 +79,7 @@ class AppSettings(BaseSettings):
         "learning_app_bootstrap_admin_display_name",
         "learning_app_bootstrap_admin_password",
         "learning_app_auth_cookie_name",
+        "learning_app_schedule_timezone",
         mode="before",
     )
     @classmethod
@@ -83,6 +88,17 @@ class AppSettings(BaseSettings):
             return value
         cleaned = value.strip()
         return cleaned or None
+
+    @field_validator("learning_app_schedule_timezone")
+    @classmethod
+    def validate_schedule_timezone(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        try:
+            ZoneInfo(value)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError(f"Unknown schedule timezone: {value}") from exc
+        return value
 
 
 def _settings_cache_key() -> tuple[tuple[str, str | None], ...]:
@@ -198,3 +214,11 @@ def auth_session_ttl_seconds() -> int:
 def demo_session_ttl_seconds() -> int:
     value = _settings().learning_app_demo_session_ttl_seconds
     return max(value or DEFAULT_DEMO_SESSION_TTL_SECONDS, 60)
+
+
+def schedule_timezone_name() -> str:
+    return _settings().learning_app_schedule_timezone or DEFAULT_SCHEDULE_TIMEZONE
+
+
+def schedule_timezone() -> ZoneInfo:
+    return ZoneInfo(schedule_timezone_name())

@@ -11,7 +11,6 @@ export type ScheduleBucket =
   | 'hot1_sit_out'
   | 'due_review'
   | 'cooling'
-  | 'bucket_retry_wait'
   | 'unseen'
   | 'mastery';
 export type LogicalBucket =
@@ -169,7 +168,6 @@ export interface QuestionSchedule {
   interval_step: number | null;
   last_incorrect_at: string | null;
   next_due_at: string | null;
-  retry_pending: boolean;
 }
 
 export interface QuestionRow {
@@ -201,6 +199,7 @@ export interface QuestionRow {
 }
 
 export interface StatsResponse {
+  schedule_timezone: string;
   summary: {
     total_questions: number;
     reviewed_questions: number;

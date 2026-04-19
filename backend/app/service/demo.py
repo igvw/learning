@@ -2,6 +2,7 @@ import copy
 import itertools
 from typing import Any
 
+from ..settings import schedule_timezone_name
 from .questions import accepted_answer_groups, canonical_answers, default_answers, public_type_config
 from .quiz import evaluate_answers
 
@@ -53,8 +54,7 @@ _DEMO_QUESTIONS = [
             "recovery_streak": None,
             "interval_step": 4,
             "last_incorrect_at": None,
-            "next_due_at": "2030-01-01T09:00:00+00:00",
-            "retry_pending": False,
+            "next_due_at": "2030-01-01T00:00:00+00:00",
         },
     },
     {
@@ -75,7 +75,6 @@ _DEMO_QUESTIONS = [
             "interval_step": 1,
             "last_incorrect_at": "2030-01-01T07:00:00+00:00",
             "next_due_at": "2030-01-01T08:00:00+00:00",
-            "retry_pending": True,
         },
     },
     {
@@ -95,8 +94,7 @@ _DEMO_QUESTIONS = [
             "recovery_streak": None,
             "interval_step": 6,
             "last_incorrect_at": None,
-            "next_due_at": "2030-01-07T10:00:00+00:00",
-            "retry_pending": False,
+            "next_due_at": "2030-01-07T00:00:00+00:00",
         },
     },
     {
@@ -116,8 +114,7 @@ _DEMO_QUESTIONS = [
             "recovery_streak": None,
             "interval_step": 8,
             "last_incorrect_at": None,
-            "next_due_at": "2030-02-01T12:00:00+00:00",
-            "retry_pending": False,
+            "next_due_at": "2030-02-01T00:00:00+00:00",
         },
     },
 ]
@@ -275,6 +272,7 @@ def get_demo_stats(*, actor_key: str, module_id: int | None, review_only: bool) 
             "total_possible": 17.0,
             "accuracy": 11.0 / 17.0,
         },
+        "schedule_timezone": schedule_timezone_name(),
         "recent_sessions": copy.deepcopy(_DEMO_RECENT_SESSIONS),
         "questions": questions,
     }

@@ -31,8 +31,8 @@
         </div>
 
         <p class="muted-copy retry-detail-copy">
-          The first chart redistributes the current <code>&lt;1</code> group across the next 24 local clock hours. The second redistributes
-          the current <code>&gt;7</code> group across rolling 7-day windows for the next year.
+          These charts break fixed-bucket due times into the next 24 local clock hours for the current <code>&lt;1</code> group and rolling
+          7-day windows for the current <code>&gt;7</code> group.
         </p>
 
         <div class="retry-detail-stack">
@@ -40,12 +40,12 @@
             <div class="subsection-header">
               <div>
                 <h3>&lt;1 by hour</h3>
-                <p class="muted-copy">{hourlyTotal} questions currently land in the main graph&apos;s <code>&lt;1</code> bucket.</p>
+                <p class="muted-copy">{hourlyTotal} fixed-bucket questions currently land in the main graph&apos;s <code>&lt;1</code> bucket.</p>
               </div>
             </div>
 
             {#if hourlyTotal === 0}
-              <p class="muted-copy">No questions are currently eligible within the main graph&apos;s <code>&lt;1</code> group.</p>
+              <p class="muted-copy">No fixed-bucket questions are currently due within the main graph&apos;s <code>&lt;1</code> group.</p>
             {:else}
               <div class="session-graph-shell">
                 <svg
@@ -89,7 +89,7 @@
             <div class="subsection-header">
               <div>
                 <h3>&gt;7 by week</h3>
-                <p class="muted-copy">{longRangeTotal} questions currently land in the main graph&apos;s <code>&gt;7</code> bucket.</p>
+                <p class="muted-copy">{longRangeTotal} fixed-bucket questions currently land in the main graph&apos;s <code>&gt;7</code> bucket.</p>
               </div>
             </div>
 

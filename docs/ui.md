@@ -72,7 +72,7 @@ Current behavior:
 - spaced-repetition stages graph
 - entry-state graph
 - retry-eligibility graph
-- first-time questions answered by day over the last 7 local days
+- first-time questions answered by day over the last 7 app-timezone days
 - sortable question table
 - `Review only` checkbox that filters that same table between non-review and review-flagged rows
 - floating create-question action
@@ -96,9 +96,9 @@ Current table behavior:
   `Latest quiz performance` with `Entry states` on the top row, then `Spaced repetition stages`, `Retry eligibility`, and `First-time questions answered` below
 - `Spaced repetition stages` shows the full fixed ladder through `60d`
 - clicking `Spaced repetition stages` opens a detail overlay with a due-day heatmap:
-  bucket columns `<1d`, `1d`, `3d`, `7d`, `14d`, `30d`, `60d`; day rows from `Today` through the latest scheduled fixed-stage day within the next 60 local days; overdue items collapse into `Today`
-- `Retry eligibility` groups immediate availability into `<1`, keeps day buckets `1` through `7`, and groups longer availability into `>7`
-- clicking `Retry eligibility` opens a detail overlay with the next 24 local clock-hour buckets for the current `<1` group, shown in 24-hour time, and rolling weekly windows for the current `>7` group
+  bucket columns `<1d`, `1d`, `3d`, `7d`, `14d`, `30d`, `60d`; day rows from `Today` through the latest scheduled fixed-stage day within the next 60 app-timezone days; overdue items collapse into `Today`
+- `Retry eligibility` groups fixed-bucket due times into `<1`, day buckets `1` through `7`, and `>7`
+- clicking `Retry eligibility` opens a detail overlay with the next 24 clock-hour buckets for the current `<1` group, shown in 24-hour time, and rolling weekly windows for the current `>7` group
 - review rows stay orange when shown in the filtered table
 - hot rows are shaded red in two intensities in the main table
 - logical bucket and hotness are separated intentionally

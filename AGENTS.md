@@ -21,3 +21,9 @@ Documentation edit rule:
 - `docs/question-markup-llm-prompt.md` must remain standalone and copy-pasteable.
 - Do not make `docs/question-markup-llm-prompt.md` back-reference other repo docs or tell an external LLM to inspect this repo.
 - Keep `docs/question-markup-llm-prompt.md` focused on transforming arbitrary source input into valid QML output.
+
+Cleanup and deprecation rule:
+
+- When a change replaces or deprecates existing behavior, remove the old path instead of preserving dead compatibility code unless there is an explicit migration requirement.
+- Remove stale tests, flags, helpers, and UI copy that only exist for deprecated behavior.
+- Make small, focused doc updates when behavior changes so the owning docs stay current without broad doc churn.

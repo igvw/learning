@@ -44,4 +44,4 @@ LEARNING_APP_TEST_DATABASE_URL=postgresql://learning:learning@127.0.0.1:5432/lea
   ./.venv/bin/python -m unittest discover -s tests/backend -v
 ```
 
-For structural editing guidance, see [Architecture](architecture.md) and the short task playbooks under `docs/playbooks/`.
+For structural editing guidance, see [Architecture](architecture.md) and the subtree `AGENTS.md` files in the relevant area of the repo.

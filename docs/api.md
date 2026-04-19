@@ -249,6 +249,7 @@ Current frontend behavior note:
 
 The response contains:
 
+- `schedule_timezone`
 - `summary`
 - `recent_sessions`
 - `questions`
@@ -273,7 +274,8 @@ Current schedule fields include:
 - `interval_step`
 - `last_incorrect_at`
 - `next_due_at`
-- `retry_pending`
+
+`next_due_at` uses exact elapsed timestamps for `<1d` buckets. For `1d` and above, it is the start of the due calendar day in the configured app schedule timezone.
 
 ## Questions
 

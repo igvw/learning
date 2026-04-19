@@ -103,8 +103,7 @@ describe('EditorDrawer', () => {
             recovery_streak: 0,
             interval_step: 0,
             last_incorrect_at: '2026-04-04T08:00:00Z',
-            next_due_at: null,
-            retry_pending: false
+            next_due_at: null
           },
           recent_incorrect_answers: [
             {
@@ -191,8 +190,7 @@ describe('EditorDrawer', () => {
             recovery_streak: 0,
             interval_step: 0,
             last_incorrect_at: '2026-04-05T08:00:00Z',
-            next_due_at: null,
-            retry_pending: false
+            next_due_at: null
           },
           recent_incorrect_answers: []
         }),
@@ -320,7 +318,7 @@ describe('AdminPage', () => {
     expect(await screen.findByText('Module ready: nursing/safety_checks.')).toBeTruthy();
 
     const confirmPasswordInputs = screen.getAllByLabelText('Confirm password');
-    await user.type(screen.getByLabelText('Handle'), 'alice');
+    await user.type(screen.getByLabelText('Username'), 'alice');
     await user.type(screen.getByLabelText('Display name'), 'Alice');
     await user.type(screen.getByLabelText('Password'), 'password123');
     await user.type(confirmPasswordInputs[0], 'password999');

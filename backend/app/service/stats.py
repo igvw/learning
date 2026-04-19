@@ -1,6 +1,7 @@
 from typing import Any
 
 from ..database import DatabaseConnection, utc_now
+from ..settings import schedule_timezone_name
 from .auth import Actor
 from .catalog import ensure_user_exists, get_scope_module_ids
 from .questions import preview_prompt
@@ -98,7 +99,6 @@ def get_stats(
                     "interval_step": schedule["interval_step"],
                     "last_incorrect_at": schedule["last_incorrect_at"],
                     "next_due_at": schedule["next_due_at"],
-                    "retry_pending": schedule["retry_pending"],
                 },
             }
         )
@@ -156,6 +156,7 @@ def get_stats(
     ]
 
     return {
+        "schedule_timezone": schedule_timezone_name(),
         "summary": {
             "total_questions": total_questions,
             "reviewed_questions": reviewed_questions,

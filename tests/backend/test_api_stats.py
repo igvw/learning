@@ -57,6 +57,7 @@ class StatsApiTests(PostgresBackendTestCase):
         stats_payload = self.get_stats_payload(user["id"], capitals["id"])
         questions_by_id = {row["question_id"]: row for row in stats_payload["questions"]}
 
+        self.assertEqual(stats_payload["schedule_timezone"], "UTC")
         self.assertEqual(questions_by_id[answered_question_id]["first_asked_at"], "2026-04-01T09:15:00Z")
         self.assertEqual(questions_by_id[answered_question_id]["last_asked_at"], "2026-04-03T10:20:00Z")
         self.assertEqual(questions_by_id[unseen_question_id]["first_asked_at"], None)

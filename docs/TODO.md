@@ -30,6 +30,7 @@ This file is the short tracker. The fuller alpha-to-beta product roadmap lives i
 
 - A/B testing
 - Alternative repetition algorithms
+- Revisit per-user schedule timezones if the app needs to support learners in different regions
 - Retention comparisons across variants
 - Bucket-structure experimentation
 - Persisted or cached schedule state if history-derived scheduling becomes a real scale bottleneck

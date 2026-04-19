@@ -33,6 +33,8 @@ The current container deployment is:
   When `true`, startup imports any missing seed content from `content/modules`. Sample `.env.example` value: `true`.
 - `LEARNING_APP_CORS_ORIGINS`
   Optional comma-separated list of allowed origins when the frontend is served from a different host.
+- `LEARNING_APP_SCHEDULE_TIMEZONE`
+  App-wide timezone used for day-scale spaced-repetition buckets and day-based stats graphs. When unset, the backend defaults to `UTC`. Hosted deployments can set this to something like `Europe/Oslo`.
 - `LEARNING_APP_BOOTSTRAP_ADMIN_HANDLE`
   Optional first-admin handle. When all three bootstrap admin vars are present and no admin exists yet, startup creates that first admin automatically.
 - `LEARNING_APP_BOOTSTRAP_ADMIN_DISPLAY_NAME`

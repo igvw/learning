@@ -95,15 +95,19 @@
   $: sessionGraph = stats ? buildSessionGraph(stats.recent_sessions) : emptySessionGraph;
   $: recoveryStageGraph = stats ? buildRecoveryStageGraph(stats.questions) : emptyRecoveryStageGraph;
   $: auxiliaryStageGraph = stats ? buildAuxiliaryStageGraph(stats.questions) : emptyAuxiliaryStageGraph;
-  $: retryEligibilityGraph = stats ? buildRetryEligibilityGraph(stats.questions) : emptyRetryEligibilityGraph;
+  $: retryEligibilityGraph = stats
+    ? buildRetryEligibilityGraph(stats.questions, new Date(), stats.schedule_timezone)
+    : emptyRetryEligibilityGraph;
   $: retryEligibilityHourlyGraph = stats
-    ? buildRetryEligibilityHourlyGraph(stats.questions)
+    ? buildRetryEligibilityHourlyGraph(stats.questions, new Date(), stats.schedule_timezone)
     : emptyRetryEligibilityHourlyGraph;
   $: retryEligibilityLongRangeGraph = stats
-    ? buildRetryEligibilityLongRangeGraph(stats.questions)
+    ? buildRetryEligibilityLongRangeGraph(stats.questions, new Date(), stats.schedule_timezone)
     : emptyRetryEligibilityLongRangeGraph;
-  $: firstSeenGraph = stats ? buildFirstSeenGraph(stats.questions) : emptyFirstSeenGraph;
-  $: stageDueMatrixGraph = stats ? buildStageDueMatrixGraph(stats.questions) : emptyStageDueMatrixGraph;
+  $: firstSeenGraph = stats ? buildFirstSeenGraph(stats.questions, new Date(), stats.schedule_timezone) : emptyFirstSeenGraph;
+  $: stageDueMatrixGraph = stats
+    ? buildStageDueMatrixGraph(stats.questions, new Date(), stats.schedule_timezone)
+    : emptyStageDueMatrixGraph;
   $: if (!stats) {
     retryDetailOpen = false;
     stageDetailOpen = false;

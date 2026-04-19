@@ -157,8 +157,8 @@
 
   <div class="admin-bar-form user-bar-form">
     <label class="field">
-      <span>Handle</span>
-      <input type="text" bind:value={userHandle} placeholder="ignazio" />
+      <span>Username</span>
+      <input type="text" bind:value={userHandle} placeholder="new-username" />
     </label>
     <label class="field">
       <span>Display name</span>

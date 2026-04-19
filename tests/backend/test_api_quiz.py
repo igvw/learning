@@ -33,7 +33,7 @@ class QuizApiTests(PostgresBackendTestCase):
         returned_ids = [item["question_id"] for item in session["items"]]
         self.assertNotIn(flagged_question_id, returned_ids)
 
-    def test_unseen_miss_then_correct_reappears_in_next_quiz_without_sit_out(self) -> None:
+    def test_unseen_miss_then_correct_sits_out_exact_next_quiz(self) -> None:
         norwegian = self.create_module_record("Norwegian Retry")
         weekdays = self.create_module_record("Weekdays Retry", norwegian["id"])
         first_question_id = self.create_question_record(
@@ -42,12 +42,12 @@ class QuizApiTests(PostgresBackendTestCase):
             [["Monday"]],
             rank=1,
         )["question_id"]
-        self.create_question_record(
+        second_question_id = self.create_question_record(
             weekdays["id"],
             "tirsdag",
             [["Tuesday"]],
             rank=2,
-        )
+        )["question_id"]
 
         user = self.create_user("alice-unseen-retry", "Alice Unseen Retry")
 
@@ -66,7 +66,7 @@ class QuizApiTests(PostgresBackendTestCase):
         self.assertTrue(second_submit["is_correct"])
 
         third_session = self.start_quiz_session(user["id"], weekdays["id"], 1)
-        self.assertEqual(third_session["items"][0]["question_id"], first_question_id)
+        self.assertEqual(third_session["items"][0]["question_id"], second_question_id)
 
     def test_answer_checking_is_case_insensitive(self) -> None:
         norwegian = self.create_module_record("Norwegian")

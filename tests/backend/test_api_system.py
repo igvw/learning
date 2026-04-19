@@ -2,6 +2,8 @@ import os
 import unittest
 from unittest.mock import patch
 
+from pydantic import ValidationError
+
 from test_support import PostgresBackendTestCase
 from backend.app.settings import (
     auth_cookie_secure,
@@ -10,6 +12,7 @@ from backend.app.settings import (
     cors_origins,
     demo_session_ttl_seconds,
     resolve_database_url,
+    schedule_timezone_name,
     seed_on_boot,
 )
 
@@ -183,3 +186,16 @@ class SettingsUnitTests(unittest.TestCase):
             clear=True,
         ):
             self.assertEqual(cors_origins(), ["https://a.example", "https://b.example"])
+
+    def test_schedule_timezone_defaults_to_utc(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(schedule_timezone_name(), "UTC")
+
+    def test_schedule_timezone_rejects_unknown_zone(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"LEARNING_APP_SCHEDULE_TIMEZONE": "Mars/Olympus"},
+            clear=True,
+        ):
+            with self.assertRaises(ValidationError):
+                schedule_timezone_name()

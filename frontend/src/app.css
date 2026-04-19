@@ -93,6 +93,18 @@ button {
   margin: 0;
 }
 
+.auth-page {
+  padding-top: clamp(1.75rem, 8vh, 4.5rem);
+}
+
+.auth-action-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
 .panel {
   background: var(--surface-panel);
   border: 1px solid rgba(148, 163, 184, 0.14);

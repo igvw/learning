@@ -111,7 +111,6 @@ export function buildQuestionSchedule(overrides: Partial<QuestionSchedule> = {})
     interval_step: null,
     last_incorrect_at: null,
     next_due_at: null,
-    retry_pending: false,
     ...overrides
   };
 }
@@ -157,6 +156,7 @@ export function buildStatsResponse(
 ): StatsResponse {
   const { summary, recent_sessions, questions, ...statsOverrides } = overrides;
   return {
+    schedule_timezone: 'UTC',
     summary: {
       total_questions: 0,
       reviewed_questions: 0,

@@ -68,12 +68,11 @@ describe('StatsPage', () => {
         interval_step: 5,
         next_due_at: localIso(2026, 3, 4, 10, 0)
       }),
-      buildRetryQuestion(6, 'seven day retry pending', {
+      buildRetryQuestion(6, 'seven day due now', {
         bucket: 'due_review',
         logical_bucket: '7d',
         interval_step: 6,
-        next_due_at: null,
-        retry_pending: true
+        next_due_at: localIso(2026, 3, 5, 10, 0)
       }),
       buildRetryQuestion(7, 'three day in two days', {
         bucket: 'cooling',
@@ -109,16 +108,14 @@ describe('StatsPage', () => {
         bucket: 'cooling',
         logical_bucket: '3d',
         interval_step: 5,
-        next_due_at: null,
-        retry_pending: false
+        next_due_at: null
       }),
       buildRetryQuestion(13, 'review', {
         bucket: 'hot0',
         logical_bucket: 'review',
         recovery_streak: 0,
         interval_step: 0,
-        next_due_at: null,
-        retry_pending: true
+        next_due_at: null
       }),
       buildRetryQuestion(14, 'mastery', {
         bucket: 'mastery',
@@ -184,7 +181,7 @@ describe('StatsPage', () => {
           bucket: 'due_review',
           logical_bucket: '7d',
           interval_step: 6,
-          retry_pending: true
+          next_due_at: localIso(2026, 3, 5, 10, 0)
         }
       }),
       buildQuestionRow({
@@ -228,8 +225,7 @@ describe('StatsPage', () => {
         review_flag: true,
         schedule: {
           bucket: 'hot0',
-          logical_bucket: 'review',
-          retry_pending: true
+          logical_bucket: 'review'
         }
       })
     ], referenceTime);
@@ -294,7 +290,29 @@ describe('StatsPage', () => {
     expect(graph.weeks.reduce((total, week) => total + week.count, 0)).toBe(2);
   });
 
-  it('builds first-time answered counts across the last 7 local days', () => {
+  it('uses the schedule timezone for retry day buckets around midnight', () => {
+    const referenceTime = new Date('2026-04-04T22:30:00Z');
+
+    const question = buildQuestionRow({
+      question_id: 1,
+      schedule: {
+        bucket: 'cooling',
+        logical_bucket: '1d',
+        interval_step: 4,
+        next_due_at: '2026-04-05T21:00:00Z'
+      }
+    });
+
+    const osloGraph = buildRetryEligibilityGraph([question], referenceTime, 'Europe/Oslo');
+    const utcGraph = buildRetryEligibilityGraph([question], referenceTime, 'UTC');
+
+    expect(osloGraph.days[0]?.count).toBe(1);
+    expect(osloGraph.days[1]?.count).toBe(0);
+    expect(utcGraph.days[0]?.count).toBe(0);
+    expect(utcGraph.days[1]?.count).toBe(1);
+  });
+
+  it('builds first-time answered counts across the last 7 schedule-timezone days', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-04-10T12:00:00Z'));
 
@@ -330,6 +348,32 @@ describe('StatsPage', () => {
     expect(graph.days.map((day) => day.count)).toEqual([1, 0, 0, 1, 0, 1, 2]);
   });
 
+  it('uses the schedule timezone for first-seen day buckets around midnight', () => {
+    const referenceTime = new Date('2026-04-04T22:30:00Z');
+    const question = buildQuestionRow({
+      question_id: 1,
+      prompt: 'question 1',
+      prompt_preview: 'question 1',
+      attempts: 1,
+      correct_percentage: 1,
+      first_asked_at: '2026-04-04T21:30:00Z',
+      last_asked_at: '2026-04-04T21:30:00Z',
+      schedule: {
+        bucket: 'cooling',
+        logical_bucket: '1h',
+        interval_step: 0
+      }
+    });
+
+    const osloGraph = buildFirstSeenGraph([question], referenceTime, 'Europe/Oslo');
+    const utcGraph = buildFirstSeenGraph([question], referenceTime, 'UTC');
+
+    expect(osloGraph.days[5]?.count).toBe(1);
+    expect(osloGraph.days[6]?.count).toBe(0);
+    expect(utcGraph.days[5]?.count).toBe(0);
+    expect(utcGraph.days[6]?.count).toBe(1);
+  });
+
   it('builds a stage due matrix and trims empty trailing days after the latest scheduled row', () => {
     const referenceTime = new Date(2026, 3, 5, 10, 30, 0);
     const localIso = (year: number, monthIndex: number, day: number, hours: number, minutes = 0): string =>
@@ -360,8 +404,7 @@ describe('StatsPage', () => {
           bucket: 'due_review',
           logical_bucket: '3d',
           interval_step: 5,
-          next_due_at: null,
-          retry_pending: true
+          next_due_at: localIso(2026, 3, 5, 10, 0)
         }
       }),
       buildQuestionRow({
@@ -420,6 +463,25 @@ describe('StatsPage', () => {
     expect(graph.cells.find((cell) => cell.rowKey === 'day-3' && cell.columnKey === '14d')?.count).toBe(1);
     expect(graph.cells.find((cell) => cell.rowKey === 'day-60' && cell.columnKey === '30d')?.count).toBe(1);
     expect(graph.cells.find((cell) => cell.rowKey === 'day-0' && cell.columnKey === '60d')?.count).toBe(0);
+  });
+
+  it('uses the schedule timezone for stage due-day rows around midnight', () => {
+    const referenceTime = new Date('2026-04-04T22:30:00Z');
+    const question = buildQuestionRow({
+      question_id: 1,
+      schedule: {
+        bucket: 'cooling',
+        logical_bucket: '1d',
+        interval_step: 4,
+        next_due_at: '2026-04-05T21:00:00Z'
+      }
+    });
+
+    const osloGraph = buildStageDueMatrixGraph([question], referenceTime, 'Europe/Oslo');
+    const utcGraph = buildStageDueMatrixGraph([question], referenceTime, 'UTC');
+
+    expect(osloGraph.cells.find((cell) => cell.rowKey === 'day-0' && cell.columnKey === '1d')?.count).toBe(1);
+    expect(utcGraph.cells.find((cell) => cell.rowKey === 'day-1' && cell.columnKey === '1d')?.count).toBe(1);
   });
 
   it('removes only trailing empty rows from the stage due matrix and keeps earlier gaps', () => {
@@ -483,8 +545,7 @@ describe('StatsPage', () => {
           bucket: 'cooling',
           logical_bucket: '30d',
           interval_step: 8,
-          next_due_at: null,
-          retry_pending: false
+          next_due_at: null
         }
       }),
       buildQuestionRow({
@@ -625,8 +686,7 @@ describe('StatsPage', () => {
             logical_bucket: 'review',
             recovery_streak: 0,
             interval_step: 0,
-            last_incorrect_at: '2026-04-03T07:00:00Z',
-            retry_pending: true
+            last_incorrect_at: '2026-04-03T07:00:00Z'
           }
         })
       ]
@@ -867,8 +927,8 @@ describe('StatsPage', () => {
             }),
             buildQuestionRow({
               question_id: 3,
-              prompt: 'retry pending',
-              prompt_preview: 'retry pending',
+              prompt: 'today due seven day',
+              prompt_preview: 'today due seven day',
               attempts: 1,
               correct_percentage: 1,
               first_asked_at: '2026-04-04T08:00:00Z',
@@ -877,8 +937,7 @@ describe('StatsPage', () => {
                 bucket: 'due_review',
                 logical_bucket: '7d',
                 interval_step: 6,
-                next_due_at: null,
-                retry_pending: true
+                next_due_at: localIso(2026, 3, 5, 10, 0)
               }
             })
           ]
@@ -943,8 +1002,7 @@ describe('StatsPage', () => {
               prompt_preview: 'review row',
               schedule: {
                 bucket: 'hot0',
-                logical_bucket: 'review',
-                retry_pending: true
+                logical_bucket: 'review'
               }
             }),
             buildQuestionRow({

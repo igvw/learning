@@ -39,19 +39,14 @@
   );
 </script>
 
-<section class="page">
+<section class="page auth-page">
   <div class="panel auth-panel">
     <div class="page-intro">
       <div>
-        <p class="eyebrow">Authentication</p>
         <h2>{bootstrapRequired ? 'Create the first admin account' : 'Sign in'}</h2>
-        <p class="muted-copy">
-          {#if bootstrapRequired}
-            Bootstrap the first admin account, then sign in normally for all further use.
-          {:else}
-            Real accounts use server-side sessions. Demo mode is ephemeral and does not save changes.
-          {/if}
-        </p>
+        {#if bootstrapRequired}
+          <p class="muted-copy">Create the first admin account to unlock the app.</p>
+        {/if}
       </div>
     </div>
 
@@ -63,11 +58,11 @@
       {#if bootstrapRequired}
         <article class="panel admin-bar-panel">
           <div class="panel-header">
-            <div><h3>Bootstrap Admin</h3></div>
+            <div><h3>Create admin account</h3></div>
           </div>
           <div class="admin-bar-form user-bar-form">
             <label class="field">
-              <span>Handle</span>
+              <span>Username</span>
               <input type="text" bind:value={bootstrapHandle} placeholder="admin" />
             </label>
             <label class="field">
@@ -94,38 +89,26 @@
         </article>
       {:else}
         <article class="panel admin-bar-panel">
-          <div class="panel-header">
-            <div><h3>Sign In</h3></div>
-          </div>
           <form class="admin-bar-form user-bar-form" on:submit|preventDefault={() => void handleLoginSubmit()}>
             <label class="field">
-              <span>Handle</span>
-              <input type="text" bind:value={handle} placeholder="ignazio" />
+              <span class="sr-only">Username</span>
+              <input type="text" bind:value={handle} placeholder="Username" />
             </label>
             <label class="field">
-              <span>Password</span>
+              <span class="sr-only">Password</span>
               <input type="password" bind:value={password} placeholder="Password" />
             </label>
             <div class="admin-action-slot">
-              <button class="primary-button" type="submit" disabled={busy}>
-                {busy ? 'Signing in...' : 'Sign In'}
-              </button>
+              <div class="auth-action-row">
+                <button class="primary-button" type="submit" disabled={busy}>
+                  {busy ? 'Signing in...' : 'Sign In'}
+                </button>
+                <button class="review-button" type="button" disabled={busy} on:click={() => void onDemo()}>
+                  {busy ? 'Opening demo...' : 'Demo'}
+                </button>
+              </div>
             </div>
           </form>
-        </article>
-
-        <article class="panel admin-bar-panel">
-          <div class="panel-header">
-            <div><h3>Demo</h3></div>
-          </div>
-          <p class="muted-copy">
-            Demo mode uses showcase modules and quiz behavior, but stats are mocked and authoring actions do not save.
-          </p>
-          <div class="admin-action-slot">
-            <button class="primary-button" type="button" disabled={busy} on:click={() => void onDemo()}>
-              {busy ? 'Opening demo...' : 'Try Demo'}
-            </button>
-          </div>
         </article>
       {/if}
     </div>
