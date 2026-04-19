@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 
 from ...database import DatabaseConnection
 from ...schemas import CreateModuleIn, ModuleNodeOut, UpdateModuleIn
-from ...services import Actor, create_module, get_module_tree, update_module
-from ..dependencies import database_connection, require_actor, require_real_actor
+from ...services import Actor, create_module, export_verified_content_archive, get_module_tree, update_module
+from ..dependencies import database_connection, require_actor, require_admin_actor, require_real_actor
 
 
 router = APIRouter()
@@ -68,3 +68,16 @@ def modules_update(
     if updated_node is not None:
         return updated_node
     raise HTTPException(status_code=500, detail="Module update did not return an updated node.")
+
+
+@router.get("/api/modules/export")
+def modules_export(
+    _: Actor = Depends(require_admin_actor),
+    connection: DatabaseConnection = Depends(database_connection),
+) -> Response:
+    payload = export_verified_content_archive(connection)
+    return Response(
+        content=payload.content,
+        media_type=payload.media_type,
+        headers={"Content-Disposition": f'attachment; filename="{payload.filename}"'},
+    )

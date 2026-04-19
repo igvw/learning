@@ -23,6 +23,7 @@ class ServiceFacadeUnitTests(unittest.TestCase):
             "create_user",
             "delete_question",
             "demo_module_tree",
+            "export_verified_content_archive",
             "get_actor_from_token",
             "get_demo_stats",
             "get_module_tree",

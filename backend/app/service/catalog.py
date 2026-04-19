@@ -1,8 +1,13 @@
+import json
+from dataclasses import dataclass
+from io import BytesIO
 from typing import Any
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from ..database import DatabaseConnection, execute_insert_returning_id, utc_now
 from .auth import Actor, create_user_account
 from .errors import NotFoundError, ValidationError
+from .questions import build_qml_line
 from .text import slugify_title, title_from_slug
 
 
@@ -37,6 +42,13 @@ def _active_module_rows(connection: DatabaseConnection) -> list[Any]:
         ORDER BY modules.full_slug ASC
         """
     ).fetchall()
+
+
+@dataclass(slots=True)
+class ContentExportPayload:
+    filename: str
+    media_type: str
+    content: bytes
 
 
 def ensure_module_exists(connection: DatabaseConnection, module_id: int | None, *, actor: Actor | None = None) -> Any | None:
@@ -290,6 +302,80 @@ def get_scope_module_ids(connection: DatabaseConnection, module_id: int | None, 
         scope_ids.append(current_id)
         stack.extend(children_by_parent.get(current_id, []))
     return sorted(scope_ids)
+
+
+def _verified_module_rows(connection: DatabaseConnection) -> list[Any]:
+    return [row for row in _active_module_rows(connection) if bool(row["admin_verified"]) and row["moderation_status"] == "verified"]
+
+
+def _module_yaml_text(instruction: str) -> str:
+    cleaned_instruction = instruction.strip()
+    if not cleaned_instruction:
+        return 'instruction: ""\n'
+    if "\n" not in cleaned_instruction:
+        return f"instruction: {json.dumps(cleaned_instruction, ensure_ascii=False)}\n"
+
+    indented_lines = "\n".join(f"  {line}" if line else "  " for line in cleaned_instruction.splitlines())
+    return f"instruction: |\n{indented_lines}\n"
+
+
+def _questions_qml_text(lines: list[str]) -> bytes:
+    if not lines:
+        return b""
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+def export_verified_content_archive(connection: DatabaseConnection) -> ContentExportPayload:
+    verified_rows = _verified_module_rows(connection)
+    children_by_parent: dict[int | None, list[int]] = {}
+    rows_by_id: dict[int, Any] = {}
+    for row in verified_rows:
+        module_id = int(row["id"])
+        rows_by_id[module_id] = row
+        children_by_parent.setdefault(row["parent_id"], []).append(module_id)
+
+    leaf_ids = [module_id for module_id in rows_by_id if not children_by_parent.get(module_id)]
+    questions_by_module = {module_id: [] for module_id in leaf_ids}
+    if leaf_ids:
+        placeholders = ",".join("?" for _ in leaf_ids)
+        question_rows = connection.execute(
+            f"""
+            SELECT module_id, question_type, prompt, type_config_json
+            FROM questions
+            WHERE module_id IN ({placeholders})
+              AND admin_verified = 1
+              AND moderation_status = 'verified'
+            ORDER BY module_id ASC, rank ASC, id ASC
+            """,
+            tuple(leaf_ids),
+        ).fetchall()
+        for row in question_rows:
+            type_config = json.loads(row["type_config_json"])
+            questions_by_module[int(row["module_id"])].append(
+                build_qml_line(str(row["question_type"]), str(row["prompt"]), type_config)
+            )
+
+    archive_buffer = BytesIO()
+    with ZipFile(archive_buffer, mode="w", compression=ZIP_DEFLATED) as archive:
+        for row in verified_rows:
+            full_slug = str(row["full_slug"])
+            archive.writestr(
+                f"modules-export/content/modules/{full_slug}/module.yaml",
+                _module_yaml_text(str(row["instruction"] or "")),
+            )
+
+        for module_id in leaf_ids:
+            full_slug = str(rows_by_id[module_id]["full_slug"])
+            archive.writestr(
+                f"modules-export/content/modules/{full_slug}/questions.qml",
+                _questions_qml_text(questions_by_module.get(module_id, [])),
+            )
+
+    return ContentExportPayload(
+        filename="modules-export.zip",
+        media_type="application/zip",
+        content=archive_buffer.getvalue(),
+    )
 
 
 def list_users(connection: DatabaseConnection) -> list[dict[str, Any]]:

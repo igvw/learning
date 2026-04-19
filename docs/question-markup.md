@@ -25,6 +25,7 @@ See also:
 - entries may be separated by blank lines for readability
 - `rank` is not written in the DSL
 - import assigns append order by insertion order
+- manual admin export writes a zip rooted at `modules-export/content/modules/`, with `module.yaml` in every verified module and `questions.qml` in every verified leaf
 
 ## Cheat Sheet
 

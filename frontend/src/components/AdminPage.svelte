@@ -51,6 +51,9 @@
     throw new Error('Module update handler is not configured.');
   };
   export let onOpenImport: (moduleId: number) => void = () => {};
+  export let onExportContent: () => Promise<void> = async () => {
+    throw new Error('Content export handler is not configured.');
+  };
   export let onModerationAction: (
     kind: ModerationKind,
     id: number,
@@ -102,6 +105,7 @@
       onCreateModule={onCreateModule}
       onUpdateModule={onUpdateModule}
       onOpenImport={onOpenImport}
+      onExportContent={onExportContent}
     />
 
     {#if isAdmin}

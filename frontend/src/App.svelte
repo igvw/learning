@@ -45,6 +45,7 @@
     createQuizSession,
     createUser,
     deleteQuestion,
+    exportContentArchive,
     getCurrentActor,
     getHealth,
     getModerationQueue,
@@ -413,6 +414,10 @@
     importState = openImportUiForModule(importState, moduleId);
   }
 
+  async function handleExportContent(): Promise<void> {
+    await exportContentArchive();
+  }
+
   async function handleCreateModule(payload: CreateModulePayload): Promise<ModuleNode> {
     const created = await ensureModulePath({
       modules,
@@ -777,6 +782,7 @@
           onCreateModule={handleCreateModule}
           onUpdateModule={handleUpdateModule}
           onOpenImport={handleOpenImportForModule}
+          onExportContent={handleExportContent}
           onModerationAction={handleModerationAction}
           onBulkQuestionModeration={handleBulkQuestionModeration}
         />

@@ -7,7 +7,7 @@ import EditorDrawer from '../src/components/EditorDrawer.svelte';
 import ImportDrawer from '../src/components/ImportDrawer.svelte';
 import ModerationQueuePanel from '../src/components/admin/ModerationQueuePanel.svelte';
 import type { ModuleNode, QuestionImportResult } from '../src/lib/types';
-import { buildAuthActor, buildModerationQueue, buildModuleNode, buildQuestionRow } from './builders';
+import { buildAuthActor, buildModerationQueue, buildModuleNode, buildMyContributions, buildQuestionRow } from './builders';
 
 describe('EditorDrawer', () => {
   it('shows type-specific ghost text in create mode', async () => {
@@ -250,6 +250,7 @@ describe('AdminPage', () => {
     });
     const updatePasswordSpy = vi.fn().mockResolvedValue(undefined);
     const openImportSpy = vi.fn();
+    const exportContentSpy = vi.fn().mockResolvedValue(undefined);
     const modules: ModuleNode[] = [
       buildModuleNode({
         id: 1,
@@ -287,13 +288,15 @@ describe('AdminPage', () => {
         onUpdateUserPassword: updatePasswordSpy,
         onCreateModule: createSpy,
         onUpdateModule: updateSpy,
-        onOpenImport: openImportSpy
+        onOpenImport: openImportSpy,
+        onExportContent: exportContentSpy
       }
     });
 
     expect(screen.getByRole('heading', { name: 'Catalog and moderation' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Accounts' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Modules' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Export content' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Import QML' })).toBeTruthy();
     expect(screen.getByText('Selected leaf module')).toBeTruthy();
     expect(screen.getByText('Create module')).toBeTruthy();
@@ -303,6 +306,7 @@ describe('AdminPage', () => {
     expect(screen.getByRole('button', { name: 'Create Module' }).className).toContain('primary-button');
     expect(screen.getByRole('button', { name: 'Create Account' }).className).toContain('primary-button');
     expect(screen.getByRole('button', { name: 'Save Role' }).className).toContain('primary-button');
+    expect(screen.getByRole('button', { name: 'Export content' }).className).toContain('primary-button');
     expect(screen.getByRole('button', { name: 'Import QML' }).className).toContain('primary-button');
 
     const titleInput = screen.getByDisplayValue('Checks');
@@ -357,6 +361,10 @@ describe('AdminPage', () => {
     await user.click(screen.getByRole('button', { name: 'Import QML' }));
     expect(openImportSpy).toHaveBeenCalledWith(3);
 
+    await user.click(screen.getByRole('button', { name: 'Export content' }));
+    expect(exportContentSpy).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText('Verified content export ready: modules-export.zip.')).toBeTruthy();
+
     await user.type(screen.getByPlaceholderText('norwegian/vocabulary/nouns_to_english'), 'Vocabulary');
     await user.selectOptions(screen.getByLabelText('Parent module'), '1');
     await user.type(screen.getAllByLabelText('Instruction')[1], 'Use the Norwegian term as the prompt.');
@@ -369,6 +377,38 @@ describe('AdminPage', () => {
     });
 
     expect(await screen.findByText('Module ready: norwegian.')).toBeTruthy();
+  });
+
+  it('hides the export content panel for regular contributors', () => {
+    render(AdminPage, {
+      props: {
+        currentActor: buildAuthActor({ handle: 'alice', display_name: 'Alice', role: 'user' }),
+        modules: [
+          buildModuleNode({
+            id: 1,
+            title: 'Nursing',
+            slug: 'nursing',
+            full_slug: 'nursing',
+            children: [
+              buildModuleNode({
+                id: 2,
+                title: 'Checks',
+                slug: 'checks',
+                full_slug: 'nursing/checks',
+                instruction: 'List the safety checks in order.'
+              })
+            ]
+          })
+        ],
+        users: [],
+        selectedModuleId: 2,
+        moderationQueue: null,
+        contributions: buildMyContributions()
+      }
+    });
+
+    expect(screen.queryByRole('heading', { name: 'Export content' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Export content' })).toBeNull();
   });
 });
 

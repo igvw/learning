@@ -24,7 +24,7 @@ from .service.authoring import (
     set_question_review_flag,
     sync_seed_content,
 )
-from .service.catalog import create_module, create_user, get_module_tree, list_users, update_module
+from .service.catalog import create_module, create_user, export_verified_content_archive, get_module_tree, list_users, update_module
 from .service.demo import create_demo_quiz_session, demo_module_tree, get_demo_stats, set_demo_review_flag, submit_demo_answer
 from .service.errors import NotFoundError, ServiceError, ValidationError
 from .service.imports import commit_question_import, validate_question_import
@@ -57,6 +57,7 @@ __all__ = [
     "create_user",
     "delete_question",
     "demo_module_tree",
+    "export_verified_content_archive",
     "get_module_tree",
     "get_actor_from_token",
     "get_demo_stats",

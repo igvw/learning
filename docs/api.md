@@ -117,6 +117,22 @@ Current behavior:
 - only the selected leaf segment is renamed
 - parent paths remain unchanged
 
+### `GET /api/modules/export`
+
+Admin-only. Downloads the full verified shared content tree as one zip archive.
+
+Current behavior:
+
+- response type is `application/zip`
+- filename is `modules-export.zip`
+- archive paths are rooted at `modules-export/content/modules/`
+- every verified module gets `module.yaml`
+- every verified leaf gets `questions.qml`
+- `questions.qml` lines are emitted in shared order (`rank ASC, id ASC`)
+- pending, changes-requested, rejected, and viewer-specific overlay content is excluded
+
+This is a manual content export for portability and inspection, not a database backup.
+
 ## Users
 
 ### `GET /api/users`

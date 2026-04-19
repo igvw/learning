@@ -5,7 +5,7 @@ This file is the short tracker. The fuller alpha-to-beta product roadmap lives i
 ## Alpha blockers
 
 - Add private-hosting production safety with HTTPS and security defaults
-- Add reliable backup and restore for hosted use
+- Add reliable backup and restore for hosted use, using `pg_dump` / restore against the `postgres` container rather than content export
 - Fix rank/order performance so imports and bulk authoring scale better
 - Keep a follow-up hardening pass for user-authored text and parsing paths after the planned QML rework lands
 

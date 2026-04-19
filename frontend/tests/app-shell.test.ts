@@ -11,6 +11,7 @@ vi.mock('../src/lib/api', () => ({
   createQuizSession: vi.fn(),
   createUser: vi.fn(),
   deleteQuestion: vi.fn(),
+  exportContentArchive: vi.fn(),
   getCurrentActor: vi.fn(),
   getHealth: vi.fn(),
   getModerationQueue: vi.fn(),
@@ -251,5 +252,38 @@ describe('App', () => {
     expect(api.reviewQuestion).toHaveBeenNthCalledWith(1, 71, { action: 'approve', note: '' });
     expect(api.reviewQuestion).toHaveBeenNthCalledWith(2, 72, { action: 'approve', note: '' });
     expect(api.getModulesTree).toHaveBeenCalledTimes(initialModuleLoads + 1);
+  });
+
+  it('calls the content export helper from the admin page', async () => {
+    const user = userEvent.setup();
+    const modules = [buildModules()[0]];
+
+    vi.mocked(api.getHealth).mockResolvedValue({
+      status: 'ok',
+      instance_key: 'local-dev',
+      bootstrap_required: false
+    });
+    vi.mocked(api.getCurrentActor).mockResolvedValue(
+      buildAuthActor({ id: 1, handle: 'admin', display_name: 'Admin', role: 'admin' })
+    );
+    vi.mocked(api.getModulesTree).mockResolvedValue(modules);
+    vi.mocked(api.getUsers).mockResolvedValue([
+      { id: 1, handle: 'admin', display_name: 'Admin', role: 'admin', created_at: '2026-04-05T10:00:00Z' }
+    ]);
+    vi.mocked(api.getModerationQueue).mockResolvedValue(buildModerationQueue());
+    vi.mocked(api.exportContentArchive).mockResolvedValue(undefined);
+
+    window.history.replaceState({}, '', '/admin');
+    render(App);
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Catalog and moderation' })).toBeTruthy();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Export content' }));
+
+    await waitFor(() => {
+      expect(api.exportContentArchive).toHaveBeenCalledTimes(1);
+    });
   });
 });

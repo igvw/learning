@@ -54,6 +54,36 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+function requestErrorMessage(response: Response, fallback: string): Promise<string> {
+  return response
+    .json()
+    .then((payload) => (payload?.detail ? String(payload.detail) : fallback))
+    .catch((error) => {
+      console.error(error);
+      return fallback;
+    });
+}
+
+function filenameFromContentDisposition(value: string | null, fallback: string): string {
+  if (!value) {
+    return fallback;
+  }
+  const utf8Match = value.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match) {
+    try {
+      return decodeURIComponent(utf8Match[1]);
+    } catch (error) {
+      console.error(error);
+    }
+  }
+  const quotedMatch = value.match(/filename="([^"]+)"/i);
+  if (quotedMatch) {
+    return quotedMatch[1];
+  }
+  const plainMatch = value.match(/filename=([^;]+)/i);
+  return plainMatch ? plainMatch[1].trim() : fallback;
+}
+
 export function getHealth(): Promise<HealthResponse> {
   return request<HealthResponse>('/api/health');
 }
@@ -157,6 +187,32 @@ export function updateModule(moduleId: number, payload: UpdateModulePayload): Pr
     method: 'PATCH',
     body: JSON.stringify(payload)
   });
+}
+
+export async function exportContentArchive(): Promise<void> {
+  const response = await fetch('/api/modules/export', {
+    credentials: 'same-origin'
+  });
+
+  if (!response.ok) {
+    throw new Error(await requestErrorMessage(response, `Request failed with ${response.status}`));
+  }
+
+  const blob = await response.blob();
+  const filename = filenameFromContentDisposition(response.headers.get('Content-Disposition'), 'modules-export.zip');
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = objectUrl;
+  link.download = filename;
+  link.style.display = 'none';
+  document.body.append(link);
+
+  try {
+    link.click();
+  } finally {
+    link.remove();
+    URL.revokeObjectURL(objectUrl);
+  }
 }
 
 export function createQuizSession(moduleId: number | null, count = 10): Promise<QuizSession> {

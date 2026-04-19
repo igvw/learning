@@ -1,7 +1,129 @@
+from io import BytesIO
+from zipfile import ZipFile
+
 from test_support import PostgresBackendTestCase
 
 
 class ModuleApiTests(PostgresBackendTestCase):
+    def test_content_export_requires_admin_authentication(self) -> None:
+        unauthenticated = self.client.get("/api/modules/export")
+        self.assertEqual(unauthenticated.status_code, 401)
+        self.assertEqual(unauthenticated.json()["detail"], "Authentication is required.")
+
+        user = self.create_user()
+        regular_user = self.client.get("/api/modules/export", headers=self.user_headers(int(user["id"])))
+        self.assertEqual(regular_user.status_code, 403)
+        self.assertEqual(regular_user.json()["detail"], "Admin access is required.")
+
+        demo_response = self.client.post("/api/auth/demo-session")
+        self.assertEqual(demo_response.status_code, 200)
+        demo_headers = self._cookie_headers_from_response(demo_response)
+        self.client.cookies.clear()
+        demo_user = self.client.get("/api/modules/export", headers=demo_headers)
+        self.assertEqual(demo_user.status_code, 403)
+        self.assertEqual(demo_user.json()["detail"], "Admin access is required.")
+
+    def test_content_export_returns_verified_zip_tree(self) -> None:
+        norwegian = self.create_module_record("Norwegian", instruction="Translate the Norwegian term into English.")
+        animals = self.create_module_record("Animals", norwegian["id"], "Use the animal name as the prompt.")
+        numbers = self.create_module_record("Numbers", norwegian["id"])
+        self.create_question_record(animals["id"], "hund", [["dog"]], rank=2)
+        self.create_question_record(animals["id"], "katt", [["cat"]], rank=1)
+
+        response = self.client.get("/api/modules/export", headers=self.admin_headers)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "application/zip")
+        self.assertEqual(response.headers["content-disposition"], 'attachment; filename="modules-export.zip"')
+
+        with ZipFile(BytesIO(response.content)) as archive:
+            names = sorted(archive.namelist())
+            self.assertIn("modules-export/content/modules/norwegian/module.yaml", names)
+            self.assertIn("modules-export/content/modules/norwegian/animals/module.yaml", names)
+            self.assertIn("modules-export/content/modules/norwegian/animals/questions.qml", names)
+            self.assertIn("modules-export/content/modules/norwegian/numbers/module.yaml", names)
+            self.assertIn("modules-export/content/modules/norwegian/numbers/questions.qml", names)
+
+            self.assertEqual(
+                archive.read("modules-export/content/modules/norwegian/module.yaml").decode(),
+                'instruction: "Translate the Norwegian term into English."\n',
+            )
+            self.assertEqual(
+                archive.read("modules-export/content/modules/norwegian/animals/questions.qml").decode(),
+                "hund [dog]\nkatt [cat]\n",
+            )
+            self.assertEqual(
+                archive.read("modules-export/content/modules/norwegian/numbers/questions.qml").decode(),
+                "",
+            )
+
+    def test_content_export_excludes_pending_and_changes_requested_content(self) -> None:
+        norwegian = self.create_module_record("Norwegian")
+        verified_leaf = self.create_module_record("Animals", norwegian["id"], "Name the animal in English.")
+        verified_question = self.create_question_record(verified_leaf["id"], "hund", [["dog"]])
+
+        contributor = self.create_user()
+        pending_module = self.client.post(
+            "/api/modules",
+            json={"title": "Pending animals", "parent_id": norwegian["id"], "instruction": "Pending only."},
+            headers=self.user_headers(int(contributor["id"])),
+        )
+        self.assertEqual(pending_module.status_code, 200)
+
+        pending_question = self.client.post(
+            "/api/questions",
+            json={
+                "module_id": verified_leaf["id"],
+                "prompt": "katt",
+                "question_type": "single_text",
+                "rank": 1,
+                "accepted_answers": [["cat"]],
+                "segments": [],
+            },
+            headers=self.user_headers(int(contributor["id"])),
+        )
+        self.assertEqual(pending_question.status_code, 200)
+
+        revise_question = self.client.post(
+            f"/api/questions/{verified_question['question_id']}/revisions",
+            json={
+                "module_id": verified_leaf["id"],
+                "prompt": "hound",
+                "question_type": "single_text",
+                "rank": 1,
+                "accepted_answers": [["dog"]],
+                "segments": [],
+                "reset_stats": False,
+            },
+            headers=self.user_headers(int(contributor["id"])),
+        )
+        self.assertEqual(revise_question.status_code, 200)
+
+        response = self.client.get("/api/modules/export", headers=self.admin_headers)
+        self.assertEqual(response.status_code, 200)
+
+        with ZipFile(BytesIO(response.content)) as archive:
+            names = sorted(archive.namelist())
+            self.assertIn("modules-export/content/modules/norwegian/animals/questions.qml", names)
+            self.assertNotIn("modules-export/content/modules/norwegian/pending_animals/module.yaml", names)
+            self.assertEqual(
+                archive.read("modules-export/content/modules/norwegian/animals/questions.qml").decode(),
+                "hund [dog]\n",
+            )
+
+    def test_content_export_writes_multiline_module_instructions(self) -> None:
+        norwegian = self.create_module_record("Norwegian", instruction="Line one.\n\nLine two.")
+        self.create_module_record("Animals", norwegian["id"])
+
+        response = self.client.get("/api/modules/export", headers=self.admin_headers)
+        self.assertEqual(response.status_code, 200)
+
+        with ZipFile(BytesIO(response.content)) as archive:
+            self.assertEqual(
+                archive.read("modules-export/content/modules/norwegian/module.yaml").decode(),
+                "instruction: |\n  Line one.\n  \n  Line two.\n",
+            )
+
     def test_leaf_module_can_be_renamed_without_losing_question_access(self) -> None:
         norwegian = self.create_module_record("Norwegian")
         nouns = self.create_module_record(

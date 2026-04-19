@@ -14,6 +14,9 @@
     throw new Error('Module update handler is not configured.');
   };
   export let onOpenImport: (moduleId: number) => void = () => {};
+  export let onExportContent: () => Promise<void> = async () => {
+    throw new Error('Content export handler is not configured.');
+  };
 
   let createTitle = '';
   let createParentId = '';
@@ -27,6 +30,9 @@
   let editSaving = false;
   let editError = '';
   let editSuccess = '';
+  let exportSaving = false;
+  let exportError = '';
+  let exportSuccess = '';
   let syncedLeafSignature = '';
 
   async function handleCreateModule(): Promise<void> {
@@ -75,6 +81,20 @@
       return;
     }
     onOpenImport(Number(importModuleId));
+  }
+
+  async function handleExportContent(): Promise<void> {
+    exportError = '';
+    exportSuccess = '';
+    exportSaving = true;
+    try {
+      await onExportContent();
+      exportSuccess = 'Verified content export ready: modules-export.zip.';
+    } catch (error) {
+      exportError = error instanceof Error ? error.message : 'Unable to export verified content.';
+    } finally {
+      exportSaving = false;
+    }
   }
 
   $: editableParentModules = isAdmin
@@ -189,6 +209,32 @@
     </div>
   </div>
 </article>
+
+{#if isAdmin}
+  <article class="panel admin-bar-panel">
+    <div class="panel-header">
+      <div><h3>Export content</h3></div>
+    </div>
+    {#if exportError}
+      <div class="banner error">{exportError}</div>
+    {/if}
+    {#if exportSuccess}
+      <div class="banner success">{exportSuccess}</div>
+    {/if}
+    <div class="admin-bar-form import-bar-form">
+      <div class="admin-status-slot">
+        <p class="muted-copy">
+          Download the full verified module tree as a zip archive with <code>module.yaml</code> files and one <code>questions.qml</code> file per verified leaf.
+        </p>
+      </div>
+      <div class="admin-action-slot">
+        <button class="primary-button" type="button" disabled={exportSaving || isDemo} on:click={() => void handleExportContent()}>
+          {exportSaving ? 'Exporting...' : 'Export content'}
+        </button>
+      </div>
+    </div>
+  </article>
+{/if}
 
 <article class="panel admin-bar-panel">
   <div class="panel-header">
