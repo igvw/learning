@@ -1,7 +1,6 @@
 import { buildQmlLine, parseQmlLine } from './qml';
 import type {
   ModuleNode,
-  PriorityMode,
   QuestionDraftPayload,
   QuestionRow,
   QuestionType
@@ -16,7 +15,6 @@ export type EditorState = {
   prompt: string;
   questionType: QuestionType;
   rank: number;
-  priorityMode: PriorityMode;
   resetStats: boolean;
   singleAnswersText: string;
   multiSlots: MultiSlot[];
@@ -123,7 +121,6 @@ export function buildEditorState(
   const prompt = question?.prompt ?? '';
   const questionType = question?.question_type ?? 'single_text';
   const rank = question?.rank ?? 1;
-  const priorityMode: PriorityMode = 'mid';
   const resetStats = true;
 
   let singleAnswersText = '';
@@ -153,7 +150,6 @@ export function buildEditorState(
     prompt,
     questionType,
     rank,
-    priorityMode,
     resetStats,
     singleAnswersText,
     multiSlots,
@@ -175,11 +171,9 @@ export function buildEditorState(
 export function buildQuestionPayload(
   state: EditorState,
   {
-    selectedModuleIsLeaf,
-    isEditing
+    selectedModuleIsLeaf
   }: {
     selectedModuleIsLeaf: boolean;
-    isEditing: boolean;
   }
 ): QuestionDraftPayload {
   const normalizedModuleId = Number(state.moduleId);
@@ -203,7 +197,6 @@ export function buildQuestionPayload(
     prompt: draft.prompt,
     question_type: draft.question_type,
     rank: state.rank,
-    priority_mode: isEditing ? null : state.priorityMode,
     accepted_answers: draft.accepted_answers,
     segments: draft.segments
   };

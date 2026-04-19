@@ -35,7 +35,7 @@ class ImportApiTests(PostgresBackendTestCase):
         source_stats = self.get_stats_payload(user["id"], module_ids["source_a"])
         self.assertEqual(len(source_stats["questions"]), 1)
         self.assertEqual(source_stats["questions"][0]["prompt"], "katt")
-        self.assertEqual(source_stats["questions"][0]["rank"], 1)
+        self.assertEqual(source_stats["questions"][0]["rank"], 2)
 
         target_stats = self.get_stats_payload(user["id"], module_ids["target"])
         self.assertEqual(len(target_stats["questions"]), 3)
@@ -59,7 +59,7 @@ class ImportApiTests(PostgresBackendTestCase):
                 ).fetchall()
             ]
         self.assertEqual(target_prompts, [("først", 1), ("andre", 2), ("hund", 3)])
-        self.assertEqual(source_prompts, [("katt", 1)])
+        self.assertEqual(source_prompts, [("katt", 2)])
 
     def test_new_imported_rows_append_after_existing_questions_in_upload_order(self) -> None:
         norwegian = self.create_module_record("Norwegian")

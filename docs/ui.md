@@ -111,14 +111,13 @@ Current behavior:
 
 - dense single-card layout for question details
 - one module selector, not a duplicate module-path display
-- prompt, type, rank, and accepted answers grouped tightly
+- prompt, type, and accepted answers grouped tightly
 - aggregated incorrect-answer history shown at the bottom in a compact table
 - create mode defaults the module selector to the current hamburger-selected scope
-- create mode uses a `Priority` selector (`High`, `Mid`, `Low`) instead of raw rank
 - create mode keeps a live editable QML box in sync with the structured fields
 - revision mode can delete the current question after confirmation
 - regular-user revision mode on verified questions becomes a personal proposal flow:
-  module and rank stay locked, and delete becomes `Request Delete`
+  module and order stay locked, and delete becomes `Request Delete`
 - admins still edit verified questions directly
 
 Incorrect-answer history currently shows:

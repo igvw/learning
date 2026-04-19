@@ -27,6 +27,8 @@ describe('EditorDrawer', () => {
       }
     });
 
+    expect(screen.queryByLabelText('Priority')).toBeNull();
+    expect(screen.queryByLabelText('Rank')).toBeNull();
     expect(screen.getByPlaceholderText('What is the capital of Norway?')).toBeTruthy();
     expect(screen.getByPlaceholderText('oslo')).toBeTruthy();
 
@@ -131,11 +133,11 @@ describe('EditorDrawer', () => {
     expect(screen.getByText('3')).toBeTruthy();
     expect(screen.getByText('1')).toBeTruthy();
     expect(screen.getByText('Module')).toBeTruthy();
+    expect(screen.queryByLabelText('Rank')).toBeNull();
     expect(screen.queryByText('Module path')).toBeNull();
     expect(screen.queryByText('Create module inline')).toBeNull();
     expect(screen.queryByText('Flag this question for manual review')).toBeNull();
   });
-
   it('offers question deletion in revision mode and confirms before calling the handler', async () => {
     const user = userEvent.setup();
     const deleteSpy = vi.fn().mockResolvedValue(undefined);

@@ -19,7 +19,7 @@ export type FirstSeenGraph = ReturnType<typeof buildFirstSeenGraph>;
 export type StageDueMatrixGraph = ReturnType<typeof buildStageDueMatrixGraph>;
 
 export const sortDefinitions: SortDefinition[] = [
-  { key: 'rank', label: 'Rank', defaultDirection: 'asc' },
+  { key: 'rank', label: 'Order', defaultDirection: 'asc' },
   { key: 'prompt', label: 'Prompt', defaultDirection: 'asc' },
   { key: 'bucket', label: 'Bucket', defaultDirection: 'asc' },
   { key: 'last_seen', label: 'Last seen', defaultDirection: 'desc' },

@@ -16,7 +16,6 @@ Key roadmap conclusion:
 
 ### Alpha blockers
 
-- finish the authenticated account rollout and moderation surfaces
 - keep the private-hosting auth/session model production-safe
 - private hosting with HTTPS and production-safe deployment defaults
 - reliable backup/restore for real hosted use
@@ -25,7 +24,6 @@ Key roadmap conclusion:
 
 ### Alpha scope that can continue alongside blockers
 
-- ongoing contribution and moderation workflow improvements
 - small UX improvements that reduce friction
 - content-building tooling improvements
 
@@ -68,6 +66,10 @@ Key roadmap conclusion:
 
 - A/B testing
 - alternative repetition algorithms
+- derive unseen-question priority from aggregate performance without changing shared catalog order
+- polish account-management and authenticated-user UX for private multi-user use
+- improve contributor submission visibility, statuses, and review feedback
+- continue moderation workflow polish for pending modules, uploaded questions, and revision/delete proposals
 - retention comparison across algorithm variants
 - bucket-structure changes and scheduler experimentation
 

@@ -4,7 +4,6 @@ This file is the short tracker. The fuller alpha-to-beta product roadmap lives i
 
 ## Alpha blockers
 
-- Finish the authenticated account rollout and moderation UX
 - Add private-hosting production safety with HTTPS and security defaults
 - Add reliable backup and restore for hosted use
 - Fix rank/order performance so imports and bulk authoring scale better
@@ -12,7 +11,6 @@ This file is the short tracker. The fuller alpha-to-beta product roadmap lives i
 
 ## Alpha work that can continue in parallel
 
-- Improve the new contribution and moderation workflows
 - Make small UX improvements that reduce friction
 - Improve content-building tooling
 - Replace the custom schema-version system with `yoyo-migrations` before the next substantial database migration
@@ -30,6 +28,10 @@ This file is the short tracker. The fuller alpha-to-beta product roadmap lives i
 
 - A/B testing
 - Alternative repetition algorithms
+- Derived unseen-question priority based on aggregate performance, kept separate from shared append order
+- Polish account-management and authenticated-user UX for private multi-user use
+- Improve contributor submission visibility, statuses, and review feedback
+- Continue moderation workflow polish for pending modules, uploaded questions, and revision/delete proposals
 - Revisit per-user schedule timezones if the app needs to support learners in different regions
 - Retention comparisons across variants
 - Bucket-structure experimentation

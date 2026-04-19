@@ -64,7 +64,8 @@ Important choices:
 - `prompt_key` stores the normalized duplicate-matching identity used for indexed question lookups
 - ordinary create/revise duplicate checks happen per leaf module through indexed `prompt_key` lookups
 - import review can also match same-prompt questions elsewhere in the same top-level module tree through `prompt_key` lookups
-- import-created and import-relocated questions append at the end of the target leaf; `rank` remains the exposed ordering hint for now
+- question order is append-only within a leaf for now; `rank` remains the exposed storage field, but sparse gaps are allowed
+- import-created and import-relocated questions append at the end of the target leaf
 
 ## Users, Sessions, And Review Flags
 

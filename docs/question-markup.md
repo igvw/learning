@@ -24,7 +24,7 @@ See also:
 - one question entry lives on one logical line
 - entries may be separated by blank lines for readability
 - `rank` is not written in the DSL
-- import assigns rank by insertion order
+- import assigns append order by insertion order
 
 ## Cheat Sheet
 
@@ -190,10 +190,10 @@ becomes conceptually:
 
 `rank` is intentionally omitted from authoring.
 
-Future import behavior should:
+Current import behavior:
 
-- assign rank by insertion order
-- allow later manual adjustment from the editor UI
+- append questions in upload order
+- keep question order server-managed rather than editor-controlled
 
 ## Math And Variables
 

@@ -6,7 +6,6 @@ from ..schemas import QuestionDraftIn
 from .auth import Actor
 from .authoring import (
     apply_import_revision,
-    close_rank_gaps,
     create_question_append_only,
     relocate_question_for_import,
 )
@@ -460,33 +459,24 @@ def _validate_question_import_rows(
 
 
 def _commit_import_rows(connection: Any, *, module_id: int, valid_rows: list[dict[str, Any]], actor: Actor | None = None) -> int:
+    _ = module_id
     committed_count = 0
-    next_rank = connection.execute(
-        "SELECT COALESCE(MAX(rank), 0) + 1 AS next_rank FROM questions WHERE module_id = ?",
-        (module_id,),
-    ).fetchone()["next_rank"]
-    source_modules_to_compact: set[int] = set()
 
     for row in valid_rows:
         action = row["commit_action"]
         payload = QuestionDraftIn(**row["payload"])
         if action["kind"] == "create":
             create_question_append_only(connection, payload, actor=actor)
-            next_rank += 1
         elif action["kind"] == "revise_existing":
             apply_import_revision(connection, question_id=action["question_id"], payload=payload)
         else:
-            source_module_id = relocate_question_for_import(
+            relocate_question_for_import(
                 connection,
                 question_id=action["question_id"],
-                payload=QuestionDraftIn(**{**row["payload"], "rank": int(next_rank)}),
-                target_rank=int(next_rank),
+                payload=payload,
             )
-            source_modules_to_compact.add(source_module_id)
-            next_rank += 1
         committed_count += 1
 
-    close_rank_gaps(connection, source_modules_to_compact)
     return committed_count
 
 

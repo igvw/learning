@@ -16,20 +16,7 @@ from .catalog import (
 from .errors import NotFoundError, ValidationError
 from .questions import serialize_type_config, stored_prompt_key
 from .text import json_dumps, normalize_text
-from .schedule import _question_attempt_history
 from .visibility import question_visible_to_actor
-
-
-def _module_question_rank_rows(connection: DatabaseConnection, module_id: int) -> list[Any]:
-    return connection.execute(
-        """
-        SELECT id, rank
-        FROM questions
-        WHERE module_id = ?
-        ORDER BY rank ASC, id ASC
-        """,
-        (module_id,),
-    ).fetchall()
 
 
 def _append_rank(connection: DatabaseConnection, module_id: int) -> int:
@@ -38,76 +25,6 @@ def _append_rank(connection: DatabaseConnection, module_id: int) -> int:
         (module_id,),
     ).fetchone()
     return int(row["max_rank"]) + 1
-
-
-def _shift_ranks_for_insert(
-    connection: DatabaseConnection,
-    *,
-    module_id: int,
-    insert_rank: int,
-    exclude_question_id: int | None = None,
-) -> None:
-    rows = _module_question_rank_rows(connection, module_id)
-    next_rank = 1
-    inserted = False
-    for row in rows:
-        if exclude_question_id is not None and row["id"] == exclude_question_id:
-            continue
-        if not inserted and next_rank == insert_rank:
-            inserted = True
-            next_rank += 1
-        connection.execute("UPDATE questions SET rank = ? WHERE id = ?", (next_rank, row["id"]))
-        next_rank += 1
-
-
-def _remove_rank_gap(connection: DatabaseConnection, *, module_id: int, exclude_question_id: int) -> None:
-    next_rank = 1
-    for row in _module_question_rank_rows(connection, module_id):
-        if row["id"] == exclude_question_id:
-            continue
-        connection.execute("UPDATE questions SET rank = ? WHERE id = ?", (next_rank, row["id"]))
-        next_rank += 1
-
-
-def _clamp_insert_rank(
-    connection: DatabaseConnection,
-    *,
-    module_id: int,
-    rank: int,
-    exclude_question_id: int | None = None,
-) -> int:
-    rows = [
-        row
-        for row in _module_question_rank_rows(connection, module_id)
-        if exclude_question_id is None or row["id"] != exclude_question_id
-    ]
-    return max(1, min(int(rank), len(rows) + 1))
-
-
-def _priority_insert_rank(connection: DatabaseConnection, *, user_id: int | None, module_id: int, priority_mode: str) -> int:
-    if user_id is None:
-        return _append_rank(connection, module_id)
-
-    question_rows = connection.execute(
-        """
-        SELECT id AS question_id, rank
-        FROM questions
-        WHERE module_id = ?
-        ORDER BY rank ASC, id ASC
-        """,
-        (module_id,),
-    ).fetchall()
-    question_ids = [row["question_id"] for row in question_rows]
-    history_by_question = _question_attempt_history(connection, user_id=user_id, question_ids=question_ids)
-    unseen_rows = [row for row in question_rows if not history_by_question.get(row["question_id"])]
-    if not unseen_rows:
-        return _append_rank(connection, module_id)
-
-    if priority_mode == "high":
-        return int(unseen_rows[0]["rank"])
-    if priority_mode == "mid":
-        return int(unseen_rows[len(unseen_rows) // 2]["rank"])
-    return int(unseen_rows[-1]["rank"]) + 1
 
 
 def ensure_unique_question_prompt(
@@ -205,7 +122,6 @@ def create_question_append_only(
 
 
 def create_question(connection: DatabaseConnection, payload: QuestionDraftIn, *, actor: Actor | None = None) -> dict[str, Any]:
-    user_id = actor.user_id if actor and actor.user_id is not None else None
     ensure_leaf_module(connection, payload.module_id, actor=actor)
     type_config = serialize_type_config(payload)
     ensure_unique_question_prompt(
@@ -216,14 +132,7 @@ def create_question(connection: DatabaseConnection, payload: QuestionDraftIn, *,
         type_config=type_config,
         actor=actor,
     )
-    insert_rank = (
-        _priority_insert_rank(connection, user_id=user_id, module_id=payload.module_id, priority_mode=payload.priority_mode)
-        if payload.priority_mode
-        else int(payload.rank)
-    )
-    insert_rank = _clamp_insert_rank(connection, module_id=payload.module_id, rank=insert_rank)
-    _shift_ranks_for_insert(connection, module_id=payload.module_id, insert_rank=insert_rank)
-    return _insert_question_record(connection, payload=payload, rank=insert_rank, actor=actor)
+    return _insert_question_record(connection, payload=payload, rank=_append_rank(connection, payload.module_id), actor=actor)
 
 
 def _question_row(connection: DatabaseConnection, question_id: int) -> Any:
@@ -275,23 +184,7 @@ def _apply_verified_question_revision(
         connection.execute("DELETE FROM quiz_session_items WHERE question_id = ?", (question_id,))
         connection.execute("DELETE FROM user_review_flags WHERE question_id = ?", (question_id,))
 
-    target_rank = _clamp_insert_rank(
-        connection,
-        module_id=payload.module_id,
-        rank=int(payload.rank),
-        exclude_question_id=question_id,
-    )
-    if int(current["module_id"]) != payload.module_id:
-        _remove_rank_gap(connection, module_id=int(current["module_id"]), exclude_question_id=question_id)
-        _shift_ranks_for_insert(connection, module_id=payload.module_id, insert_rank=target_rank)
-    else:
-        _remove_rank_gap(connection, module_id=payload.module_id, exclude_question_id=question_id)
-        _shift_ranks_for_insert(
-            connection,
-            module_id=payload.module_id,
-            insert_rank=target_rank,
-            exclude_question_id=question_id,
-        )
+    target_rank = int(current["rank"]) if int(current["module_id"]) == payload.module_id else _append_rank(connection, payload.module_id)
 
     connection.execute(
         """
@@ -362,7 +255,6 @@ def relocate_question_for_import(
     *,
     question_id: int,
     payload: QuestionDraftIn,
-    target_rank: int,
 ) -> int:
     current = _require_question_row(connection, question_id)
     ensure_leaf_module(connection, payload.module_id)
@@ -375,6 +267,7 @@ def relocate_question_for_import(
         type_config=type_config,
         exclude_question_id=question_id,
     )
+    target_rank = _append_rank(connection, payload.module_id)
     connection.execute(
         """
         UPDATE questions
@@ -402,11 +295,6 @@ def relocate_question_for_import(
     )
     connection.execute("DELETE FROM user_review_flags WHERE question_id = ?", (question_id,))
     return int(current["module_id"])
-
-
-def close_rank_gaps(connection: DatabaseConnection, module_ids: set[int]) -> None:
-    for module_id in sorted(module_ids):
-        _remove_rank_gap(connection, module_id=module_id, exclude_question_id=-1)
 
 
 def _proposal_payload(
@@ -555,23 +443,7 @@ def revise_question(
         actor=actor,
         exclude_question_id=question_id,
     )
-    target_rank = _clamp_insert_rank(
-        connection,
-        module_id=payload.module_id,
-        rank=int(payload.rank),
-        exclude_question_id=question_id,
-    )
-    if int(current["module_id"]) != payload.module_id:
-        _remove_rank_gap(connection, module_id=int(current["module_id"]), exclude_question_id=question_id)
-        _shift_ranks_for_insert(connection, module_id=payload.module_id, insert_rank=target_rank)
-    else:
-        _remove_rank_gap(connection, module_id=payload.module_id, exclude_question_id=question_id)
-        _shift_ranks_for_insert(
-            connection,
-            module_id=payload.module_id,
-            insert_rank=target_rank,
-            exclude_question_id=question_id,
-        )
+    target_rank = int(current["rank"]) if int(current["module_id"]) == payload.module_id else _append_rank(connection, payload.module_id)
     connection.execute(
         """
         UPDATE questions
@@ -610,7 +482,7 @@ def revise_question(
 def delete_question(connection: DatabaseConnection, question_id: int, *, actor: Actor | None = None) -> dict[str, Any]:
     current = _require_question_row(connection, question_id)
     if actor is None or actor.role == "admin":
-        delete_question_and_close_rank_gap(connection, question_id)
+        delete_question_record(connection, question_id)
         return {
             "question_id": question_id,
             "proposal_id": None,
@@ -622,7 +494,7 @@ def delete_question(connection: DatabaseConnection, question_id: int, *, actor: 
     if not bool(current["admin_verified"]):
         if actor.user_id is None or current["created_by_user_id"] != actor.user_id:
             raise ValidationError("You can only delete your own pending questions.")
-        delete_question_and_close_rank_gap(connection, question_id)
+        delete_question_record(connection, question_id)
         return {
             "question_id": question_id,
             "proposal_id": None,
@@ -775,13 +647,11 @@ def merge_question_progress(
             )
 
 
-def delete_question_and_close_rank_gap(connection: DatabaseConnection, question_id: int) -> None:
+def delete_question_record(connection: DatabaseConnection, question_id: int) -> None:
     row = _question_row(connection, question_id)
     if row is None:
         return
-    module_id = int(row["module_id"])
     connection.execute("DELETE FROM questions WHERE id = ?", (question_id,))
-    _remove_rank_gap(connection, module_id=module_id, exclude_question_id=question_id)
 
 
 def _existing_prompt_keys(connection: DatabaseConnection, module_id: int) -> set[str]:

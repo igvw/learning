@@ -98,6 +98,7 @@ Current behavior:
 - same-leaf duplicate rows can revise the existing question in place
 - same-tree prompt matches can move an existing question into a different leaf while keeping its quiz history and derived scheduling
 - import-created and import-relocated questions append at the end of the target leaf in batch order
+- question order is currently append-only within each leaf; moves and deletes do not renumber older siblings
 - invalid or conflicting rows stay in review until they are edited or removed
 - leaf modules can be renamed from Admin without changing the underlying module id
 - the current question-line format is described in [Question Markup DSL](question-markup.md)

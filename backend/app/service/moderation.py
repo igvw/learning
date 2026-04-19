@@ -6,7 +6,7 @@ from ..schemas import QuestionDraftIn
 from .auth import Actor
 from .authoring import (
     _apply_verified_question_revision,
-    delete_question_and_close_rank_gap,
+    delete_question_record,
     ensure_unique_question_prompt,
 )
 from .catalog import ensure_unique_module_slug
@@ -408,7 +408,7 @@ def review_question_revision(
 
     if action == "approve":
         if bool(row["delete_requested"]):
-            delete_question_and_close_rank_gap(connection, int(row["question_id"]))
+            delete_question_record(connection, int(row["question_id"]))
         else:
             proposed_type_config = json.loads(row["proposed_type_config_json"])
             _apply_verified_question_revision(

@@ -66,7 +66,7 @@ class ModuleApiTests(PostgresBackendTestCase):
         self.assertEqual(rename_response.status_code, 400)
         self.assertEqual(rename_response.json()["detail"], "Only leaf modules can be renamed.")
 
-    def test_question_delete_removes_question_and_closes_rank_gap(self) -> None:
+    def test_question_delete_removes_question_without_reordering_remaining_siblings(self) -> None:
         norwegian = self.create_module_record("Norwegian")
         weekdays = self.create_module_record("Weekdays", norwegian["id"])
         first_question_id = self.create_question_record(
@@ -105,7 +105,7 @@ class ModuleApiTests(PostgresBackendTestCase):
         remaining_questions = stats_payload["questions"]
         self.assertEqual(len(remaining_questions), 1)
         self.assertEqual(remaining_questions[0]["question_id"], second_question_id)
-        self.assertEqual(remaining_questions[0]["rank"], 1)
+        self.assertEqual(remaining_questions[0]["rank"], 2)
 
         missing_response = self.client.delete(f"/api/questions/{first_question_id}", headers=self.admin_headers)
         self.assertEqual(missing_response.status_code, 404)

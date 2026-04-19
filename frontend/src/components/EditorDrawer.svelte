@@ -19,7 +19,6 @@
   import type {
     AuthActor,
     ModuleNode,
-    PriorityMode,
     QuestionDraftPayload,
     QuestionRow,
     QuestionType
@@ -43,7 +42,6 @@
   let prompt = '';
   let questionType: QuestionType = 'single_text';
   let rank = 1;
-  let priorityMode: PriorityMode = 'mid';
   let moduleId: number | string = 0;
   let resetStats = true;
   let singleAnswersText = '';
@@ -61,7 +59,6 @@
       prompt,
       questionType,
       rank,
-      priorityMode,
       resetStats,
       singleAnswersText,
       multiSlots,
@@ -76,7 +73,6 @@
     prompt = nextState.prompt;
     questionType = nextState.questionType;
     rank = nextState.rank;
-    priorityMode = nextState.priorityMode;
     resetStats = nextState.resetStats;
     singleAnswersText = nextState.singleAnswersText;
     multiSlots = nextState.multiSlots;
@@ -137,8 +133,7 @@
 
   function buildPayload(): QuestionDraftPayload {
     return buildQuestionPayload(currentState(), {
-      selectedModuleIsLeaf,
-      isEditing: Boolean(editingQuestion)
+      selectedModuleIsLeaf
     });
   }
 
@@ -201,7 +196,6 @@
   $: isAdmin = currentActor?.role === 'admin';
   $: isVerifiedNonAdminEdit = Boolean(editingQuestion && !isAdmin && editingQuestion.admin_verified);
   $: moduleSelectionLocked = isVerifiedNonAdminEdit;
-  $: rankLocked = isVerifiedNonAdminEdit;
   $: primaryActionLabel = saving ? 'Saving...' : editingQuestion ? 'Save Revision' : 'Create Question';
   $: deleteActionLabel = deleting
     ? isVerifiedNonAdminEdit
@@ -223,12 +217,7 @@
         singleAnswersText,
         multiSlots,
         inlineBlanks,
-        inlineTail,
-        moduleId: Number(moduleId),
-        rank,
-        priorityMode,
-        resetStats,
-        qmlText
+        inlineTail
       })
     );
   }
@@ -251,7 +240,7 @@
         {/if}
 
         {#if isVerifiedNonAdminEdit}
-          <div class="banner info">This is a personal revision proposal. Module placement and rank stay global until an admin approves it.</div>
+          <div class="banner info">This is a personal revision proposal. Module placement and order stay global until an admin approves it.</div>
         {/if}
 
         {#if !editingQuestion && qmlError}
@@ -275,49 +264,19 @@
                   <p class="muted-copy editor-inline-note">Select a leaf module before saving this question.</p>
                 {/if}
 
-                {#if editingQuestion}
-                  <label class="field">
-                    <span>Question type</span>
-                    <select
-                      bind:value={questionType}
-                      on:change={(event) => setQuestionType((event.currentTarget as HTMLSelectElement).value as QuestionType)}
-                    >
-                      <option value="single_text">Single text</option>
-                      <option value="computed_text">Computed text</option>
-                      <option value="multi_text">Multi text (any order)</option>
-                      <option value="ordered_multi">Ordered multi</option>
-                      <option value="inline_cloze">Inline cloze</option>
-                    </select>
-                  </label>
-
-                  <label class="field editor-field-small">
-                    <span>Rank</span>
-                    <input type="number" min="1" step="1" bind:value={rank} disabled={rankLocked} />
-                  </label>
-                {:else}
-                  <label class="field">
-                    <span>Question type</span>
-                    <select
-                      bind:value={questionType}
-                      on:change={(event) => setQuestionType((event.currentTarget as HTMLSelectElement).value as QuestionType)}
-                    >
-                      <option value="single_text">Single text</option>
-                      <option value="computed_text">Computed text</option>
-                      <option value="multi_text">Multi text (any order)</option>
-                      <option value="ordered_multi">Ordered multi</option>
-                      <option value="inline_cloze">Inline cloze</option>
-                    </select>
-                  </label>
-
-                  <label class="field editor-field-small">
-                    <span>Priority</span>
-                    <select bind:value={priorityMode}>
-                      <option value="high">High</option>
-                      <option value="mid">Mid</option>
-                      <option value="low">Low</option>
-                    </select>
-                  </label>
-                {/if}
+                <label class="field">
+                  <span>Question type</span>
+                  <select
+                    bind:value={questionType}
+                    on:change={(event) => setQuestionType((event.currentTarget as HTMLSelectElement).value as QuestionType)}
+                  >
+                    <option value="single_text">Single text</option>
+                    <option value="computed_text">Computed text</option>
+                    <option value="multi_text">Multi text (any order)</option>
+                    <option value="ordered_multi">Ordered multi</option>
+                    <option value="inline_cloze">Inline cloze</option>
+                  </select>
+                </label>
 
                 <label class="field editor-field-prompt editor-field-wide">
                   <span>Prompt</span>

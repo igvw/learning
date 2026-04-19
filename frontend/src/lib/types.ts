@@ -1,6 +1,5 @@
 export type RouteName = 'quiz' | 'stats' | 'admin';
 export type QuestionType = 'single_text' | 'multi_text' | 'ordered_multi' | 'inline_cloze' | 'computed_text';
-export type PriorityMode = 'high' | 'mid' | 'low';
 export type UserRole = 'admin' | 'user' | 'demo';
 export type ModerationStatus = 'verified' | 'pending' | 'changes_requested' | 'rejected';
 export type ProposalStatus = 'pending' | 'changes_requested' | 'approved' | 'rejected';
@@ -217,7 +216,6 @@ export interface QuestionDraftPayload {
   prompt: string;
   question_type: QuestionType;
   rank: number;
-  priority_mode?: PriorityMode | null;
   accepted_answers: string[][];
   segments: string[];
 }

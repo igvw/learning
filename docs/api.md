@@ -293,12 +293,9 @@ Practical request fields:
 - `module_id`
 - `prompt`
 - `question_type`
-- `rank`
-- optional `priority_mode` for create flow (`high`, `mid`, `low`)
+- `rank` (accepted for compatibility; create placement is server-managed append order)
 - `accepted_answers`
 - optional `segments`
-
-`priority_mode` is resolved against the authenticated actor’s own unseen questions.
 
 ### `POST /api/questions/{question_id}/revisions`
 
@@ -312,7 +309,7 @@ Current role behavior:
 
 Current role behavior:
 
-- admins delete the question immediately and close the rank gap
+- admins delete the question immediately
 - regular users delete only their own pending uploaded questions immediately
 - regular users deleting a verified question create or update a personal delete request proposal instead
 
@@ -344,6 +341,7 @@ Important behavior:
 - same-leaf duplicate rows can revise the existing question in place
 - same-tree prompt matches can move an existing question into a different leaf while keeping question-linked progress
 - imported creates and same-tree relocations append at the end of the target leaf while preserving batch order
+- deletes and source-module moves leave sparse rank gaps; shared order is append-only for now
 - malformed or conflicting rows are returned for review
 - nothing is saved until commit succeeds
 - regular-user imports only create new pending uploaded questions; they do not revise or relocate shared verified questions
