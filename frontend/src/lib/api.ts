@@ -6,6 +6,7 @@ import type {
   HealthResponse,
   LoginPayload,
   ModerationActionPayload,
+  ModerationRevisionActionPayload,
   ModerationQueue,
   ModuleNode,
   MyContributions,
@@ -167,7 +168,7 @@ export function reviewQuestion(questionId: number, payload: ModerationActionPayl
 
 export function reviewQuestionRevision(
   proposalId: number,
-  payload: ModerationActionPayload
+  payload: ModerationRevisionActionPayload
 ): Promise<Record<string, unknown>> {
   return request<Record<string, unknown>>(`/api/moderation/question-revisions/${proposalId}`, {
     method: 'POST',

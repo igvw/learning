@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -7,7 +7,14 @@ import EditorDrawer from '../src/components/EditorDrawer.svelte';
 import ImportDrawer from '../src/components/ImportDrawer.svelte';
 import ModerationQueuePanel from '../src/components/admin/ModerationQueuePanel.svelte';
 import type { ModuleNode, QuestionImportResult } from '../src/lib/types';
-import { buildAuthActor, buildModerationQueue, buildModuleNode, buildMyContributions, buildQuestionRow } from './builders';
+import {
+  buildAuthActor,
+  buildModerationQueue,
+  buildModuleNode,
+  buildMyContributions,
+  buildQuestionRevisionProposal,
+  buildQuestionRow
+} from './builders';
 
 describe('EditorDrawer', () => {
   it('shows type-specific ghost text in create mode', async () => {
@@ -294,45 +301,26 @@ describe('AdminPage', () => {
     });
 
     expect(screen.getByRole('heading', { name: 'Catalog and moderation' })).toBeTruthy();
-    expect(screen.getByRole('heading', { name: 'Accounts' })).toBeTruthy();
-    expect(screen.getByRole('heading', { name: 'Modules' })).toBeTruthy();
-    expect(screen.getByRole('heading', { name: 'Export content' })).toBeTruthy();
-    expect(screen.getByRole('heading', { name: 'Import QML' })).toBeTruthy();
-    expect(screen.getByText('Selected leaf module')).toBeTruthy();
-    expect(screen.getByText('Create module')).toBeTruthy();
-    expect(screen.queryByText('Current modules')).toBeNull();
+    expect(screen.getByRole('button', { name: /^Accounts/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /modules in the tree/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Import/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Export/ })).toBeTruthy();
 
-    expect(screen.getByRole('button', { name: 'Save Module' }).className).toContain('primary-button');
-    expect(screen.getByRole('button', { name: 'Create Module' }).className).toContain('primary-button');
-    expect(screen.getByRole('button', { name: 'Create Account' }).className).toContain('primary-button');
-    expect(screen.getByRole('button', { name: 'Save Role' }).className).toContain('primary-button');
-    expect(screen.getByRole('button', { name: 'Export content' }).className).toContain('primary-button');
-    expect(screen.getByRole('button', { name: 'Import QML' }).className).toContain('primary-button');
+    await user.click(screen.getByRole('button', { name: /^Accounts/ }));
+    const accountsDialog = await screen.findByRole('dialog', { name: 'Accounts' });
+    expect(within(accountsDialog).getByRole('button', { name: 'Create Account' }).className).toContain('primary-button');
+    expect(within(accountsDialog).getByRole('button', { name: 'Save Role' }).className).toContain('primary-button');
 
-    const titleInput = screen.getByDisplayValue('Checks');
-    await user.clear(titleInput);
-    await user.type(titleInput, 'Safety Checks');
-    const editInstruction = screen.getByDisplayValue('List the safety checks in order.');
-    await user.clear(editInstruction);
-    await user.type(editInstruction, 'List each safety check before continuing.');
-    await user.click(screen.getByRole('button', { name: 'Save Module' }));
-
-    expect(updateSpy).toHaveBeenCalledWith(2, {
-      title: 'Safety Checks',
-      instruction: 'List each safety check before continuing.'
-    });
-    expect(await screen.findByText('Module ready: nursing/safety_checks.')).toBeTruthy();
-
-    const confirmPasswordInputs = screen.getAllByLabelText('Confirm password');
-    await user.type(screen.getByLabelText('Username'), 'alice');
-    await user.type(screen.getByLabelText('Display name'), 'Alice');
-    await user.type(screen.getByLabelText('Password'), 'password123');
+    const confirmPasswordInputs = within(accountsDialog).getAllByLabelText('Confirm password');
+    await user.type(within(accountsDialog).getByLabelText('Username'), 'alice');
+    await user.type(within(accountsDialog).getByLabelText('Display name'), 'Alice');
+    await user.type(within(accountsDialog).getByLabelText('Password'), 'password123');
     await user.type(confirmPasswordInputs[0], 'password999');
-    expect((screen.getByRole('button', { name: 'Create Account' }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText('Passwords must match before creating an account.')).toBeTruthy();
+    expect((within(accountsDialog).getByRole('button', { name: 'Create Account' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(accountsDialog).getByText('Passwords must match before creating an account.')).toBeTruthy();
     await user.clear(confirmPasswordInputs[0]);
     await user.type(confirmPasswordInputs[0], 'password123');
-    await user.click(screen.getByRole('button', { name: 'Create Account' }));
+    await user.click(within(accountsDialog).getByRole('button', { name: 'Create Account' }));
     expect(createUserSpy).toHaveBeenCalledWith({
       handle: 'alice',
       display_name: 'Alice',
@@ -341,34 +329,49 @@ describe('AdminPage', () => {
     });
     expect(await screen.findByText('Account ready: Alice.')).toBeTruthy();
 
-    await user.selectOptions(screen.getByLabelText('Manage account'), '9');
-    await user.selectOptions(screen.getAllByLabelText('Role')[1], 'admin');
-    await user.click(screen.getByRole('button', { name: 'Save Role' }));
+    await user.selectOptions(within(accountsDialog).getByLabelText('Manage account'), '9');
+    await user.selectOptions(within(accountsDialog).getAllByLabelText('Role')[1], 'admin');
+    await user.click(within(accountsDialog).getByRole('button', { name: 'Save Role' }));
     expect(updateRoleSpy).toHaveBeenCalledWith(9, 'admin');
     expect(await screen.findByText('Role updated for Ignazio.')).toBeTruthy();
 
-    await user.type(screen.getByLabelText('New password'), 'new-password123');
+    await user.type(within(accountsDialog).getByLabelText('New password'), 'new-password123');
     await user.type(confirmPasswordInputs[1], 'new-password999');
-    expect((screen.getByRole('button', { name: 'Update Password' }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText('Passwords must match before updating a password.')).toBeTruthy();
+    expect((within(accountsDialog).getByRole('button', { name: 'Update Password' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(accountsDialog).getByText('Passwords must match before updating a password.')).toBeTruthy();
     await user.clear(confirmPasswordInputs[1]);
     await user.type(confirmPasswordInputs[1], 'new-password123');
-    await user.click(screen.getByRole('button', { name: 'Update Password' }));
+    await user.click(within(accountsDialog).getByRole('button', { name: 'Update Password' }));
     expect(updatePasswordSpy).toHaveBeenCalledWith(9, 'new-password123');
     expect(await screen.findByText('Password updated.')).toBeTruthy();
 
-    await user.selectOptions(screen.getByLabelText('Import target'), '3');
-    await user.click(screen.getByRole('button', { name: 'Import QML' }));
-    expect(openImportSpy).toHaveBeenCalledWith(3);
+    await user.click(within(accountsDialog).getByRole('button', { name: 'Close' }));
 
-    await user.click(screen.getByRole('button', { name: 'Export content' }));
-    expect(exportContentSpy).toHaveBeenCalledTimes(1);
-    expect(await screen.findByText('Verified content export ready: modules-export.zip.')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: /modules in the tree/i }));
+    const modulesDialog = await screen.findByRole('dialog', { name: 'Modules' });
+    expect(within(modulesDialog).getByRole('button', { name: 'Save Module' }).className).toContain('primary-button');
+    expect(within(modulesDialog).getByRole('button', { name: 'Create Module' }).className).toContain('primary-button');
+    expect(within(modulesDialog).getByText('Selected leaf module')).toBeTruthy();
+    expect(within(modulesDialog).getByText('Create module')).toBeTruthy();
 
-    await user.type(screen.getByPlaceholderText('norwegian/vocabulary/nouns_to_english'), 'Vocabulary');
-    await user.selectOptions(screen.getByLabelText('Parent module'), '1');
-    await user.type(screen.getAllByLabelText('Instruction')[1], 'Use the Norwegian term as the prompt.');
-    await user.click(screen.getByRole('button', { name: 'Create Module' }));
+    const titleInput = within(modulesDialog).getByDisplayValue('Checks');
+    await user.clear(titleInput);
+    await user.type(titleInput, 'Safety Checks');
+    const editInstruction = within(modulesDialog).getByDisplayValue('List the safety checks in order.');
+    await user.clear(editInstruction);
+    await user.type(editInstruction, 'List each safety check before continuing.');
+    await user.click(within(modulesDialog).getByRole('button', { name: 'Save Module' }));
+
+    expect(updateSpy).toHaveBeenCalledWith(2, {
+      title: 'Safety Checks',
+      instruction: 'List each safety check before continuing.'
+    });
+    expect(await screen.findByText('Module ready: nursing/safety_checks.')).toBeTruthy();
+
+    await user.type(within(modulesDialog).getByPlaceholderText('norwegian/vocabulary/nouns_to_english'), 'Vocabulary');
+    await user.selectOptions(within(modulesDialog).getByLabelText('Parent module'), '1');
+    await user.type(within(modulesDialog).getAllByLabelText('Instruction')[1], 'Use the Norwegian term as the prompt.');
+    await user.click(within(modulesDialog).getByRole('button', { name: 'Create Module' }));
 
     expect(createSpy).toHaveBeenCalledWith({
       title: 'Vocabulary',
@@ -377,9 +380,28 @@ describe('AdminPage', () => {
     });
 
     expect(await screen.findByText('Module ready: norwegian.')).toBeTruthy();
+
+    await user.click(within(modulesDialog).getByRole('button', { name: 'Close' }));
+
+    await user.click(screen.getByRole('button', { name: /^Import/ }));
+    const importDialog = await screen.findByRole('dialog', { name: 'Import' });
+    expect(within(importDialog).getByRole('button', { name: 'Import QML' }).className).toContain('primary-button');
+    await user.selectOptions(within(importDialog).getByLabelText('Import target'), '3');
+    await user.click(within(importDialog).getByRole('button', { name: 'Import QML' }));
+    expect(openImportSpy).toHaveBeenCalledWith(3);
+
+    await user.click(within(importDialog).getByRole('button', { name: 'Close' }));
+
+    await user.click(screen.getByRole('button', { name: /^Export/ }));
+    const exportDialog = await screen.findByRole('dialog', { name: 'Export' });
+    expect(within(exportDialog).getByRole('button', { name: 'Export content' }).className).toContain('primary-button');
+    await user.click(within(exportDialog).getByRole('button', { name: 'Export content' }));
+    expect(exportContentSpy).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText('Verified content export ready: modules-export.zip.')).toBeTruthy();
   });
 
-  it('hides the export content panel for regular contributors', () => {
+  it('shows module and contributions summaries for regular contributors without import or export', async () => {
+    const user = userEvent.setup();
     render(AdminPage, {
       props: {
         currentActor: buildAuthActor({ handle: 'alice', display_name: 'Alice', role: 'user' }),
@@ -403,12 +425,28 @@ describe('AdminPage', () => {
         users: [],
         selectedModuleId: 2,
         moderationQueue: null,
-        contributions: buildMyContributions()
+        contributions: buildMyContributions({
+          revisions: [
+            buildQuestionRevisionProposal({
+              proposal_id: 41,
+              module_full_slug: 'nursing/checks',
+              current_prompt: 'sanitize',
+              proposed_prompt: 'sanitize hands'
+            })
+          ]
+        })
       }
     });
 
-    expect(screen.queryByRole('heading', { name: 'Export content' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Export content' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Import/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Export/ })).toBeNull();
+    expect(screen.getByRole('button', { name: /^Modules/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^My contributions/ })).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: /^My contributions/ }));
+    const contributionsDialog = await screen.findByRole('dialog', { name: 'My contributions' });
+    await user.click(within(contributionsDialog).getByRole('button', { name: /^nursing\/checks/i }));
+    expect(await screen.findByRole('dialog', { name: 'Revision detail' })).toBeTruthy();
   });
 });
 
@@ -417,6 +455,8 @@ describe('ModerationQueuePanel', () => {
     const user = userEvent.setup();
     const moderationSpy = vi.fn().mockResolvedValue(undefined);
     const bulkSpy = vi.fn().mockResolvedValue({ succeeded: 2, failed: 0 });
+    const bulkRevisionSpy = vi.fn().mockResolvedValue({ succeeded: 1, failed: 0 });
+    const openRevisionEditorSpy = vi.fn();
 
     render(ModerationQueuePanel, {
       props: {
@@ -468,45 +508,147 @@ describe('ModerationQueuePanel', () => {
             }
           ],
           pending_revisions: [
-            {
+            buildQuestionRevisionProposal({
               proposal_id: 21,
               question_id: 5,
               proposer_user_id: 3,
               proposer_display_name: 'Bob',
-              status: 'pending',
-              delete_requested: false,
-              admin_review_note: '',
               module_id: 3,
               module_full_slug: 'norwegian/vocabulary/noun2en',
               current_prompt: 'dag',
               current_question_type: 'single_text',
               current_accepted_answers: [['day']],
-              current_segments: [],
               proposed_prompt: 'dagen',
               proposed_question_type: 'single_text',
-              proposed_accepted_answers: [['the day']],
-              proposed_segments: []
-            }
+              proposed_accepted_answers: [['the day']]
+            }),
+            buildQuestionRevisionProposal({
+              proposal_id: 22,
+              question_id: 6,
+              proposer_user_id: 3,
+              proposer_display_name: 'Bob',
+              module_id: 3,
+              module_full_slug: 'norwegian/vocabulary/noun2en',
+              current_prompt: 'liten',
+              current_question_type: 'single_text',
+              current_accepted_answers: [['small']],
+              proposed_prompt: 'liten',
+              proposed_question_type: 'multi_text',
+              proposed_accepted_answers: [['small'], ['little']]
+            }),
+            buildQuestionRevisionProposal({
+              proposal_id: 23,
+              question_id: 7,
+              proposer_user_id: 3,
+              proposer_display_name: 'Bob',
+              module_id: 3,
+              module_full_slug: 'norwegian/vocabulary/noun2en',
+              current_prompt: 'natt',
+              current_question_type: 'single_text',
+              current_accepted_answers: [['night']],
+              proposed_prompt: 'natt',
+              proposed_question_type: 'single_text',
+              proposed_accepted_answers: [['night']],
+              delete_requested: true
+            }),
+            buildQuestionRevisionProposal({
+              proposal_id: 24,
+              question_id: 8,
+              proposer_user_id: 3,
+              proposer_display_name: 'Bob',
+              module_id: 3,
+              module_full_slug: 'norwegian/vocabulary/noun2en',
+              current_prompt: 'morgen',
+              current_question_type: 'inline_cloze',
+              current_accepted_answers: [['morning']],
+              current_segments: ['It is ', '.'],
+              proposed_prompt: 'morgen',
+              proposed_question_type: 'inline_cloze',
+              proposed_accepted_answers: [['early morning']],
+              proposed_segments: ['This is ', '.']
+            })
           ]
         }),
         onModerationAction: moderationSpy,
-        onBulkQuestionModeration: bulkSpy
+        onBulkQuestionModeration: bulkSpy,
+        onBulkRevisionModeration: bulkRevisionSpy,
+        onOpenRevisionEditor: openRevisionEditorSpy
       }
     });
 
-    expect(screen.getByRole('button', { name: /Pending modules/i })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /Pending uploaded questions/i })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /Pending revisions/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Modules/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Uploads/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Revisions/i })).toBeTruthy();
 
-    await user.click(screen.getByRole('button', { name: /Pending modules/i }));
+    await user.click(screen.getByRole('button', { name: /^Modules/i }));
     expect(screen.getByRole('heading', { name: 'Pending modules' })).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Close' }));
 
-    await user.click(screen.getByRole('button', { name: /Pending revisions/i }));
+    await user.click(screen.getByRole('button', { name: /^Revisions/i }));
     expect(screen.getByRole('heading', { name: 'Pending revisions' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Open pending revisions for norwegian/vocabulary/noun2en' })).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: 'Open pending revisions for norwegian/vocabulary/noun2en' }));
+    expect(screen.getByRole('button', { name: 'Back to modules' })).toBeTruthy();
+    expect(screen.getByText('Delete requests')).toBeTruthy();
+    expect(screen.getByText('Type changes')).toBeTruthy();
+    expect(screen.getByText('Prompt changes')).toBeTruthy();
+    expect(screen.getByText('Answer / segment changes')).toBeTruthy();
+    expect(screen.queryByLabelText('Select all revisions in Prompt changes')).toBeNull();
+
+    const revisionsDialog = screen.getByRole('dialog', { name: 'Pending revisions' });
+    const promptToggle = within(revisionsDialog).getByText('Prompt changes').closest('button');
+    expect(promptToggle).toBeTruthy();
+    await user.click(promptToggle as HTMLElement);
+    await waitFor(() => {
+      expect(screen.getByLabelText('Select all revisions in Prompt changes')).toBeTruthy();
+    });
+    const promptHeading = screen.getByText('Prompt changes');
+    const promptSection = promptHeading.closest('section');
+    expect(promptSection).toBeTruthy();
+    expect(within(promptSection as HTMLElement).getByRole('columnheader', { name: 'Changes' })).toBeTruthy();
+    expect(within(promptSection as HTMLElement).queryByRole('columnheader', { name: 'Question' })).toBeNull();
+    expect(within(promptSection as HTMLElement).getByRole('columnheader', { name: 'Reset' })).toBeTruthy();
+    expect(within(promptSection as HTMLElement).getByText('Current')).toBeTruthy();
+    expect(within(promptSection as HTMLElement).getByText('Proposed')).toBeTruthy();
+    expect(within(promptSection as HTMLElement).getAllByText('Single text').length).toBeGreaterThan(0);
+    expect(within(promptSection as HTMLElement).queryByText(/^Prompt$/)).toBeNull();
+    expect(screen.queryByRole('button', { name: /Request changes/i })).toBeNull();
+    expect(
+      (within(promptSection as HTMLElement).getByLabelText(
+        'Reset stats for revision proposal for dag'
+      ) as HTMLInputElement).checked
+    ).toBe(true);
+
+    await user.click(screen.getByRole('button', { name: 'Open revision editor for dag' }));
+    expect(openRevisionEditorSpy).toHaveBeenCalledWith(expect.objectContaining({ proposal_id: 21 }));
+
+    await user.click(screen.getByLabelText('Select all revisions in Prompt changes'));
+    await user.click(within(promptSection as HTMLElement).getByRole('button', { name: 'Approve selected' }));
+
+    expect(bulkRevisionSpy).toHaveBeenCalledWith([{ proposalId: 21, resetStats: true }], {
+      action: 'approve',
+      note: ''
+    });
+    expect(await screen.findByText('Approved 1 revision.')).toBeTruthy();
+
+    const deleteToggle = within(revisionsDialog).getByText('Delete requests').closest('button');
+    expect(deleteToggle).toBeTruthy();
+    await user.click(deleteToggle as HTMLElement);
+    const deleteHeading = screen.getByText('Delete requests');
+    const deleteSection = deleteHeading.closest('section');
+    expect(deleteSection).toBeTruthy();
+    expect(within(deleteSection as HTMLElement).queryByText('Proposed')).toBeNull();
+    expect(within(deleteSection as HTMLElement).queryByText(/^Delete$/)).toBeNull();
+    expect(within(deleteSection as HTMLElement).getByText('natt')).toBeTruthy();
+    expect(within(deleteSection as HTMLElement).getByRole('button', { name: 'Approve revision proposal for natt' })).toBeTruthy();
+    expect(within(deleteSection as HTMLElement).getByRole('button', { name: 'Reject revision proposal for natt' })).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: 'Back to modules' }));
+    expect(screen.getByRole('button', { name: 'Open pending revisions for norwegian/vocabulary/noun2en' })).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Close' }));
 
-    await user.click(screen.getByRole('button', { name: /Pending uploaded questions/i }));
+    await user.click(screen.getByRole('button', { name: /^Uploads/i }));
     expect(screen.getByRole('heading', { name: 'Pending uploaded questions' })).toBeTruthy();
     expect(screen.getByText('norwegian/vocabulary/noun2en')).toBeTruthy();
 
@@ -565,7 +707,7 @@ describe('ModerationQueuePanel', () => {
       }
     });
 
-    await user.click(screen.getByRole('button', { name: /Pending uploaded questions/i }));
+    await user.click(screen.getByRole('button', { name: /^Uploads/i }));
     await user.click(screen.getByLabelText('Select all pending questions in science/chemistry'));
     await user.click(screen.getByRole('button', { name: 'Reject selected' }));
 

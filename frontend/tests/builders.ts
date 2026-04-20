@@ -3,6 +3,7 @@ import type {
   ModuleNode,
   MyContributions,
   ModerationQueue,
+  QuestionRevisionProposal,
   QuestionImportResult,
   QuestionImportReviewRow,
   QuestionImportRowPayload,
@@ -223,6 +224,31 @@ export function buildModerationQueue(overrides: Partial<ModerationQueue> = {}): 
     pending_modules: [],
     pending_questions: [],
     pending_revisions: [],
+    ...overrides
+  };
+}
+
+export function buildQuestionRevisionProposal(
+  overrides: Partial<QuestionRevisionProposal> = {}
+): QuestionRevisionProposal {
+  return {
+    proposal_id: 1,
+    question_id: 1,
+    proposer_user_id: 2,
+    proposer_display_name: 'Reviewer',
+    status: 'pending',
+    delete_requested: false,
+    admin_review_note: '',
+    module_id: 1,
+    module_full_slug: 'biology',
+    current_prompt: 'cell',
+    current_question_type: 'single_text',
+    current_accepted_answers: [['cell']],
+    current_segments: [],
+    proposed_prompt: 'cells',
+    proposed_question_type: 'single_text',
+    proposed_accepted_answers: [['cells']],
+    proposed_segments: [],
     ...overrides
   };
 }

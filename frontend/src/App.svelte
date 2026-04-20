@@ -8,6 +8,7 @@
   import ModuleMenu from './components/ModuleMenu.svelte';
   import QuizPage from './components/QuizPage.svelte';
   import StatsPage from './components/StatsPage.svelte';
+  import { buildModerationRevisionSeed } from './lib/admin-page';
   import {
     clearLegacySelectionStorage,
     findModuleTitle,
@@ -71,6 +72,7 @@
   import { applyQuestionReviewFlag, applySubmitAnswerResult } from './lib/quiz-session';
   import type {
     AuthActor,
+    BulkRevisionModerationItem,
     BulkModerationResult,
     CreateModulePayload,
     CreateUserPayload,
@@ -78,10 +80,12 @@
     ModerationActionPayload,
     ModerationKind,
     ModerationQueue,
+    ModerationRevisionActionPayload,
     ModuleNode,
     MyContributions,
     QuestionDraftPayload,
     QuestionImportRowPayload,
+    QuestionRevisionProposal,
     QuestionRow,
     QuizSession,
     RouteName,
@@ -116,7 +120,9 @@
   let reviewOnly = false;
 
   let editorOpen = false;
+  let editorMode: 'standard' | 'moderation' = 'standard';
   let editingQuestion: QuestionRow | null = null;
+  let editingRevisionProposal: QuestionRevisionProposal | null = null;
   let savingQuestion = false;
   let deletingQuestion = false;
 
@@ -399,18 +405,33 @@
   }
 
   function handleOpenCreate(): void {
+    editorMode = 'standard';
+    editingRevisionProposal = null;
     editingQuestion = null;
     deletingQuestion = false;
     editorOpen = true;
   }
 
   function handleOpenEdit(question: QuestionRow): void {
+    editorMode = 'standard';
+    editingRevisionProposal = null;
     deletingQuestion = false;
     editorOpen = true;
     editingQuestion = question;
   }
 
+  function handleOpenRevisionEditor(proposal: QuestionRevisionProposal): void {
+    editorMode = 'moderation';
+    editingRevisionProposal = proposal;
+    editingQuestion = buildModerationRevisionSeed(proposal, proposal.delete_requested ? 'current' : 'proposed');
+    deletingQuestion = false;
+    editorOpen = true;
+  }
+
   function handleOpenImportForModule(moduleId: number): void {
+    if (currentActor?.role !== 'admin') {
+      return;
+    }
     importState = openImportUiForModule(importState, moduleId);
   }
 
@@ -441,6 +462,14 @@
     return findModuleNode(modules, updated.id) ?? updated;
   }
 
+  function closeEditor(): void {
+    editorOpen = false;
+    editorMode = 'standard';
+    editingQuestion = null;
+    editingRevisionProposal = null;
+    deletingQuestion = false;
+  }
+
   async function reloadAfterQuestionMutation(): Promise<void> {
     session = null;
     await loadModules();
@@ -452,20 +481,40 @@
     }
   }
 
+  async function reloadAfterModerationMutation(): Promise<void> {
+    await loadRoleData();
+    await loadModules();
+    if (currentRoute === 'stats') {
+      await loadStats();
+    }
+  }
+
   async function handleSaveQuestion(payload: QuestionDraftPayload, resetStats: boolean): Promise<void> {
     savingQuestion = true;
     try {
-      if (editingQuestion) {
+      if (editorMode === 'moderation' && editingRevisionProposal) {
+        await reviewQuestionRevision(editingRevisionProposal.proposal_id, {
+          action: 'approve',
+          note: '',
+          edited_revision: {
+            ...payload,
+            reset_stats: resetStats
+          }
+        });
+        closeEditor();
+        await reloadAfterModerationMutation();
+      } else if (editingQuestion) {
         await reviseQuestion(editingQuestion.question_id, {
           ...payload,
           reset_stats: resetStats
         });
+        closeEditor();
+        await reloadAfterQuestionMutation();
       } else {
         await createQuestion(payload);
+        closeEditor();
+        await reloadAfterQuestionMutation();
       }
-      editorOpen = false;
-      editingQuestion = null;
-      await reloadAfterQuestionMutation();
     } finally {
       savingQuestion = false;
     }
@@ -475,8 +524,7 @@
     deletingQuestion = true;
     try {
       await deleteQuestion(questionId);
-      editorOpen = false;
-      editingQuestion = null;
+      closeEditor();
       await reloadAfterQuestionMutation();
     } finally {
       deletingQuestion = false;
@@ -484,7 +532,7 @@
   }
 
   async function handleStartImport(qmlText: string): Promise<void> {
-    if (!importTargetModuleNode) {
+    if (!importTargetModuleNode || currentActor?.role !== 'admin') {
       return;
     }
     importState = {
@@ -516,7 +564,7 @@
   }
 
   async function handleCommitImport(rows: QuestionImportRowPayload[]): Promise<void> {
-    if (!importTargetModuleNode) {
+    if (!importTargetModuleNode || currentActor?.role !== 'admin') {
       return;
     }
     let queuedRows: QuestionImportRowPayload[] = [];
@@ -621,7 +669,7 @@
   async function handleModerationAction(
     kind: ModerationKind,
     id: number,
-    payload: ModerationActionPayload
+    payload: ModerationRevisionActionPayload
   ): Promise<void> {
     if (kind === 'module') {
       await reviewModule(id, payload);
@@ -630,23 +678,29 @@
     } else {
       await reviewQuestionRevision(id, payload);
     }
-    await loadRoleData();
-    await loadModules();
-    if (currentRoute === 'stats') {
-      await loadStats();
-    }
+    await reloadAfterModerationMutation();
   }
 
   async function handleBulkQuestionModeration(
     questionIds: number[],
     payload: ModerationActionPayload
   ): Promise<BulkModerationResult> {
+    return handleBulkModeration(questionIds, payload, reviewQuestion);
+  }
+
+  async function handleBulkRevisionModeration(
+    items: BulkRevisionModerationItem[],
+    payload: ModerationActionPayload
+  ): Promise<BulkModerationResult> {
     let succeeded = 0;
     let failed = 0;
 
-    for (const questionId of questionIds) {
+    for (const item of items) {
       try {
-        await reviewQuestion(questionId, payload);
+        await reviewQuestionRevision(item.proposalId, {
+          ...payload,
+          ...(payload.action === 'approve' ? { reset_stats: item.resetStats } : {})
+        });
         succeeded += 1;
       } catch (error) {
         console.error(error);
@@ -654,11 +708,30 @@
       }
     }
 
-    await loadRoleData();
-    await loadModules();
-    if (currentRoute === 'stats') {
-      await loadStats();
+    await reloadAfterModerationMutation();
+
+    return { succeeded, failed };
+  }
+
+  async function handleBulkModeration(
+    ids: number[],
+    payload: ModerationActionPayload,
+    handler: (id: number, payload: ModerationActionPayload) => Promise<Record<string, unknown>>
+  ): Promise<BulkModerationResult> {
+    let succeeded = 0;
+    let failed = 0;
+
+    for (const id of ids) {
+      try {
+        await handler(id, payload);
+        succeeded += 1;
+      } catch (error) {
+        console.error(error);
+        failed += 1;
+      }
     }
+
+    await reloadAfterModerationMutation();
 
     return { succeeded, failed };
   }
@@ -721,7 +794,7 @@
     <Header
       currentRoute={currentRoute}
       currentActor={currentActor}
-      importStatusVisible={importStatus.visible}
+      importStatusVisible={currentActor?.role === 'admin' && importStatus.visible}
       importStatusLabel={importStatus.label}
       importStatusDetail={importStatus.detail}
       importStatusTone={importStatus.tone}
@@ -759,7 +832,6 @@
       {:else if currentRoute === 'stats'}
         <StatsPage
           moduleLabel={selectedModuleLabel}
-          activeUserLabel={activeActorLabel}
           stats={stats}
           loading={statsLoading}
           reviewOnly={reviewOnly}
@@ -785,6 +857,8 @@
           onExportContent={handleExportContent}
           onModerationAction={handleModerationAction}
           onBulkQuestionModeration={handleBulkQuestionModeration}
+          onBulkRevisionModeration={handleBulkRevisionModeration}
+          onOpenRevisionEditor={handleOpenRevisionEditor}
         />
       {/if}
     </main>
@@ -794,16 +868,17 @@
       modules={modules}
       defaultModuleId={selectedModuleId}
       editingQuestion={editingQuestion}
+      mode={editorMode}
       saving={savingQuestion}
       deleting={deletingQuestion}
       currentActor={currentActor}
-      onClose={() => (editorOpen = false)}
+      onClose={closeEditor}
       onSave={handleSaveQuestion}
       onDelete={handleDeleteQuestion}
     />
 
     <ImportDrawer
-      open={importState.open}
+      open={currentActor?.role === 'admin' && importState.open}
       moduleNode={importTargetModuleNode}
       result={importState.result}
       busy={importState.busy}

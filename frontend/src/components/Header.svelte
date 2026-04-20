@@ -86,8 +86,7 @@
       <span></span>
     </button>
     <div>
-      <p class="eyebrow">Keyboard-first learning</p>
-      <h1>Learning App</h1>
+      <h1>Learning</h1>
     </div>
   </div>
 

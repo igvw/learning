@@ -24,24 +24,15 @@
       <div class="panel modal-panel retry-detail-panel" role="dialog" aria-modal="true" aria-labelledby="retry-detail-title">
         <div class="panel-header sticky retry-detail-header">
           <div>
-            <p class="eyebrow">Retry detail</p>
             <h2 id="retry-detail-title">Retry eligibility details</h2>
           </div>
           <button type="button" class="ghost-button" on:click={onClose}>Close</button>
         </div>
 
-        <p class="muted-copy retry-detail-copy">
-          These charts break fixed-bucket due times into the next 24 local clock hours for the current <code>&lt;1</code> group and rolling
-          7-day windows for the current <code>&gt;7</code> group.
-        </p>
-
         <div class="retry-detail-stack">
           <section class="retry-detail-section">
             <div class="subsection-header">
-              <div>
-                <h3>&lt;1 by hour</h3>
-                <p class="muted-copy">{hourlyTotal} fixed-bucket questions currently land in the main graph&apos;s <code>&lt;1</code> bucket.</p>
-              </div>
+              <div><h3>&lt;1 by hour</h3></div>
             </div>
 
             {#if hourlyTotal === 0}
@@ -87,10 +78,7 @@
 
           <section class="retry-detail-section">
             <div class="subsection-header">
-              <div>
-                <h3>&gt;7 by week</h3>
-                <p class="muted-copy">{longRangeTotal} fixed-bucket questions currently land in the main graph&apos;s <code>&gt;7</code> bucket.</p>
-              </div>
+              <div><h3>&gt;7 by week</h3></div>
             </div>
 
             {#if longRangeTotal === 0}

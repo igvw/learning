@@ -1,18 +1,23 @@
 <script lang="ts">
   import AccountsPanel from './admin/AccountsPanel.svelte';
+  import AdminSummaryCard from './admin/AdminSummaryCard.svelte';
   import ContributionsPanel from './admin/ContributionsPanel.svelte';
+  import ModerationOverlay from './admin/ModerationOverlay.svelte';
   import ModerationQueuePanel from './admin/ModerationQueuePanel.svelte';
   import ModuleManagementPanel from './admin/ModuleManagementPanel.svelte';
   import { flattenModules } from '../lib/admin-page';
   import type {
     AuthActor,
+    BulkRevisionModerationItem,
     BulkModerationResult,
     CreateModulePayload,
     ModerationActionPayload,
     ModerationKind,
+    ModerationRevisionActionPayload,
     ModerationQueue,
     ModuleNode,
     MyContributions,
+    QuestionRevisionProposal,
     UpdateModulePayload,
     User
   } from '../lib/types';
@@ -57,7 +62,7 @@
   export let onModerationAction: (
     kind: ModerationKind,
     id: number,
-    payload: ModerationActionPayload
+    payload: ModerationRevisionActionPayload
   ) => Promise<void> = async () => {
     throw new Error('Moderation handler is not configured.');
   };
@@ -67,10 +72,20 @@
   ) => Promise<BulkModerationResult> = async () => {
     throw new Error('Bulk moderation handler is not configured.');
   };
+  export let onBulkRevisionModeration: (
+    items: BulkRevisionModerationItem[],
+    payload: ModerationActionPayload
+  ) => Promise<BulkModerationResult> = async () => {
+    throw new Error('Bulk revision moderation handler is not configured.');
+  };
+  export let onOpenRevisionEditor: (proposal: QuestionRevisionProposal) => void = () => {};
+
+  let openOverlay: 'accounts' | 'modules' | 'import' | 'export' | null = null;
 
   $: isAdmin = currentActor?.role === 'admin';
   $: isDemo = currentActor?.role === 'demo';
   $: flatModules = flattenModules(modules);
+  $: selectedFlatModule = flatModules.find((module) => module.id === selectedModuleId) ?? null;
 </script>
 
 <section class="page admin-page">
@@ -87,35 +102,159 @@
 
   <div class="admin-stack">
     {#if isAdmin}
-      <AccountsPanel
-        users={users}
-        isDemo={isDemo}
-        onCreateUser={onCreateUser}
-        onUpdateUserRole={onUpdateUserRole}
-        onUpdateUserPassword={onUpdateUserPassword}
-      />
-    {/if}
+      <div class="admin-summary-grid">
+        <AdminSummaryCard
+          title="Accounts"
+          detail={`${users.length} account${users.length === 1 ? '' : 's'}`}
+          countLabel={String(users.length)}
+          onClick={() => {
+            openOverlay = 'accounts';
+          }}
+        />
+        <AdminSummaryCard
+          title="Modules"
+          detail={`${flatModules.length} module${flatModules.length === 1 ? '' : 's'} in the tree`}
+          countLabel={String(flatModules.length)}
+          onClick={() => {
+            openOverlay = 'modules';
+          }}
+        />
+      </div>
 
-    <ModuleManagementPanel
-      currentActorId={currentActor?.id ?? null}
-      isAdmin={isAdmin}
-      isDemo={isDemo}
-      flatModules={flatModules}
-      selectedModuleId={selectedModuleId}
-      onCreateModule={onCreateModule}
-      onUpdateModule={onUpdateModule}
-      onOpenImport={onOpenImport}
-      onExportContent={onExportContent}
-    />
+      <div class="admin-summary-grid">
+        <AdminSummaryCard
+          title="Import"
+          detail="Validate and commit QML into a verified leaf."
+          onClick={() => {
+            openOverlay = 'import';
+          }}
+        />
+        <AdminSummaryCard
+          title="Export"
+          detail="Download the full verified module tree."
+          onClick={() => {
+            openOverlay = 'export';
+          }}
+        />
+      </div>
+    {:else}
+      <div class="admin-summary-grid">
+        <AdminSummaryCard
+          title="Modules"
+          detail={
+            selectedFlatModule
+              ? `Selected: ${selectedFlatModule.full_slug}`
+              : `${flatModules.length} module${flatModules.length === 1 ? '' : 's'} available`
+          }
+          countLabel={String(flatModules.length)}
+          onClick={() => {
+            openOverlay = 'modules';
+          }}
+        />
+      </div>
+    {/if}
 
     {#if isAdmin}
       <ModerationQueuePanel
         moderationQueue={moderationQueue}
         onModerationAction={onModerationAction}
         onBulkQuestionModeration={onBulkQuestionModeration}
+        onBulkRevisionModeration={onBulkRevisionModeration}
+        onOpenRevisionEditor={onOpenRevisionEditor}
       />
     {:else}
       <ContributionsPanel contributions={contributions} />
     {/if}
   </div>
 </section>
+
+<ModerationOverlay
+  open={openOverlay === 'accounts'}
+  eyebrow=""
+  title="Accounts"
+  titleId="accounts-overlay-title"
+  onClose={() => {
+    openOverlay = null;
+  }}
+>
+  <AccountsPanel
+    users={users}
+    isDemo={isDemo}
+    showHeading={false}
+    onCreateUser={onCreateUser}
+    onUpdateUserRole={onUpdateUserRole}
+    onUpdateUserPassword={onUpdateUserPassword}
+  />
+</ModerationOverlay>
+
+<ModerationOverlay
+  open={openOverlay === 'modules'}
+  eyebrow=""
+  title={isAdmin ? 'Modules' : 'Pending modules'}
+  titleId="modules-overlay-title"
+  onClose={() => {
+    openOverlay = null;
+  }}
+>
+  <ModuleManagementPanel
+    currentActorId={currentActor?.id ?? null}
+    isAdmin={isAdmin}
+    isDemo={isDemo}
+    mode="modules"
+    showHeading={false}
+    flatModules={flatModules}
+    selectedModuleId={selectedModuleId}
+    onCreateModule={onCreateModule}
+    onUpdateModule={onUpdateModule}
+    onOpenImport={onOpenImport}
+    onExportContent={onExportContent}
+  />
+</ModerationOverlay>
+
+<ModerationOverlay
+  open={openOverlay === 'import'}
+  eyebrow=""
+  title="Import"
+  titleId="import-overlay-title"
+  onClose={() => {
+    openOverlay = null;
+  }}
+>
+  <ModuleManagementPanel
+    currentActorId={currentActor?.id ?? null}
+    isAdmin={isAdmin}
+    isDemo={isDemo}
+    mode="import"
+    showHeading={false}
+    flatModules={flatModules}
+    selectedModuleId={selectedModuleId}
+    onCreateModule={onCreateModule}
+    onUpdateModule={onUpdateModule}
+    onOpenImport={onOpenImport}
+    onExportContent={onExportContent}
+  />
+</ModerationOverlay>
+
+<ModerationOverlay
+  open={openOverlay === 'export'}
+  eyebrow=""
+  title="Export"
+  titleId="export-overlay-title"
+  onClose={() => {
+    openOverlay = null;
+  }}
+>
+  <ModuleManagementPanel
+    currentActorId={currentActor?.id ?? null}
+    isAdmin={isAdmin}
+    isDemo={isDemo}
+    mode="export"
+    showHeading={false}
+    flatModules={flatModules}
+    selectedModuleId={selectedModuleId}
+    onCreateModule={onCreateModule}
+    onUpdateModule={onUpdateModule}
+    onOpenImport={onOpenImport}
+    onExportContent={onExportContent}
+  />
+</ModerationOverlay>

@@ -3,6 +3,7 @@
 
   export let users: User[] = [];
   export let isDemo = false;
+  export let showHeading = true;
   export let onCreateUser: (payload: {
     handle: string;
     display_name: string;
@@ -144,9 +145,11 @@
 </script>
 
 <article class="panel admin-bar-panel">
-  <div class="panel-header">
-    <div><h3>Accounts</h3></div>
-  </div>
+  {#if showHeading}
+    <div class="panel-header">
+      <div><h3>Accounts</h3></div>
+    </div>
+  {/if}
 
   {#if userError}
     <div class="banner error">{userError}</div>

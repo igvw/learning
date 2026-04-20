@@ -19,7 +19,6 @@ Key roadmap conclusion:
 - keep the private-hosting auth/session model production-safe
 - private hosting with HTTPS and production-safe deployment defaults
 - reliable backup/restore for real hosted use
-- rank/order performance fixes so imports and bulk authoring are no longer slowed by dense integer-rank updates
 - keep a follow-up hardening pass for user-authored text and parsing paths after QML v2 replaces the current math-style surface
 
 ### Alpha scope that can continue alongside blockers

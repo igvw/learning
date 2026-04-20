@@ -480,90 +480,6 @@ def _commit_import_rows(connection: Any, *, module_id: int, valid_rows: list[dic
     return committed_count
 
 
-def _validate_user_question_import_rows(
-    connection: Any,
-    *,
-    module_id: int,
-    rows: list[dict[str, Any]],
-    actor: Actor,
-) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    ensure_leaf_module(connection, module_id, actor=actor)
-    normalized_rows = _normalize_import_rows(rows)
-    valid_rows: list[dict[str, Any]] = []
-    review_rows: list[dict[str, Any]] = []
-    exact_duplicate_count = 0
-    seen_prompt_keys: set[str] = set()
-
-    for row in normalized_rows:
-        try:
-            payload = QuestionDraftIn(**parse_qml_line(line=row["qml_line"], module_id=module_id, rank=row["row_number"]))
-            type_config = serialize_type_config(payload)
-            prompt_key = stored_prompt_key(payload.question_type, payload.prompt, type_config)
-            if prompt_key in seen_prompt_keys:
-                exact_duplicate_count += 1
-                continue
-            seen_prompt_keys.add(prompt_key)
-
-            existing = connection.execute(
-                """
-                SELECT 1
-                FROM questions AS q
-                WHERE q.module_id = ?
-                  AND q.prompt_key = ?
-                  AND q.moderation_status <> 'rejected'
-                  AND (
-                    q.admin_verified = 1
-                    OR (q.created_by_user_id = ? AND q.admin_verified = 0 AND q.moderation_status IN ('pending', 'changes_requested'))
-                  )
-                LIMIT 1
-                """,
-                (module_id, prompt_key, actor.user_id),
-            ).fetchone()
-            if existing is not None:
-                review_rows.append(
-                    _review_row(
-                        row_number=row["row_number"],
-                        qml_line=row["qml_line"],
-                        status="duplicate",
-                        status_text="This prompt already exists in your visible scope. User imports only create new pending questions.",
-                        editable=True,
-                        blocking=True,
-                        imported_answer_blocks=answer_blocks(type_config),
-                    )
-                )
-                continue
-            valid_rows.append(
-                {
-                    "row_number": row["row_number"],
-                    "qml_line": row["qml_line"],
-                    "payload": payload.model_dump(),
-                    "commit_action": {"kind": "create"},
-                }
-            )
-        except (QMLError, ValueError) as error:
-            review_rows.append(
-                _review_row(
-                    row_number=row["row_number"],
-                    qml_line=row["qml_line"],
-                    status="invalid",
-                    status_text=f"Invalid QML: {error}",
-                    editable=True,
-                    blocking=True,
-                    imported_answer_blocks=[],
-                )
-            )
-
-    return (
-        _result_payload(
-            normalized_rows=normalized_rows,
-            valid_rows=valid_rows,
-            review_rows=review_rows,
-            exact_duplicate_count=exact_duplicate_count,
-        ),
-        valid_rows,
-    )
-
-
 def validate_question_import(
     connection: Any,
     *,
@@ -576,15 +492,7 @@ def validate_question_import(
         normalized_rows = qml_lines_from_text(qml_text) if qml_text is not None else _normalize_import_rows(rows or [])
     except QMLError as error:
         raise ValidationError(str(error)) from error
-    if actor is not None and actor.role != "admin":
-        result, _ = _validate_user_question_import_rows(
-            connection,
-            module_id=module_id,
-            rows=normalized_rows,
-            actor=actor,
-        )
-    else:
-        result, _ = _validate_question_import_rows(connection, module_id=module_id, rows=normalized_rows)
+    result, _ = _validate_question_import_rows(connection, module_id=module_id, rows=normalized_rows)
     return result
 
 
@@ -595,15 +503,7 @@ def commit_question_import(
     rows: list[dict[str, Any]],
     actor: Actor | None = None,
 ) -> dict[str, Any]:
-    if actor is not None and actor.role != "admin":
-        result, valid_rows = _validate_user_question_import_rows(
-            connection,
-            module_id=module_id,
-            rows=rows,
-            actor=actor,
-        )
-    else:
-        result, valid_rows = _validate_question_import_rows(connection, module_id=module_id, rows=rows)
+    result, valid_rows = _validate_question_import_rows(connection, module_id=module_id, rows=rows)
     if any(review_row["blocking"] for review_row in result["review_rows"]):
         return result
     if not valid_rows:

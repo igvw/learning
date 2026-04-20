@@ -2,7 +2,7 @@ import json
 from typing import Any
 
 from ..database import DatabaseConnection, utc_now
-from ..schemas import QuestionDraftIn
+from ..schemas import QuestionDraftIn, QuestionRevisionIn
 from .auth import Actor
 from .authoring import (
     _apply_verified_question_revision,
@@ -10,8 +10,12 @@ from .authoring import (
     ensure_unique_question_prompt,
 )
 from .catalog import ensure_unique_module_slug
-from .errors import NotFoundError
+from .errors import NotFoundError, ValidationError
 from .text import title_from_slug
+
+
+def _stored_rejection_status(action: str) -> str:
+    return "rejected" if action == "reject" else action
 
 
 def _pending_module_rows(connection: DatabaseConnection, *, creator_user_id: int | None = None) -> list[Any]:
@@ -178,7 +182,11 @@ def list_my_contributions(connection: DatabaseConnection, *, actor: Actor) -> di
     return {
         "modules": [_module_payload(row) for row in _pending_module_rows(connection, creator_user_id=int(actor.user_id))],
         "questions": [_question_payload(row) for row in _pending_question_rows(connection, creator_user_id=int(actor.user_id))],
-        "revisions": [_proposal_payload(row) for row in _proposal_rows(connection, proposer_user_id=int(actor.user_id))],
+        "revisions": [
+            _proposal_payload(row)
+            for row in _proposal_rows(connection, proposer_user_id=int(actor.user_id))
+            if row["status"] in {"pending", "changes_requested"}
+        ],
     }
 
 
@@ -239,7 +247,7 @@ def review_module_submission(
                 reviewed_at = ?
             WHERE id = ?
             """,
-            (action, note.strip(), actor.user_id, utc_now(), module_id),
+            (_stored_rejection_status(action), note.strip(), actor.user_id, utc_now(), module_id),
         )
     refreshed = _pending_module_rows(connection)
     target = next((candidate for candidate in refreshed if int(candidate["id"]) == module_id), None)
@@ -337,7 +345,7 @@ def review_question_submission(
                 reviewed_at = ?
             WHERE id = ?
             """,
-            (action, note.strip(), actor.user_id, utc_now(), question_id),
+            (_stored_rejection_status(action), note.strip(), actor.user_id, utc_now(), question_id),
         )
     refreshed = _pending_question_rows(connection)
     target = next((candidate for candidate in refreshed if int(candidate["question_id"]) == question_id), None)
@@ -374,6 +382,8 @@ def review_question_revision(
     proposal_id: int,
     action: str,
     note: str,
+    reset_stats: bool | None = None,
+    edited_revision: QuestionRevisionIn | None = None,
     actor: Actor,
 ) -> dict[str, Any]:
     row = connection.execute(
@@ -406,8 +416,28 @@ def review_question_revision(
     if row is None:
         raise NotFoundError(f"Proposal {proposal_id} was not found.")
 
+    if edited_revision is not None and action != "approve":
+        raise ValidationError("Edited revisions can only be submitted when approving a proposal.")
+    if reset_stats is not None and action != "approve":
+        raise ValidationError("Reset stats can only be submitted when approving a proposal.")
+
     if action == "approve":
-        if bool(row["delete_requested"]):
+        if edited_revision is not None:
+            payload = QuestionDraftIn(
+                module_id=int(row["module_id"]),
+                prompt=edited_revision.prompt,
+                question_type=edited_revision.question_type,
+                rank=int(row["rank"]),
+                accepted_answers=edited_revision.accepted_answers,
+                segments=edited_revision.segments,
+            )
+            _apply_verified_question_revision(
+                connection,
+                question_id=int(row["question_id"]),
+                payload=payload,
+                reset_stats=edited_revision.reset_stats,
+            )
+        elif bool(row["delete_requested"]):
             delete_question_record(connection, int(row["question_id"]))
         else:
             proposed_type_config = json.loads(row["proposed_type_config_json"])
@@ -422,20 +452,20 @@ def review_question_revision(
                     accepted_answers=proposed_type_config.get("accepted_answers", []),
                     segments=proposed_type_config.get("segments", []),
                 ),
-                reset_stats=False,
+                reset_stats=bool(reset_stats),
             )
-            connection.execute(
-                """
-                UPDATE question_revision_proposals
-                SET
-                    status = 'approved',
-                    admin_review_note = ?,
-                    reviewed_by_user_id = ?,
-                    reviewed_at = ?
-                WHERE id = ?
-                """,
-                (note.strip(), actor.user_id, utc_now(), proposal_id),
-            )
+        connection.execute(
+            """
+            UPDATE question_revision_proposals
+            SET
+                status = 'approved',
+                admin_review_note = ?,
+                reviewed_by_user_id = ?,
+                reviewed_at = ?
+            WHERE id = ?
+            """,
+            (note.strip(), actor.user_id, utc_now(), proposal_id),
+        )
     else:
         connection.execute(
             """
@@ -447,7 +477,7 @@ def review_question_revision(
                 reviewed_at = ?
             WHERE id = ?
             """,
-            (action, note.strip(), actor.user_id, utc_now(), proposal_id),
+            (_stored_rejection_status(action), note.strip(), actor.user_id, utc_now(), proposal_id),
         )
 
     refreshed = connection.execute(

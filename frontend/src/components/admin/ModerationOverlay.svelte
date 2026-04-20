@@ -21,7 +21,9 @@
       <div class="panel modal-panel moderation-overlay-panel" role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <div class="panel-header sticky moderation-overlay-header">
           <div>
-            <p class="eyebrow">{eyebrow}</p>
+            {#if eyebrow}
+              <p class="eyebrow">{eyebrow}</p>
+            {/if}
             <h2 id={titleId}>{title}</h2>
           </div>
           <button type="button" class="ghost-button" on:click={onClose}>Close</button>

@@ -19,6 +19,11 @@ The app has three main pages plus a shared module menu:
 
 The header also includes the authenticated account badge and logout menu.
 
+Current header behavior:
+
+- brand text is `Learning`
+- no eyebrow/kicker is shown above the brand
+
 ## Module Menu
 
 The hamburger menu controls module scope.
@@ -55,6 +60,7 @@ Current behavior:
 - correct answers that used a non-default accepted alternative expand that slot’s disabled input to all accepted answers
 - correct answers that used the default accepted answer do not show a separate neutral feedback box
 - the completed session becomes the review surface
+- the old helper card under the start controls is gone; the page now stays focused on scope and start actions
 
 Completed-session behavior:
 
@@ -98,10 +104,11 @@ Current table behavior:
 - clicking `Spaced repetition stages` opens a detail overlay with a due-day heatmap:
   bucket columns `<1d`, `1d`, `3d`, `7d`, `14d`, `30d`, `60d`; day rows from `Today` through the latest scheduled fixed-stage day within the next 60 app-timezone days; overdue items collapse into `Today`
 - `Retry eligibility` groups fixed-bucket due times into `<1`, day buckets `1` through `7`, and `>7`
-- clicking `Retry eligibility` opens a detail overlay with the next 24 clock-hour buckets for the current `<1` group, shown in 24-hour time, and rolling weekly windows for the current `>7` group
+- clicking `Retry eligibility` opens a detail overlay with the same graphs and only graph titles plus empty-state/status copy
 - review rows stay orange when shown in the filtered table
 - hot rows are shaded red in two intensities in the main table
 - logical bucket and hotness are separated intentionally
+- the detail overlays for `Retry eligibility` and `Spaced repetition stages` keep titles and empty-state/status messaging only; explanatory body copy and count blurbs are omitted
 
 ## Revision Drawer
 
@@ -133,20 +140,27 @@ The third route is now role-aware instead of always being a pure admin page.
 Current behavior:
 
 - admins see:
-  account creation and password reset
-  global module editing
-  manual full-content export
-  QML import
+  compact top-row summary cards for `Accounts`, `Modules`, `Import`, and `Export`
+  overlay-based account creation and password reset
+  overlay-based global module editing
+  overlay-based manual full-content export
+  overlay-based QML import
   moderation summary cards for pending modules, pending uploaded questions, and question revision/delete proposals
 - admins open each moderation category in its own overlay instead of keeping the full queue inline on the page
 - the pending uploaded questions overlay groups rows by module and supports bulk approve/reject per module table
-- request-changes stays a row-by-row action, and pending modules plus revision/delete proposals remain individually reviewed
+- the pending revisions overlay opens with module cards, then drills into one module at a time with collapsed change sections
+- each revision row now keeps all question details in one `Changes` snapshot:
+  - normal revisions show side-by-side current/proposed cards
+  - delete requests show a single red current snapshot
+- clicking a revision snapshot opens the shared question drawer in moderation-review mode, and saving approves the edited revision immediately
+- pending revisions support bulk approve/reject per expanded change section
 - the export panel downloads the full verified module tree as `modules-export.zip`
 - regular users see:
-  pending leaf-module creation under verified parents
-  QML import for pending question uploads
-  editable own pending leaf modules
-  a `My contributions` list with statuses and review notes
+  a compact `Modules` summary card that opens pending-module creation/editing
+  one wide `My contributions` summary card
+  a browsable contributions overlay with `Modules`, `Uploaded questions`, and active `Revisions`
+  read-only revision detail using the same snapshot/diff card style as admin moderation, but without moderation actions
+- non-admin import/upload UI is removed
 - demo shows the same contribution surface in a disabled/showcase form
 
 ## Import Drawer
@@ -170,6 +184,7 @@ Current behavior:
 - save with one button and determinate chunk progress
 - allow the drawer to be hidden while an upload keeps running in the current tab
 - show a compact header upload-status pill that reopens the drawer
+- admin-only; regular users no longer have a QML upload path
 
 Current import-save behavior:
 
@@ -178,4 +193,3 @@ Current import-save behavior:
 - while a chunked upload is active, the review rows become read-only status rows
 - partial success keeps the drawer open, removes already committed rows, and revalidates the remainder
 - blocking rows stay highlighted red until edited or removed
-- in demo mode the import entry points stay visible, but saving is blocked

@@ -3,6 +3,50 @@ from test_support import PostgresBackendTestCase
 
 
 class ImportApiTests(PostgresBackendTestCase):
+    def test_import_routes_require_admin_authentication(self) -> None:
+        norwegian = self.create_module_record("Norwegian")
+        target = self.create_module_record("Target", norwegian["id"])
+        validate_payload = {"module_id": target["id"], "qml_text": "hund [dog]"}
+        commit_payload = {"module_id": target["id"], "rows": [{"row_number": 1, "qml_line": "hund [dog]"}]}
+
+        validate_unauthenticated = self.client.post("/api/question-imports/validate", json=validate_payload)
+        self.assertEqual(validate_unauthenticated.status_code, 401)
+        self.assertEqual(validate_unauthenticated.json()["detail"], "Authentication is required.")
+
+        commit_unauthenticated = self.client.post("/api/question-imports/commit", json=commit_payload)
+        self.assertEqual(commit_unauthenticated.status_code, 401)
+        self.assertEqual(commit_unauthenticated.json()["detail"], "Authentication is required.")
+
+        user = self.create_user()
+        validate_user = self.client.post(
+            "/api/question-imports/validate",
+            json=validate_payload,
+            headers=self.user_headers(int(user["id"])),
+        )
+        self.assertEqual(validate_user.status_code, 403)
+        self.assertEqual(validate_user.json()["detail"], "Admin access is required.")
+
+        commit_user = self.client.post(
+            "/api/question-imports/commit",
+            json=commit_payload,
+            headers=self.user_headers(int(user["id"])),
+        )
+        self.assertEqual(commit_user.status_code, 403)
+        self.assertEqual(commit_user.json()["detail"], "Admin access is required.")
+
+        demo_response = self.client.post("/api/auth/demo-session")
+        self.assertEqual(demo_response.status_code, 200)
+        demo_headers = self._cookie_headers_from_response(demo_response)
+        self.client.cookies.clear()
+
+        validate_demo = self.client.post("/api/question-imports/validate", json=validate_payload, headers=demo_headers)
+        self.assertEqual(validate_demo.status_code, 403)
+        self.assertEqual(validate_demo.json()["detail"], "Admin access is required.")
+
+        commit_demo = self.client.post("/api/question-imports/commit", json=commit_payload, headers=demo_headers)
+        self.assertEqual(commit_demo.status_code, 403)
+        self.assertEqual(commit_demo.json()["detail"], "Admin access is required.")
+
     def test_same_tree_reimport_moves_question_and_preserves_progress(self) -> None:
         module_ids = self.create_module_tree()
         self.create_question_record(module_ids["target"], "først", [["first"]], rank=1)

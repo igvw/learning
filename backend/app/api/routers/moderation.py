@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from ...database import DatabaseConnection
-from ...schemas import ModerationActionIn, ModerationQueueOut, MyContributionsOut
+from ...schemas import ModerationActionIn, ModerationQueueOut, ModerationRevisionActionIn, MyContributionsOut
 from ...services import (
     Actor,
     list_moderation_queue,
@@ -67,7 +67,7 @@ def moderation_question_review(
 @router.post("/api/moderation/question-revisions/{proposal_id}", response_model=dict)
 def moderation_question_revision_review(
     proposal_id: int,
-    payload: ModerationActionIn,
+    payload: ModerationRevisionActionIn,
     actor: Actor = Depends(require_admin_actor),
     connection: DatabaseConnection = Depends(database_connection),
 ) -> dict:
@@ -76,5 +76,7 @@ def moderation_question_revision_review(
         proposal_id=proposal_id,
         action=payload.action,
         note=payload.note,
+        reset_stats=payload.reset_stats,
+        edited_revision=payload.edited_revision,
         actor=actor,
     )

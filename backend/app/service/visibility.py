@@ -109,23 +109,12 @@ def list_effective_question_rows(
         if not question_visible_to_actor(row, actor):
             continue
         proposal = proposals_by_question.get(int(row["question_id"]))
-        if proposal is not None and proposal["delete_requested"] and bool(row["admin_verified"]):
+        if proposal is not None and bool(row["admin_verified"]):
             continue
 
         question_type = row["question_type"]
         prompt = row["prompt"]
         type_config = json.loads(row["type_config_json"])
-        viewer_proposal = None
-        if proposal is not None and not proposal["delete_requested"] and bool(row["admin_verified"]):
-            prompt = proposal["prompt"]
-            question_type = proposal["question_type"]
-            type_config = proposal["type_config"]
-            viewer_proposal = {
-                "proposal_id": proposal["proposal_id"],
-                "status": proposal["status"],
-                "delete_requested": proposal["delete_requested"],
-                "admin_review_note": proposal["admin_review_note"],
-            }
 
         effective_rows.append(
             {
@@ -141,7 +130,7 @@ def list_effective_question_rows(
                 "admin_verified": bool(row["admin_verified"]),
                 "moderation_status": row["moderation_status"],
                 "creator_display_name": row["creator_display_name"],
-                "viewer_proposal": viewer_proposal,
+                "viewer_proposal": None,
             }
         )
     return effective_rows

@@ -11,7 +11,6 @@
     }
   }
 
-  $: totalQuestions = graph.cells.reduce((total, cell) => total + cell.count, 0);
 </script>
 
 <svelte:window on:keydown={handleWindowKeydown} />
@@ -22,22 +21,13 @@
       <div class="panel modal-panel stage-detail-panel" role="dialog" aria-modal="true" aria-labelledby="stage-detail-title">
         <div class="panel-header sticky stage-detail-header">
           <div>
-            <p class="eyebrow">Stage detail</p>
             <h2 id="stage-detail-title">Spaced repetition stage details</h2>
           </div>
           <button type="button" class="ghost-button" on:click={onClose}>Close</button>
         </div>
 
-        <p class="muted-copy stage-detail-copy">
-          This heatmap shows when fixed-stage questions are due next. Columns group the current spaced-repetition stages, rows show
-          local calendar days from today through the latest scheduled day within the next 60 days, and darker cells mean more questions.
-        </p>
-
         <div class="subsection-header">
-          <div>
-            <h3>Due-day heatmap</h3>
-            <p class="muted-copy">{totalQuestions} fixed-stage questions are represented in this matrix.</p>
-          </div>
+          <div><h3>Due-day heatmap</h3></div>
         </div>
 
         {#if graph.rows.length === 0}

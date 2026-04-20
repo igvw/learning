@@ -160,7 +160,13 @@ Admin-only. Replaces one real account password.
 
 ### `GET /api/contributions/me`
 
-Returns the current regular user’s pending modules, pending uploaded questions, and revision/delete proposals.
+Returns the current regular user’s active contribution queue:
+
+- pending modules
+- pending uploaded questions
+- active revision/delete proposals (`pending` and `changes_requested`)
+
+Rejected revision proposals remain in the database for moderation history, but are not returned in this user-facing payload.
 
 ### `GET /api/moderation/queue`
 
@@ -177,9 +183,20 @@ Admin-only moderation actions. Request shape:
 ```json
 {
   "action": "approve",
-  "note": ""
+  "note": "",
+  "edited_revision": {
+    "module_id": 12,
+    "prompt": "updated prompt",
+    "question_type": "single_text",
+    "rank": 4,
+    "accepted_answers": [["updated answer"]],
+    "segments": [],
+    "reset_stats": true
+  }
 }
 ```
+
+`edited_revision` is optional and only valid when `action` is `approve`. It lets an admin open a pending revision in the shared question drawer, edit the proposed content, and approve that edited version immediately. Approving a delete proposal with `edited_revision` keeps the question and applies the edited revision instead of deleting it.
 
 ## Quiz Sessions
 
@@ -360,7 +377,7 @@ Important behavior:
 - deletes and source-module moves leave sparse rank gaps; shared order is append-only for now
 - malformed or conflicting rows are returned for review
 - nothing is saved until commit succeeds
-- regular-user imports only create new pending uploaded questions; they do not revise or relocate shared verified questions
+- these routes are admin-only
 
 Type inference:
 
@@ -370,6 +387,8 @@ Type inference:
 - embedded `[...]` in the sentence = `inline_cloze`
 
 ### `POST /api/question-imports/validate`
+
+Admin-only.
 
 Validates pasted QML text or an edited row list.
 
@@ -427,6 +446,8 @@ Current review statuses:
 - `conflict`
 
 ### `POST /api/question-imports/commit`
+
+Admin-only.
 
 Commits the submitted row list after revalidation.
 

@@ -29,7 +29,6 @@
   } from '../lib/stats-page';
 
   export let moduleLabel = 'All Modules';
-  export let activeUserLabel = 'Current User';
   export let stats: StatsResponse | null = null;
   export let loading = false;
   export let reviewOnly = false;
@@ -117,9 +116,7 @@
 <section class="page stats-page">
   <div class="page-intro">
     <div>
-      <p class="eyebrow">Stats scope</p>
       <h2>{moduleLabel}</h2>
-      <p class="muted-copy">Progress for {activeUserLabel}.</p>
     </div>
     <div class="stats-page-actions">
       <label class="review-filter">
@@ -144,17 +141,14 @@
   {:else if stats}
     <div class="stats-grid">
       <article class="panel stat-card">
-        <p class="eyebrow">Question bank</p>
         <h3>{stats.summary.total_questions}</h3>
         <p>{stats.summary.reviewed_questions} flagged for review by this user.</p>
       </article>
       <article class="panel stat-card">
-        <p class="eyebrow">Attempts</p>
         <h3>{stats.summary.total_attempts}</h3>
         <p>{formatScore(stats.summary.total_correct)}/{formatScore(stats.summary.total_possible)} points earned.</p>
       </article>
       <article class="panel stat-card">
-        <p class="eyebrow">Accuracy</p>
         <h3>{Math.round(stats.summary.accuracy * 100)}%</h3>
         <p>Across the selected module scope.</p>
       </article>

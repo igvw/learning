@@ -1,3 +1,4 @@
+from backend.app.database import get_connection
 from test_support import PostgresBackendTestCase
 
 
@@ -140,13 +141,16 @@ class ModerationApiTests(PostgresBackendTestCase):
         proposal_id = int(revise_response.json()["proposal_id"])
 
         alice_stats_with_proposal = self.get_stats_payload(int(alice["id"]), words["id"])
-        alice_question = next(
-            question
-            for question in alice_stats_with_proposal["questions"]
-            if question["question_id"] == verified_question["question_id"]
+        self.assertNotIn(
+            verified_question["question_id"],
+            {question["question_id"] for question in alice_stats_with_proposal["questions"]},
         )
-        self.assertEqual(alice_question["prompt"], "hunden")
-        self.assertEqual(alice_question["viewer_proposal"]["proposal_id"], proposal_id)
+
+        alice_session = self.start_quiz_session(int(alice["id"]), words["id"], 5)
+        self.assertNotIn(
+            verified_question["question_id"],
+            {item["question_id"] for item in alice_session["items"]},
+        )
 
         bob_stats_with_original = self.get_stats_payload(int(bob["id"]), words["id"])
         bob_question = next(
@@ -155,7 +159,24 @@ class ModerationApiTests(PostgresBackendTestCase):
             if question["question_id"] == verified_question["question_id"]
         )
         self.assertEqual(bob_question["prompt"], "hund")
-        self.assertIsNone(bob_question["viewer_proposal"])
+
+        bob_session = self.start_quiz_session(int(bob["id"]), words["id"], 5)
+        self.assertIn(
+            verified_question["question_id"],
+            {item["question_id"] for item in bob_session["items"]},
+        )
+
+        contributions_response = self.client.get(
+            "/api/contributions/me",
+            headers=self.user_headers(int(alice["id"])),
+        )
+        self.assertEqual(contributions_response.status_code, 200)
+        proposed_revision = next(
+            proposal
+            for proposal in contributions_response.json()["revisions"]
+            if proposal["proposal_id"] == proposal_id
+        )
+        self.assertEqual(proposed_revision["proposed_prompt"], "hunden")
 
         approve_revision_response = self.client.post(
             f"/api/moderation/question-revisions/{proposal_id}",
@@ -172,6 +193,368 @@ class ModerationApiTests(PostgresBackendTestCase):
             if question["question_id"] == verified_question["question_id"]
         )
         self.assertEqual(approved_question["prompt"], "hunden")
+
+    def test_admin_can_approve_revision_with_edited_override(self) -> None:
+        norwegian = self.create_module_record("Norwegian")
+        words = self.create_module_record("Words", norwegian["id"])
+        verified_question = self.create_question_record(words["id"], "hund", [["dog"]], rank=1)
+        alice = self.create_user(handle="alice", display_name="Alice")
+
+        revise_response = self.client.post(
+            f"/api/questions/{verified_question['question_id']}/revisions",
+            json={
+                "module_id": words["id"],
+                "prompt": "hunden",
+                "question_type": "single_text",
+                "rank": 1,
+                "accepted_answers": [["dog"]],
+                "segments": [],
+                "reset_stats": False,
+            },
+            headers=self.user_headers(int(alice["id"])),
+        )
+        self.assertEqual(revise_response.status_code, 200)
+        proposal_id = int(revise_response.json()["proposal_id"])
+
+        approve_response = self.client.post(
+            f"/api/moderation/question-revisions/{proposal_id}",
+            json={
+                "action": "approve",
+                "note": "Tighten the wording.",
+                "edited_revision": {
+                    "module_id": words["id"],
+                    "prompt": "hunden min",
+                    "question_type": "single_text",
+                    "rank": 1,
+                    "accepted_answers": [["my dog"]],
+                    "segments": [],
+                    "reset_stats": True,
+                },
+            },
+            headers=self.admin_headers,
+        )
+        self.assertEqual(approve_response.status_code, 200)
+        self.assertEqual(approve_response.json()["status"], "approved")
+
+        stats_after = self.get_stats_payload(int(alice["id"]), words["id"])
+        revised_question = next(
+            question
+            for question in stats_after["questions"]
+            if question["question_id"] == verified_question["question_id"]
+        )
+        self.assertEqual(revised_question["prompt"], "hunden min")
+        self.assertEqual(revised_question["accepted_answers"], [["my dog"]])
+
+    def test_admin_can_approve_revision_and_reset_stats_for_all_users(self) -> None:
+        norwegian = self.create_module_record("Norwegian")
+        words = self.create_module_record("Words", norwegian["id"])
+        verified_question = self.create_question_record(words["id"], "hund", [["dog"]], rank=1)
+        alice = self.create_user(handle="alice", display_name="Alice")
+        bob = self.create_user(handle="bob", display_name="Bob")
+
+        alice_session = self.start_quiz_session(int(alice["id"]), words["id"], 1)
+        self.submit_quiz_item(int(alice["id"]), alice_session["id"], alice_session["items"][0]["id"], ["dog"])
+        bob_session = self.start_quiz_session(int(bob["id"]), words["id"], 1)
+        self.submit_quiz_item(int(bob["id"]), bob_session["id"], bob_session["items"][0]["id"], ["dog"])
+
+        revise_response = self.client.post(
+            f"/api/questions/{verified_question['question_id']}/revisions",
+            json={
+                "module_id": words["id"],
+                "prompt": "hunden",
+                "question_type": "single_text",
+                "rank": 1,
+                "accepted_answers": [["dog"]],
+                "segments": [],
+                "reset_stats": False,
+            },
+            headers=self.user_headers(int(alice["id"])),
+        )
+        self.assertEqual(revise_response.status_code, 200)
+        proposal_id = int(revise_response.json()["proposal_id"])
+
+        approve_response = self.client.post(
+            f"/api/moderation/question-revisions/{proposal_id}",
+            json={
+                "action": "approve",
+                "note": "Approve and reset.",
+                "reset_stats": True,
+            },
+            headers=self.admin_headers,
+        )
+        self.assertEqual(approve_response.status_code, 200)
+        self.assertEqual(approve_response.json()["status"], "approved")
+
+        alice_stats = self.get_stats_payload(int(alice["id"]), words["id"])
+        alice_question = next(
+            question
+            for question in alice_stats["questions"]
+            if question["question_id"] == verified_question["question_id"]
+        )
+        self.assertEqual(alice_question["prompt"], "hunden")
+        self.assertEqual(alice_question["attempts"], 0)
+        self.assertEqual(alice_question["schedule"]["logical_bucket"], "unseen")
+
+        bob_stats = self.get_stats_payload(int(bob["id"]), words["id"])
+        bob_question = next(
+            question
+            for question in bob_stats["questions"]
+            if question["question_id"] == verified_question["question_id"]
+        )
+        self.assertEqual(bob_question["prompt"], "hunden")
+        self.assertEqual(bob_question["attempts"], 0)
+        self.assertEqual(bob_question["schedule"]["logical_bucket"], "unseen")
+
+    def test_delete_request_can_be_approved_as_an_edited_revision(self) -> None:
+        norwegian = self.create_module_record("Norwegian")
+        words = self.create_module_record("Words", norwegian["id"])
+        verified_question = self.create_question_record(words["id"], "hund", [["dog"]], rank=1)
+        alice = self.create_user(handle="alice", display_name="Alice")
+
+        delete_response = self.client.delete(
+            f"/api/questions/{verified_question['question_id']}",
+            headers=self.user_headers(int(alice["id"])),
+        )
+        self.assertEqual(delete_response.status_code, 200)
+        proposal_id = int(delete_response.json()["proposal_id"])
+
+        approve_response = self.client.post(
+            f"/api/moderation/question-revisions/{proposal_id}",
+            json={
+                "action": "approve",
+                "note": "Keep it, but revise it.",
+                "edited_revision": {
+                    "module_id": words["id"],
+                    "prompt": "hunden",
+                    "question_type": "single_text",
+                    "rank": 1,
+                    "accepted_answers": [["the dog"]],
+                    "segments": [],
+                    "reset_stats": False,
+                },
+            },
+            headers=self.admin_headers,
+        )
+        self.assertEqual(approve_response.status_code, 200)
+        self.assertEqual(approve_response.json()["status"], "approved")
+
+        stats_after = self.get_stats_payload(int(alice["id"]), words["id"])
+        self.assertEqual(len(stats_after["questions"]), 1)
+        self.assertEqual(stats_after["questions"][0]["prompt"], "hunden")
+        self.assertEqual(stats_after["questions"][0]["accepted_answers"], [["the dog"]])
+
+    def test_reject_rejects_edited_revision_payload(self) -> None:
+        norwegian = self.create_module_record("Norwegian")
+        words = self.create_module_record("Words", norwegian["id"])
+        verified_question = self.create_question_record(words["id"], "hund", [["dog"]], rank=1)
+        alice = self.create_user(handle="alice", display_name="Alice")
+
+        revise_response = self.client.post(
+            f"/api/questions/{verified_question['question_id']}/revisions",
+            json={
+                "module_id": words["id"],
+                "prompt": "hunden",
+                "question_type": "single_text",
+                "rank": 1,
+                "accepted_answers": [["dog"]],
+                "segments": [],
+                "reset_stats": False,
+            },
+            headers=self.user_headers(int(alice["id"])),
+        )
+        self.assertEqual(revise_response.status_code, 200)
+        proposal_id = int(revise_response.json()["proposal_id"])
+
+        reject_response = self.client.post(
+            f"/api/moderation/question-revisions/{proposal_id}",
+            json={
+                "action": "reject",
+                "note": "No thanks.",
+                "edited_revision": {
+                    "module_id": words["id"],
+                    "prompt": "hunden min",
+                    "question_type": "single_text",
+                    "rank": 1,
+                    "accepted_answers": [["my dog"]],
+                    "segments": [],
+                    "reset_stats": False,
+                },
+            },
+            headers=self.admin_headers,
+        )
+        self.assertEqual(reject_response.status_code, 400)
+        self.assertEqual(
+            reject_response.json()["detail"],
+            "Edited revisions can only be submitted when approving a proposal.",
+        )
+
+    def test_reject_rejects_reset_stats_payload(self) -> None:
+        norwegian = self.create_module_record("Norwegian")
+        words = self.create_module_record("Words", norwegian["id"])
+        verified_question = self.create_question_record(words["id"], "hund", [["dog"]], rank=1)
+        alice = self.create_user(handle="alice", display_name="Alice")
+
+        revise_response = self.client.post(
+            f"/api/questions/{verified_question['question_id']}/revisions",
+            json={
+                "module_id": words["id"],
+                "prompt": "hunden",
+                "question_type": "single_text",
+                "rank": 1,
+                "accepted_answers": [["dog"]],
+                "segments": [],
+                "reset_stats": False,
+            },
+            headers=self.user_headers(int(alice["id"])),
+        )
+        self.assertEqual(revise_response.status_code, 200)
+        proposal_id = int(revise_response.json()["proposal_id"])
+
+        reject_response = self.client.post(
+            f"/api/moderation/question-revisions/{proposal_id}",
+            json={"action": "reject", "note": "No thanks.", "reset_stats": True},
+            headers=self.admin_headers,
+        )
+        self.assertEqual(reject_response.status_code, 400)
+        self.assertEqual(
+            reject_response.json()["detail"],
+            "Reset stats can only be submitted when approving a proposal.",
+        )
+
+    def test_rejected_revision_returns_question_to_study_flow_and_hides_proposal_from_user_ui(self) -> None:
+        norwegian = self.create_module_record("Norwegian")
+        words = self.create_module_record("Words", norwegian["id"])
+        verified_question = self.create_question_record(words["id"], "hund", [["dog"]], rank=1)
+        alice = self.create_user(handle="alice", display_name="Alice")
+
+        revise_response = self.client.post(
+            f"/api/questions/{verified_question['question_id']}/revisions",
+            json={
+                "module_id": words["id"],
+                "prompt": "hunden",
+                "question_type": "single_text",
+                "rank": 1,
+                "accepted_answers": [["dog"]],
+                "segments": [],
+                "reset_stats": False,
+            },
+            headers=self.user_headers(int(alice["id"])),
+        )
+        self.assertEqual(revise_response.status_code, 200)
+        proposal_id = int(revise_response.json()["proposal_id"])
+
+        reject_response = self.client.post(
+            f"/api/moderation/question-revisions/{proposal_id}",
+            json={"action": "reject", "note": "No thanks."},
+            headers=self.admin_headers,
+        )
+        self.assertEqual(reject_response.status_code, 200)
+        self.assertEqual(reject_response.json()["status"], "rejected")
+
+        queue_response = self.client.get("/api/moderation/queue", headers=self.admin_headers)
+        self.assertEqual(queue_response.status_code, 200)
+        self.assertNotIn(
+            proposal_id,
+            {proposal["proposal_id"] for proposal in queue_response.json()["pending_revisions"]},
+        )
+
+        contributions_response = self.client.get(
+            "/api/contributions/me",
+            headers=self.user_headers(int(alice["id"])),
+        )
+        self.assertEqual(contributions_response.status_code, 200)
+        self.assertNotIn(
+            proposal_id,
+            {proposal["proposal_id"] for proposal in contributions_response.json()["revisions"]},
+        )
+
+        stats_after_rejection = self.get_stats_payload(int(alice["id"]), words["id"])
+        restored_question = next(
+            question
+            for question in stats_after_rejection["questions"]
+            if question["question_id"] == verified_question["question_id"]
+        )
+        self.assertEqual(restored_question["prompt"], "hund")
+
+        session_after_rejection = self.start_quiz_session(int(alice["id"]), words["id"], 5)
+        self.assertIn(
+            verified_question["question_id"],
+            {item["question_id"] for item in session_after_rejection["items"]},
+        )
+
+        with get_connection(self.database_url) as connection:
+            stored_rejection = connection.execute(
+                """
+                SELECT status, admin_review_note
+                FROM question_revision_proposals
+                WHERE id = ?
+                """,
+                (proposal_id,),
+            ).fetchone()
+        self.assertIsNotNone(stored_rejection)
+        self.assertEqual(stored_rejection["status"], "rejected")
+        self.assertEqual(stored_rejection["admin_review_note"], "No thanks.")
+
+    def test_reopened_pending_revision_with_stale_review_metadata_is_visible(self) -> None:
+        norwegian = self.create_module_record("Norwegian")
+        words = self.create_module_record("Words", norwegian["id"])
+        verified_question = self.create_question_record(words["id"], "hund", [["dog"]], rank=1)
+        alice = self.create_user(handle="alice", display_name="Alice")
+
+        revise_response = self.client.post(
+            f"/api/questions/{verified_question['question_id']}/revisions",
+            json={
+                "module_id": words["id"],
+                "prompt": "hunden",
+                "question_type": "single_text",
+                "rank": 1,
+                "accepted_answers": [["dog"]],
+                "segments": [],
+                "reset_stats": False,
+            },
+            headers=self.user_headers(int(alice["id"])),
+        )
+        self.assertEqual(revise_response.status_code, 200)
+        proposal_id = int(revise_response.json()["proposal_id"])
+
+        reject_response = self.client.post(
+            f"/api/moderation/question-revisions/{proposal_id}",
+            json={"action": "reject", "note": "No thanks."},
+            headers=self.admin_headers,
+        )
+        self.assertEqual(reject_response.status_code, 200)
+
+        with get_connection(self.database_url) as connection:
+            connection.execute(
+                """
+                UPDATE question_revision_proposals
+                SET status = 'pending'
+                WHERE id = ?
+                """,
+                (proposal_id,),
+            )
+
+        queue_response = self.client.get("/api/moderation/queue", headers=self.admin_headers)
+        self.assertEqual(queue_response.status_code, 200)
+        reopened_revision = next(
+            proposal
+            for proposal in queue_response.json()["pending_revisions"]
+            if proposal["proposal_id"] == proposal_id
+        )
+        self.assertEqual(reopened_revision["status"], "pending")
+
+        contributions_response = self.client.get(
+            "/api/contributions/me",
+            headers=self.user_headers(int(alice["id"])),
+        )
+        self.assertEqual(contributions_response.status_code, 200)
+        reopened_contribution = next(
+            proposal
+            for proposal in contributions_response.json()["revisions"]
+            if proposal["proposal_id"] == proposal_id
+        )
+        self.assertEqual(reopened_contribution["status"], "pending")
+        self.assertEqual(reopened_contribution["admin_review_note"], "No thanks.")
 
     def test_delete_request_hides_question_only_for_proposer_until_admin_approval(self) -> None:
         norwegian = self.create_module_record("Norwegian")

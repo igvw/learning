@@ -220,6 +220,10 @@ export interface QuestionDraftPayload {
   segments: string[];
 }
 
+export interface ModerationEditedRevisionPayload extends QuestionDraftPayload {
+  reset_stats: boolean;
+}
+
 export interface QuestionMutationResult {
   question_id: number;
   proposal_id: number | null;
@@ -251,6 +255,16 @@ export interface UpdateUserPasswordPayload {
 export interface ModerationActionPayload {
   action: 'approve' | 'reject' | 'changes_requested';
   note: string;
+}
+
+export interface ModerationRevisionActionPayload extends ModerationActionPayload {
+  reset_stats?: boolean;
+  edited_revision?: ModerationEditedRevisionPayload;
+}
+
+export interface BulkRevisionModerationItem {
+  proposalId: number;
+  resetStats: boolean;
 }
 
 export interface BulkModerationResult {

@@ -28,6 +28,7 @@
   export let modules: ModuleNode[] = [];
   export let defaultModuleId: number | null = null;
   export let editingQuestion: QuestionRow | null = null;
+  export let mode: 'standard' | 'moderation' = 'standard';
   export let saving = false;
   export let deleting = false;
   export let currentActor: AuthActor | null = null;
@@ -192,11 +193,19 @@
   $: selectedModuleOption = moduleOptions.find((option) => option.id === Number(moduleId)) ?? null;
   $: selectedModuleIsLeaf = selectedModuleOption?.isLeaf ?? false;
   $: editorBusy = saving || deleting;
-  $: showDeleteAction = Boolean(editingQuestion);
+  $: showDeleteAction = Boolean(editingQuestion) && mode !== 'moderation';
   $: isAdmin = currentActor?.role === 'admin';
   $: isVerifiedNonAdminEdit = Boolean(editingQuestion && !isAdmin && editingQuestion.admin_verified);
-  $: moduleSelectionLocked = isVerifiedNonAdminEdit;
-  $: primaryActionLabel = saving ? 'Saving...' : editingQuestion ? 'Save Revision' : 'Create Question';
+  $: moduleSelectionLocked = mode === 'moderation' || isVerifiedNonAdminEdit;
+  $: primaryActionLabel = saving
+    ? mode === 'moderation'
+      ? 'Approving...'
+      : 'Saving...'
+    : mode === 'moderation'
+      ? 'Approve Revision'
+      : editingQuestion
+        ? 'Save Revision'
+        : 'Create Question';
   $: deleteActionLabel = deleting
     ? isVerifiedNonAdminEdit
       ? 'Requesting...'
@@ -229,8 +238,8 @@
       <aside class="drawer-panel" aria-label="Question editor">
         <div class="panel-header sticky">
           <div>
-            <p class="eyebrow">{editingQuestion ? 'Revision flow' : 'Create flow'}</p>
-            <h2>{editingQuestion ? 'Revise Question' : 'Create Question'}</h2>
+            <p class="eyebrow">{mode === 'moderation' ? 'Moderation review' : editingQuestion ? 'Revision flow' : 'Create flow'}</p>
+            <h2>{mode === 'moderation' ? 'Approve Revision' : editingQuestion ? 'Revise Question' : 'Create Question'}</h2>
           </div>
           <button type="button" class="ghost-button" on:click={onClose}>Close</button>
         </div>
@@ -239,7 +248,9 @@
           <div class="banner error">{formError}</div>
         {/if}
 
-        {#if isVerifiedNonAdminEdit}
+        {#if mode === 'moderation'}
+          <div class="banner info">Saving here approves the edited revision. Module placement and order stay locked.</div>
+        {:else if isVerifiedNonAdminEdit}
           <div class="banner info">This is a personal revision proposal. Module placement and order stay global until an admin approves it.</div>
         {/if}
 

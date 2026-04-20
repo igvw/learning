@@ -272,13 +272,7 @@
     <div class="banner error">{errorMessage}</div>
   {/if}
 
-  {#if !session}
-    <div class="panel empty-state">
-      <h3>Short bursts, no mouse required.</h3>
-      <p>Start a quiz for the selected scope. Submitted cards stay on screen so the finished session becomes the review surface.</p>
-      <p class="shortcut-hint">Press <kbd>Enter</kbd> to move through fields. On the last field, <kbd>Enter</kbd> submits the question.</p>
-    </div>
-  {:else if session.items.length === 0}
+  {#if session && session.items.length === 0}
     <div class="panel empty-state">
       <h3>No questions in this scope yet.</h3>
       <p>Switch modules from the menu or create questions from the stats page.</p>

@@ -5,6 +5,8 @@
   export let currentActorId: number | null = null;
   export let isAdmin = false;
   export let isDemo = false;
+  export let mode: 'all' | 'modules' | 'import' | 'export' = 'all';
+  export let showHeading = true;
   export let flatModules: FlatModule[] = [];
   export let selectedModuleId: number | null = null;
   export let onCreateModule: (payload: CreateModulePayload) => Promise<ModuleNode> = async () => {
@@ -100,6 +102,9 @@
   $: editableParentModules = isAdmin
     ? flatModules.filter((module) => !module.isLeaf)
     : flatModules.filter((module) => !module.isLeaf && module.admin_verified);
+  $: showModuleSection = mode === 'all' || mode === 'modules';
+  $: showExportSection = isAdmin && (mode === 'all' || mode === 'export');
+  $: showImportSection = isAdmin && (mode === 'all' || mode === 'import');
   $: selectedModule = flatModules.find((module) => module.id === selectedModuleId) ?? null;
   $: selectedEditableLeafModule =
     selectedModule?.isLeaf && (isAdmin || (!!currentActorId && !selectedModule.admin_verified && selectedModule.created_by_user_id === currentActorId))
@@ -129,92 +134,98 @@
   }
 </script>
 
-<article class="panel admin-bar-panel">
-  <div class="panel-header">
-    <div><h3>{isAdmin ? 'Modules' : 'Pending modules'}</h3></div>
-  </div>
-
-  {#if editError}
-    <div class="banner error">{editError}</div>
-  {/if}
-  {#if editSuccess}
-    <div class="banner success">{editSuccess}</div>
-  {/if}
-
-  <div class="admin-bar-form module-bar-form">
-    <div class="admin-wide-field">
-      <h4>{isAdmin ? 'Selected leaf module' : 'Selected editable pending leaf'}</h4>
-      {#if selectedEditableLeafModule}
-        <p class="muted-copy">
-          Current path: <code>{selectedEditableLeafModule.full_slug}</code>
-        </p>
-      {:else}
-        <p class="muted-copy">
-          {isAdmin
-            ? 'Select a leaf module from the menu before renaming it.'
-            : 'Select one of your own pending leaf modules from the menu before renaming it.'}
-        </p>
-      {/if}
-    </div>
-
-    <label class="field">
-      <span>Module title</span>
-      <input type="text" bind:value={editTitle} disabled={!selectedEditableLeafModule || editSaving || isDemo} />
-    </label>
-
-    <label class="field admin-wide-field">
-      <span>Instruction</span>
-      <textarea rows="4" bind:value={editInstruction} disabled={!selectedEditableLeafModule || editSaving || isDemo}></textarea>
-    </label>
-
-    <div class="admin-action-slot">
-      <button class="primary-button" type="button" disabled={!selectedEditableLeafModule || editSaving || isDemo} on:click={() => void handleUpdateModule()}>
-        {editSaving ? 'Saving...' : 'Save Module'}
-      </button>
-    </div>
-  </div>
-
-  {#if createError}
-    <div class="banner error">{createError}</div>
-  {/if}
-  {#if createSuccess}
-    <div class="banner success">{createSuccess}</div>
-  {/if}
-
-  <div class="admin-bar-form module-bar-form">
-    <div class="admin-wide-field">
-      <h4>{isAdmin ? 'Create module' : 'Create pending leaf module'}</h4>
-    </div>
-    <label class="field">
-      <span>Module path</span>
-      <input type="text" bind:value={createTitle} placeholder="norwegian/vocabulary/nouns_to_english" disabled={isDemo} />
-    </label>
-    <label class="field">
-      <span>Parent module</span>
-      <select bind:value={createParentId} disabled={isDemo}>
-        <option value="">Top level</option>
-        {#each editableParentModules as module}
-          <option value={module.id}>{'\u00A0'.repeat(module.depth * 2)}{module.full_slug}</option>
-        {/each}
-      </select>
-    </label>
-    <label class="field admin-wide-field">
-      <span>Instruction</span>
-      <textarea rows="4" bind:value={createInstruction} disabled={isDemo}></textarea>
-    </label>
-    <div class="admin-action-slot">
-      <button class="primary-button" type="button" disabled={createSaving || isDemo} on:click={() => void handleCreateModule()}>
-        {createSaving ? 'Creating...' : 'Create Module'}
-      </button>
-    </div>
-  </div>
-</article>
-
-{#if isAdmin}
+{#if showModuleSection}
   <article class="panel admin-bar-panel">
-    <div class="panel-header">
-      <div><h3>Export content</h3></div>
+    {#if showHeading}
+      <div class="panel-header">
+        <div><h3>{isAdmin ? 'Modules' : 'Pending modules'}</h3></div>
+      </div>
+    {/if}
+
+    {#if editError}
+      <div class="banner error">{editError}</div>
+    {/if}
+    {#if editSuccess}
+      <div class="banner success">{editSuccess}</div>
+    {/if}
+
+    <div class="admin-bar-form module-bar-form">
+      <div class="admin-wide-field">
+        <h4>{isAdmin ? 'Selected leaf module' : 'Selected editable pending leaf'}</h4>
+        {#if selectedEditableLeafModule}
+          <p class="muted-copy">
+            Current path: <code>{selectedEditableLeafModule.full_slug}</code>
+          </p>
+        {:else}
+          <p class="muted-copy">
+            {isAdmin
+              ? 'Select a leaf module from the menu before renaming it.'
+              : 'Select one of your own pending leaf modules from the menu before renaming it.'}
+          </p>
+        {/if}
+      </div>
+
+      <label class="field">
+        <span>Module title</span>
+        <input type="text" bind:value={editTitle} disabled={!selectedEditableLeafModule || editSaving || isDemo} />
+      </label>
+
+      <label class="field admin-wide-field">
+        <span>Instruction</span>
+        <textarea rows="4" bind:value={editInstruction} disabled={!selectedEditableLeafModule || editSaving || isDemo}></textarea>
+      </label>
+
+      <div class="admin-action-slot">
+        <button class="primary-button" type="button" disabled={!selectedEditableLeafModule || editSaving || isDemo} on:click={() => void handleUpdateModule()}>
+          {editSaving ? 'Saving...' : 'Save Module'}
+        </button>
+      </div>
     </div>
+
+    {#if createError}
+      <div class="banner error">{createError}</div>
+    {/if}
+    {#if createSuccess}
+      <div class="banner success">{createSuccess}</div>
+    {/if}
+
+    <div class="admin-bar-form module-bar-form">
+      <div class="admin-wide-field">
+        <h4>{isAdmin ? 'Create module' : 'Create pending leaf module'}</h4>
+      </div>
+      <label class="field">
+        <span>Module path</span>
+        <input type="text" bind:value={createTitle} placeholder="norwegian/vocabulary/nouns_to_english" disabled={isDemo} />
+      </label>
+      <label class="field">
+        <span>Parent module</span>
+        <select bind:value={createParentId} disabled={isDemo}>
+          <option value="">Top level</option>
+          {#each editableParentModules as module}
+            <option value={module.id}>{'\u00A0'.repeat(module.depth * 2)}{module.full_slug}</option>
+          {/each}
+        </select>
+      </label>
+      <label class="field admin-wide-field">
+        <span>Instruction</span>
+        <textarea rows="4" bind:value={createInstruction} disabled={isDemo}></textarea>
+      </label>
+      <div class="admin-action-slot">
+        <button class="primary-button" type="button" disabled={createSaving || isDemo} on:click={() => void handleCreateModule()}>
+          {createSaving ? 'Creating...' : 'Create Module'}
+        </button>
+      </div>
+    </div>
+  </article>
+{/if}
+
+{#if showExportSection}
+  <article class="panel admin-bar-panel">
+    {#if showHeading}
+      <div class="panel-header">
+        <div><h3>Export</h3></div>
+      </div>
+    {/if}
     {#if exportError}
       <div class="banner error">{exportError}</div>
     {/if}
@@ -236,34 +247,38 @@
   </article>
 {/if}
 
-<article class="panel admin-bar-panel">
-  <div class="panel-header">
-    <div><h3>Import QML</h3></div>
-  </div>
-  <div class="admin-bar-form import-bar-form">
-    <label class="field">
-      <span>Import target</span>
-      <select bind:value={importModuleId} disabled={flatModules.length === 0 || isDemo}>
-        {#if flatModules.length === 0}
-          <option value={null}>No modules available</option>
-        {:else}
-          {#each flatModules.filter((module) => module.isLeaf) as module}
-            <option value={module.id}>{module.full_slug}</option>
-          {/each}
+{#if showImportSection}
+  <article class="panel admin-bar-panel">
+    {#if showHeading}
+      <div class="panel-header">
+        <div><h3>Import</h3></div>
+      </div>
+    {/if}
+    <div class="admin-bar-form import-bar-form">
+      <label class="field">
+        <span>Import target</span>
+        <select bind:value={importModuleId} disabled={flatModules.length === 0 || isDemo}>
+          {#if flatModules.length === 0}
+            <option value={null}>No modules available</option>
+          {:else}
+            {#each flatModules.filter((module) => module.isLeaf) as module}
+              <option value={module.id}>{module.full_slug}</option>
+            {/each}
+          {/if}
+        </select>
+      </label>
+      <div class="admin-status-slot">
+        {#if selectedImportModule}
+          <p class="muted-copy">
+            {selectedImportModule.admin_verified ? 'Verified module' : 'Pending module'}: <code>{selectedImportModule.full_slug}</code>
+          </p>
         {/if}
-      </select>
-    </label>
-    <div class="admin-status-slot">
-      {#if selectedImportModule}
-        <p class="muted-copy">
-          {selectedImportModule.admin_verified ? 'Verified module' : 'Pending module'}: <code>{selectedImportModule.full_slug}</code>
-        </p>
-      {/if}
+      </div>
+      <div class="admin-action-slot">
+        <button class="primary-button" type="button" disabled={!selectedImportModule?.isLeaf || isDemo} on:click={handleOpenImport}>
+          Import QML
+        </button>
+      </div>
     </div>
-    <div class="admin-action-slot">
-      <button class="primary-button" type="button" disabled={!selectedImportModule?.isLeaf || isDemo} on:click={handleOpenImport}>
-        Import QML
-      </button>
-    </div>
-  </div>
-</article>
+  </article>
+{/if}

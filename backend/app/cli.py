@@ -22,7 +22,7 @@ def main() -> None:
     if args.command == "init-db":
         initialize_database(database_url)
         print("Database initialized.")
-    if args.command == "import-content":
+    elif args.command == "import-content":
         initialize_database(database_url)
         with get_connection(database_url) as connection:
             result = sync_seed_content(connection, Path(args.content_root))

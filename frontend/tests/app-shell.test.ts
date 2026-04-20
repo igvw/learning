@@ -39,7 +39,8 @@ import {
   buildAuthActor,
   buildModerationQueue,
   buildModuleNode,
-  buildMyContributions
+  buildMyContributions,
+  buildQuestionRevisionProposal
 } from './builders';
 
 function buildModules() {
@@ -158,13 +159,13 @@ describe('App', () => {
     window.history.replaceState({}, '', '/admin');
     render(App);
 
-    await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Catalog and moderation' })).toBeTruthy();
-    });
+    await screen.findByText('Catalog and moderation');
 
-    await user.selectOptions(screen.getByLabelText('Manage account'), '1');
-    await user.selectOptions(screen.getAllByLabelText('Role')[1], 'user');
-    await user.click(screen.getByRole('button', { name: 'Save Role' }));
+    await user.click(screen.getByRole('button', { name: /^Accounts/ }));
+    const accountsDialog = await screen.findByRole('dialog', { name: 'Accounts' });
+    await user.selectOptions(within(accountsDialog).getByLabelText('Manage account'), '1');
+    await user.selectOptions(within(accountsDialog).getAllByLabelText('Role')[1], 'user');
+    await user.click(within(accountsDialog).getByRole('button', { name: 'Save Role' }));
 
     expect(api.updateUserRole).toHaveBeenCalledWith(1, { role: 'user' });
     await waitFor(() => {
@@ -231,14 +232,12 @@ describe('App', () => {
     window.history.replaceState({}, '', '/admin');
     render(App);
 
-    await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Catalog and moderation' })).toBeTruthy();
-    });
+    await screen.findByText('Catalog and moderation');
 
     const initialModuleLoads = vi.mocked(api.getModulesTree).mock.calls.length;
     const initialModerationLoads = vi.mocked(api.getModerationQueue).mock.calls.length;
 
-    await user.click(screen.getByRole('button', { name: /Pending uploaded questions/i }));
+    await user.click(screen.getByRole('button', { name: /^Uploads/i }));
     await user.click(screen.getByLabelText('Select all pending questions in biology'));
     await user.click(screen.getByRole('button', { name: 'Approve selected' }));
 
@@ -252,6 +251,173 @@ describe('App', () => {
     expect(api.reviewQuestion).toHaveBeenNthCalledWith(1, 71, { action: 'approve', note: '' });
     expect(api.reviewQuestion).toHaveBeenNthCalledWith(2, 72, { action: 'approve', note: '' });
     expect(api.getModulesTree).toHaveBeenCalledTimes(initialModuleLoads + 1);
+  });
+
+  it('bulk approves pending revisions and refreshes shared data once after the batch', async () => {
+    const user = userEvent.setup();
+    const modules = [buildModules()[0]];
+
+    vi.mocked(api.getHealth).mockResolvedValue({
+      status: 'ok',
+      instance_key: 'local-dev',
+      bootstrap_required: false
+    });
+    vi.mocked(api.getCurrentActor).mockResolvedValue(
+      buildAuthActor({ id: 1, handle: 'admin', display_name: 'Admin', role: 'admin' })
+    );
+    vi.mocked(api.getModulesTree).mockResolvedValue(modules);
+    vi.mocked(api.getUsers).mockResolvedValue([
+      { id: 1, handle: 'admin', display_name: 'Admin', role: 'admin', created_at: '2026-04-05T10:00:00Z' }
+    ]);
+    const moderationQueueMock = vi.mocked(api.getModerationQueue);
+    moderationQueueMock.mockReset();
+    moderationQueueMock
+      .mockResolvedValueOnce(
+        buildModerationQueue({
+          pending_revisions: [
+            buildQuestionRevisionProposal({
+              proposal_id: 81,
+              question_id: 71,
+              module_id: 1,
+              module_full_slug: 'biology',
+              current_prompt: 'cell',
+              proposed_prompt: 'cells'
+            }),
+            buildQuestionRevisionProposal({
+              proposal_id: 82,
+              question_id: 72,
+              module_id: 1,
+              module_full_slug: 'biology',
+              current_prompt: 'tissue',
+              proposed_prompt: 'tissues'
+            })
+          ]
+        })
+      )
+      .mockResolvedValueOnce(buildModerationQueue());
+    vi.mocked(api.reviewQuestionRevision).mockResolvedValue({});
+
+    window.history.replaceState({}, '', '/admin');
+    render(App);
+
+    await screen.findByText('Catalog and moderation');
+
+    const initialModuleLoads = vi.mocked(api.getModulesTree).mock.calls.length;
+    const initialModerationLoads = moderationQueueMock.mock.calls.length;
+
+    await user.click(screen.getByRole('button', { name: /^Revisions/i }));
+    await user.click(screen.getByRole('button', { name: 'Open pending revisions for biology' }));
+    const revisionsDialog = screen.getByRole('dialog', { name: 'Pending revisions' });
+    const promptToggle = within(revisionsDialog).getByText('Prompt changes').closest('button');
+    expect(promptToggle).toBeTruthy();
+    await user.click(promptToggle as HTMLElement);
+    await waitFor(() => {
+      expect(screen.getByLabelText('Select all revisions in Prompt changes')).toBeTruthy();
+    });
+    await user.click(screen.getByLabelText('Select all revisions in Prompt changes'));
+    await user.click(screen.getAllByRole('button', { name: 'Approve selected' })[0]);
+
+    await waitFor(() => {
+      expect(api.reviewQuestionRevision).toHaveBeenCalledTimes(2);
+    });
+    await waitFor(() => {
+      expect(api.getModerationQueue).toHaveBeenCalledTimes(initialModerationLoads + 1);
+    });
+
+    expect(api.reviewQuestionRevision).toHaveBeenNthCalledWith(1, 81, {
+      action: 'approve',
+      note: '',
+      reset_stats: true
+    });
+    expect(api.reviewQuestionRevision).toHaveBeenNthCalledWith(2, 82, {
+      action: 'approve',
+      note: '',
+      reset_stats: true
+    });
+    expect(api.getModulesTree).toHaveBeenCalledTimes(initialModuleLoads + 1);
+  });
+
+  it('opens the moderation revision drawer and approves an edited revision', async () => {
+    const user = userEvent.setup();
+    const modules = [buildModules()[0]];
+
+    vi.mocked(api.getHealth).mockResolvedValue({
+      status: 'ok',
+      instance_key: 'local-dev',
+      bootstrap_required: false
+    });
+    vi.mocked(api.getCurrentActor).mockResolvedValue(
+      buildAuthActor({ id: 1, handle: 'admin', display_name: 'Admin', role: 'admin' })
+    );
+    vi.mocked(api.getModulesTree).mockResolvedValue(modules);
+    vi.mocked(api.getUsers).mockResolvedValue([
+      { id: 1, handle: 'admin', display_name: 'Admin', role: 'admin', created_at: '2026-04-05T10:00:00Z' }
+    ]);
+    const moderationQueueMock = vi.mocked(api.getModerationQueue);
+    moderationQueueMock.mockReset();
+    moderationQueueMock.mockResolvedValue(
+      buildModerationQueue({
+        pending_revisions: [
+          buildQuestionRevisionProposal({
+            proposal_id: 81,
+            question_id: 71,
+            module_id: 1,
+            module_full_slug: 'biology',
+            current_prompt: 'cell',
+            current_accepted_answers: [['cell']],
+            proposed_prompt: 'cells',
+            proposed_accepted_answers: [['cells']]
+          })
+        ]
+      })
+    );
+    vi.mocked(api.reviewQuestionRevision).mockResolvedValue({});
+
+    window.history.replaceState({}, '', '/admin');
+    render(App);
+
+    await screen.findByText('Catalog and moderation');
+
+    await user.click(screen.getByRole('button', { name: /^Revisions/i }));
+    await user.click(screen.getByRole('button', { name: 'Open pending revisions for biology' }));
+    const revisionsDialog = screen.getByRole('dialog', { name: 'Pending revisions' });
+    const promptToggle = within(revisionsDialog).getByText('Prompt changes').closest('button');
+    expect(promptToggle).toBeTruthy();
+    await user.click(promptToggle as HTMLElement);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Open revision editor for cell' })).toBeTruthy();
+    });
+    await user.click(screen.getByRole('button', { name: 'Open revision editor for cell' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Approve Revision' })).toBeTruthy();
+    });
+
+    const promptInput = screen.getByLabelText('Prompt');
+    await user.clear(promptInput);
+    await user.type(promptInput, 'cells refined');
+
+    const answersInput = screen.getByLabelText('Accepted answers, one per line');
+    await user.clear(answersInput);
+    await user.type(answersInput, 'cellular');
+
+    await user.click(screen.getByRole('button', { name: 'Approve Revision' }));
+
+    await waitFor(() => {
+      expect(api.reviewQuestionRevision).toHaveBeenCalledWith(81, {
+        action: 'approve',
+        note: '',
+        edited_revision: {
+          module_id: 1,
+          prompt: 'cells refined',
+          question_type: 'single_text',
+          rank: 1,
+          accepted_answers: [['cellular']],
+          segments: [],
+          reset_stats: true
+        }
+      });
+    });
   });
 
   it('calls the content export helper from the admin page', async () => {
@@ -276,11 +442,11 @@ describe('App', () => {
     window.history.replaceState({}, '', '/admin');
     render(App);
 
-    await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Catalog and moderation' })).toBeTruthy();
-    });
+    await screen.findByText('Catalog and moderation');
 
-    await user.click(screen.getByRole('button', { name: 'Export content' }));
+    await user.click(screen.getByRole('button', { name: /^Export/ }));
+    const exportDialog = await screen.findByRole('dialog', { name: 'Export' });
+    await user.click(within(exportDialog).getByRole('button', { name: 'Export content' }));
 
     await waitFor(() => {
       expect(api.exportContentArchive).toHaveBeenCalledTimes(1);

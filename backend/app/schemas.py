@@ -261,6 +261,11 @@ class QuestionRevisionIn(QuestionDraftIn):
     reset_stats: bool = True
 
 
+class ModerationRevisionActionIn(ModerationActionIn):
+    reset_stats: bool | None = None
+    edited_revision: QuestionRevisionIn | None = None
+
+
 class QuestionMutationOut(BaseModel):
     question_id: int
     proposal_id: int | None = None
