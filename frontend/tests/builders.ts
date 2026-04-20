@@ -75,7 +75,6 @@ export function buildQuizItem(overrides: Partial<QuizItem> = {}): QuizItem {
     moderation_status: 'verified',
     created_by_user_id: null,
     creator_display_name: null,
-    viewer_proposal: null,
     submitted_answer: null,
     is_correct: null,
     ...overrides
@@ -139,7 +138,6 @@ export function buildQuestionRow(
     moderation_status: 'verified',
     created_by_user_id: null,
     creator_display_name: null,
-    viewer_proposal: null,
     accepted_answers: [['answer']],
     segments: [],
     recent_incorrect_answers: [],

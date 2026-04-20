@@ -3,30 +3,37 @@
   import StageDueMatrixOverlay from './StageDueMatrixOverlay.svelte';
   import type { QuestionRow, StatsResponse } from '../lib/types';
   import {
+    formatBucketLabel,
+    formatLastSeen,
+    formatScore
+  } from '../lib/stats/format';
+  import {
     buildAuxiliaryStageGraph,
-    buildFirstSeenGraph,
     buildRecoveryStageGraph,
+    emptyAuxiliaryStageGraph,
+    emptyRecoveryStageGraph
+  } from '../lib/stats/stage-graphs';
+  import { buildSessionGraph, emptySessionGraph } from '../lib/stats/session-graph';
+  import {
     buildRetryEligibilityGraph,
     buildRetryEligibilityHourlyGraph,
     buildRetryEligibilityLongRangeGraph,
-    buildStageDueMatrixGraph,
-    buildSessionGraph,
-    emptyAuxiliaryStageGraph,
-    emptyFirstSeenGraph,
-    emptyRecoveryStageGraph,
     emptyRetryEligibilityGraph,
     emptyRetryEligibilityHourlyGraph,
-    emptyRetryEligibilityLongRangeGraph,
+    emptyRetryEligibilityLongRangeGraph
+  } from '../lib/stats/retry-graphs';
+  import {
+    buildFirstSeenGraph,
+    buildStageDueMatrixGraph,
+    emptyFirstSeenGraph,
     emptyStageDueMatrixGraph,
-    emptySessionGraph,
-    formatBucketLabel,
-    formatLastSeen,
-    formatScore,
+  } from '../lib/stats/due-graphs';
+  import {
     sortDefinitions,
     sortQuestions,
     type SortDirection,
     type SortKey
-  } from '../lib/stats-page';
+  } from '../lib/stats/table';
 
   export let moduleLabel = 'All Modules';
   export let stats: StatsResponse | null = null;
@@ -432,8 +439,6 @@
                       <span>{question.prompt_preview}</span>
                       {#if !question.admin_verified}
                         <span class="inline-status-chip">Unverified</span>
-                      {:else if question.viewer_proposal}
-                        <span class="inline-status-chip">My proposal</span>
                       {/if}
                     </div>
                   </td>

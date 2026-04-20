@@ -42,7 +42,7 @@ Source material may be:
 
 Transformation rules:
 - Infer sensible learner-facing questions from the provided material.
-- Preserve meaning instead of copying raw source structure blindly.
+- Preserve meaning while avoiding blind copies of the raw source structure.
 - Generate valid QML even when the source is not already written as questions.
 - Avoid obvious duplicates within the current output.
 - If the source implies bidirectional study questions, generate both directions when useful.

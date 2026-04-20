@@ -17,6 +17,7 @@ vi.mock('../src/lib/api', () => ({
   getModerationQueue: vi.fn(),
   getModulesTree: vi.fn(),
   getMyContributions: vi.fn(),
+  getStats: vi.fn(),
   getUsers: vi.fn(),
   login: vi.fn(),
   logout: vi.fn(),
@@ -40,7 +41,8 @@ import {
   buildModerationQueue,
   buildModuleNode,
   buildMyContributions,
-  buildQuestionRevisionProposal
+  buildQuestionRevisionProposal,
+  buildStatsResponse
 } from './builders';
 
 function buildModules() {
@@ -69,6 +71,7 @@ function mockAuthenticatedUser(modules = [buildModules()[0]]) {
   vi.mocked(api.getCurrentActor).mockResolvedValue(buildAuthActor());
   vi.mocked(api.getModulesTree).mockResolvedValue(modules);
   vi.mocked(api.getMyContributions).mockResolvedValue(buildMyContributions());
+  vi.mocked(api.getStats).mockResolvedValue(buildStatsResponse());
 }
 
 describe('App', () => {

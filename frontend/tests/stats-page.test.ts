@@ -5,13 +5,17 @@ import { describe, expect, it, vi } from 'vitest';
 import StatsPage from '../src/components/StatsPage.svelte';
 import { buildQuestionRow, buildRecentSession, buildStatsResponse } from './builders';
 import {
-  buildFirstSeenGraph,
-  buildRecoveryStageGraph,
+  buildRecoveryStageGraph
+} from '../src/lib/stats/stage-graphs';
+import {
   buildRetryEligibilityGraph,
   buildRetryEligibilityHourlyGraph,
-  buildRetryEligibilityLongRangeGraph,
+  buildRetryEligibilityLongRangeGraph
+} from '../src/lib/stats/retry-graphs';
+import {
+  buildFirstSeenGraph,
   buildStageDueMatrixGraph
-} from '../src/lib/stats-page';
+} from '../src/lib/stats/due-graphs';
 
 describe('StatsPage', () => {
   it('builds retry eligibility counts across the coming week from fixed buckets only', () => {

@@ -1,6 +1,6 @@
 # Learning App Database
 
-This document describes the current conceptual data model.
+This document describes the conceptual data model.
 
 See also:
 
@@ -18,7 +18,7 @@ The database is organized around:
 - user-owned review state
 - authenticated account sessions
 
-The current runtime database is PostgreSQL.
+The runtime database is PostgreSQL.
 
 ## Modules
 
@@ -43,7 +43,7 @@ Important choices:
 
 ## Questions
 
-`questions` stores the current shared question content.
+`questions` stores shared question content.
 
 Each question keeps:
 
@@ -64,7 +64,7 @@ Important choices:
 - `prompt_key` stores the normalized duplicate-matching identity used for indexed question lookups
 - ordinary create/revise duplicate checks happen per leaf module through indexed `prompt_key` lookups
 - import review can also match same-prompt questions elsewhere in the same top-level module tree through `prompt_key` lookups
-- question order is append-only within a leaf for now; `rank` remains the exposed storage field, but sparse gaps are allowed
+- question order is append-only within a leaf; `rank` is the exposed storage field, and sparse gaps are allowed
 - import-created and import-relocated questions append at the end of the target leaf
 
 ## Users, Sessions, And Review Flags
@@ -123,7 +123,7 @@ Important choices:
 
 Scheduling is derived per user from quiz history.
 
-The current model separates:
+The model separates:
 
 - short-term hotness (`hot0`, `hot1`, `hot1_sit_out`)
 - long-term bucket memory (`1h` through `60d`)
@@ -133,13 +133,13 @@ Review-flagged questions are excluded from serving and treated separately in sta
 
 ## Seed Content
 
-Repo seed content still imports from `content/modules`.
+Repo seed content imports from `content/modules`.
 
-Current behavior:
+Behavior:
 
 - module hierarchy is inferred from directory structure
 - `module.yaml` is only used for optional `instruction`
-- `questions.dsl` is the current seed question format
+- `questions.dsl` is the seed question format
 
 ## Relationships
 

@@ -41,8 +41,7 @@
   flex-shrink: 0;
 }
 
-.admin-bar-panel,
-.admin-list-panel {
+.admin-bar-panel {
   display: grid;
   gap: 1rem;
   align-self: start;

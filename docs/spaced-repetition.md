@@ -22,9 +22,9 @@ Review-flagged questions are skipped. `mastery` questions are not served.
 - fixed buckets: `1h`, `3h`, `6h`, `12h`, `1d`, `3d`, `7d`, `14d`, `30d`, `60d`
 - `mastery`
 
-`hot1_sit_out` still exists internally, but only as the implementation detail for that one-quiz gap between `hot0` and `hot1`.
+`hot1_sit_out` exists internally as the implementation detail for that one-quiz gap between `hot0` and `hot1`.
 
-For fixed buckets `1d` and above, availability starts at midnight on the due day in the configured app timezone. Sub-day buckets still use exact elapsed time.
+For fixed buckets `1d` and above, availability starts at midnight on the due day in the configured app timezone. Sub-day buckets use exact elapsed time.
 
 ## Rules
 
@@ -41,4 +41,4 @@ For fixed buckets `1d` and above, availability starts at midnight on the due day
 - multiple-wrong recovery can only drop one bucket
 - `1h` never drops below `1h`
 
-Partial credit counts as wrong for scheduling. Final question order inside a quiz is still randomized after selection.
+Partial credit counts as wrong for scheduling. Final question order inside a quiz is randomized after selection.

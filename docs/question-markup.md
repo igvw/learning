@@ -323,10 +323,10 @@ Reason: `z` is unbound.
 
 ## Future Integration
 
-Later work can still:
+Later work can:
 
 - add export in this format
 - extend the syntax in `QML v2`
 - add richer ghost-text authoring hints
 
-The format compiles into the app's current runtime question model, including the explicit `computed_text` question type for variable-driven prompts.
+The format compiles into the app's runtime question model, including the explicit `computed_text` question type for variable-driven prompts.

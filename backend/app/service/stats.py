@@ -83,7 +83,6 @@ def get_stats(
                 "moderation_status": row["moderation_status"],
                 "created_by_user_id": row["created_by_user_id"],
                 "creator_display_name": row["creator_display_name"],
-                "viewer_proposal": row["viewer_proposal"],
                 "accepted_answers": type_config["accepted_answers"],
                 "segments": type_config.get("segments", []),
                 "recent_incorrect_answers": recent_incorrect_answers.get(row["question_id"], []),

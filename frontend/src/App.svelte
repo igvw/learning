@@ -8,19 +8,19 @@
   import ModuleMenu from './components/ModuleMenu.svelte';
   import QuizPage from './components/QuizPage.svelte';
   import StatsPage from './components/StatsPage.svelte';
-  import { buildModerationRevisionSeed } from './lib/admin-page';
+  import { buildModerationRevisionSeed } from './lib/moderation-editor';
   import {
-    clearLegacySelectionStorage,
     findModuleTitle,
     persistSelectedModule as persistSelectedModuleSelection,
     routeFromPath
   } from './lib/app-state';
   import {
-    loadModulesForActor,
     loadRoleDataForActor,
     loadStatsForActor,
     pathForRoute,
-    resolveHealthContext
+    refreshAuthenticatedShellData,
+    resolveAuthSessionState,
+    type RefreshedShellState
   } from './lib/app-shell-data';
   import {
     closeImportUiState,
@@ -31,12 +31,11 @@
     reopenImportUiState,
     resetImportUiState,
     restoreImportUiStateFromSession,
-    setImportUiSaveStatus,
     updateImportUiDraft
   } from './lib/app-shell-import';
-  import { IMPORT_COMMIT_CHUNK_SIZE, initialImportDraftRows } from './lib/import-session';
-  import { cloneImportRows } from './lib/import-rows';
-  import { commitImportInChunks, prepareImportSave, rebuildImportStateAfterPartialSave } from './lib/import-workflow';
+  import { commitImportUiFlow, startImportUiFlow } from './lib/app-shell-import-actions';
+  import { IMPORT_COMMIT_CHUNK_SIZE } from './lib/import-session';
+  import { runBulkModeration, runBulkRevisionModeration, saveQuestionMutation } from './lib/app-shell-mutations';
   import {
     bootstrapAdmin,
     commitQuestionImport,
@@ -129,10 +128,6 @@
   let importState = initialImportUiState();
   let instanceKey = 'default';
 
-  function findModuleNode(nodes: ModuleNode[], moduleId: number): ModuleNode | null {
-    return findModuleNodeInTree(nodes, moduleId);
-  }
-
   function persistSelectedModule(moduleId: number | null): void {
     persistSelectedModuleSelection(window.localStorage, {
       instanceKey,
@@ -181,23 +176,6 @@
     });
   }
 
-  async function loadModules(): Promise<void> {
-    const loadedState = await loadModulesForActor({
-      actor: currentActor,
-      getModulesTree,
-      selectedModuleId,
-      importTargetModuleId: importState.targetModuleId,
-      instanceKey,
-      storage: window.localStorage
-    });
-    modules = loadedState.modules;
-    importState = {
-      ...importState,
-      targetModuleId: loadedState.importTargetModuleId
-    };
-    applySelectedModule(loadedState.selectedModuleId);
-  }
-
   async function loadRoleData(): Promise<void> {
     const roleData = await loadRoleDataForActor({
       actor: currentActor,
@@ -210,41 +188,42 @@
     contributions = roleData.contributions;
   }
 
-  async function refreshAuthenticatedData(): Promise<void> {
-    await loadModules();
+  function applyRefreshedShellData(refreshed: RefreshedShellState): void {
+    modules = refreshed.modules;
+    importState = {
+      ...importState,
+      targetModuleId: refreshed.importTargetModuleId
+    };
+    applySelectedModule(refreshed.selectedModuleId);
+    users = refreshed.users;
+    moderationQueue = refreshed.moderationQueue;
+    contributions = refreshed.contributions;
+    if (currentRoute === 'stats') {
+      stats = refreshed.stats;
+      statsError = refreshed.statsErrorMessage;
+    }
+  }
+
+  async function refreshAuthenticatedData(actor: AuthActor | null = currentActor): Promise<void> {
+    const refreshed = await refreshAuthenticatedShellData({
+      actor,
+      currentRoute,
+      selectedModuleId,
+      importState,
+      instanceKey,
+      storage: window.localStorage,
+      getModulesTree,
+      getUsers,
+      getModerationQueue,
+      getMyContributions,
+      getStats
+    });
+    applyRefreshedShellData(refreshed);
     restoreImportStateFromSession();
     importState = {
       ...importState,
       sessionReady: true
     };
-    await loadRoleData();
-    if (currentRoute === 'stats') {
-      await loadStats();
-    }
-  }
-
-  async function resolveAuthSession(): Promise<void> {
-    authLoading = true;
-    authError = '';
-    const healthContext = await resolveHealthContext(getHealth);
-    health = healthContext.health;
-    instanceKey = healthContext.instanceKey;
-
-    clearLegacySelectionStorage(window.localStorage);
-
-    try {
-      currentActor = await getCurrentActor();
-      await refreshAuthenticatedData();
-    } catch (error) {
-      currentActor = null;
-      resetAuthenticatedState();
-      importState = {
-        ...importState,
-        sessionReady: true
-      };
-    } finally {
-      authLoading = false;
-    }
   }
 
   async function loadStats(): Promise<void> {
@@ -257,6 +236,45 @@
     stats = loadedStats.stats;
     statsError = loadedStats.errorMessage;
     statsLoading = false;
+  }
+
+  async function resolveAuthSession(): Promise<void> {
+    authLoading = true;
+    authError = '';
+    const resolvedState = await resolveAuthSessionState({
+      currentRoute,
+      selectedModuleId,
+      importState,
+      storage: window.localStorage,
+      getHealth,
+      getCurrentActor,
+      getModulesTree,
+      getUsers,
+      getModerationQueue,
+      getMyContributions,
+      getStats
+    });
+    health = resolvedState.health;
+    instanceKey = resolvedState.instanceKey;
+    currentActor = resolvedState.currentActor;
+
+    if (!resolvedState.currentActor) {
+      resetAuthenticatedState();
+      importState = {
+        ...importState,
+        sessionReady: true
+      };
+      authLoading = false;
+      return;
+    }
+
+    applyRefreshedShellData(resolvedState);
+    restoreImportStateFromSession();
+    importState = {
+      ...importState,
+      sessionReady: true
+    };
+    authLoading = false;
   }
 
   async function navigate(route: RouteName): Promise<void> {
@@ -289,7 +307,7 @@
     authError = '';
     try {
       currentActor = await login(payload);
-      await refreshAuthenticatedData();
+      await refreshAuthenticatedData(currentActor);
     } catch (error) {
       authError = error instanceof Error ? error.message : 'Unable to sign in.';
     } finally {
@@ -307,7 +325,7 @@
     try {
       currentActor = await bootstrapAdmin(payload);
       health = health ? { ...health, bootstrap_required: false } : null;
-      await refreshAuthenticatedData();
+      await refreshAuthenticatedData(currentActor);
     } catch (error) {
       authError = error instanceof Error ? error.message : 'Unable to create the first admin.';
     } finally {
@@ -320,7 +338,7 @@
     authError = '';
     try {
       currentActor = await createDemoSession();
-      await refreshAuthenticatedData();
+      await refreshAuthenticatedData(currentActor);
     } catch (error) {
       authError = error instanceof Error ? error.message : 'Unable to start demo mode.';
     } finally {
@@ -348,7 +366,7 @@
     const updatedUser = await updateUserRole(userId, { role });
     if (currentActor?.id === userId) {
       currentActor = await getCurrentActor();
-      await refreshAuthenticatedData();
+      await refreshAuthenticatedData(currentActor);
       return updatedUser;
     }
     await loadRoleData();
@@ -447,19 +465,17 @@
       instruction: payload.instruction,
       createModule,
       reloadModules: async () => {
-        await loadModules();
+        await refreshAuthenticatedData(currentActor);
         return modules;
       }
     });
-    await loadRoleData();
     return created;
   }
 
   async function handleUpdateModule(moduleId: number, payload: UpdateModulePayload): Promise<ModuleNode> {
     const updated = await updateModule(moduleId, payload);
-    await loadModules();
-    await loadRoleData();
-    return findModuleNode(modules, updated.id) ?? updated;
+    await refreshAuthenticatedData(currentActor);
+    return findModuleNodeInTree(modules, updated.id) ?? updated;
   }
 
   function closeEditor(): void {
@@ -472,47 +488,33 @@
 
   async function reloadAfterQuestionMutation(): Promise<void> {
     session = null;
-    await loadModules();
-    await loadRoleData();
+    await refreshAuthenticatedData();
     if (currentRoute !== 'stats') {
       await navigate('stats');
-    } else {
-      await loadStats();
     }
   }
 
   async function reloadAfterModerationMutation(): Promise<void> {
-    await loadRoleData();
-    await loadModules();
-    if (currentRoute === 'stats') {
-      await loadStats();
-    }
+    await refreshAuthenticatedData();
   }
 
   async function handleSaveQuestion(payload: QuestionDraftPayload, resetStats: boolean): Promise<void> {
     savingQuestion = true;
     try {
-      if (editorMode === 'moderation' && editingRevisionProposal) {
-        await reviewQuestionRevision(editingRevisionProposal.proposal_id, {
-          action: 'approve',
-          note: '',
-          edited_revision: {
-            ...payload,
-            reset_stats: resetStats
-          }
-        });
-        closeEditor();
+      const reloadKind = await saveQuestionMutation({
+        editorMode,
+        editingQuestion,
+        editingRevisionProposal,
+        payload,
+        resetStats,
+        createQuestion,
+        reviseQuestion,
+        reviewQuestionRevision
+      });
+      closeEditor();
+      if (reloadKind === 'moderation') {
         await reloadAfterModerationMutation();
-      } else if (editingQuestion) {
-        await reviseQuestion(editingQuestion.question_id, {
-          ...payload,
-          reset_stats: resetStats
-        });
-        closeEditor();
-        await reloadAfterQuestionMutation();
       } else {
-        await createQuestion(payload);
-        closeEditor();
         await reloadAfterQuestionMutation();
       }
     } finally {
@@ -532,137 +534,32 @@
   }
 
   async function handleStartImport(qmlText: string): Promise<void> {
-    if (!importTargetModuleNode || currentActor?.role !== 'admin') {
-      return;
-    }
-    importState = {
-      ...setImportUiSaveStatus(importState),
-      busy: true,
-      error: '',
-      draftQmlText: qmlText,
-      saveProgressTotal: 0,
-      saveProgressCompleted: 0
-    };
-    try {
-      const nextResult = await validateQuestionImportText(importTargetModuleNode.id, qmlText);
-      importState = {
-        ...importState,
-        draftRows: initialImportDraftRows(nextResult),
-        result: nextResult
-      };
-    } catch (error) {
-      importState = {
-        ...importState,
-        error: error instanceof Error ? error.message : 'Unable to start this import.'
-      };
-    } finally {
-      importState = {
-        ...importState,
-        busy: false
-      };
-    }
+    importState = await startImportUiFlow({
+      state: importState,
+      actor: currentActor,
+      moduleNode: importTargetModuleNode,
+      qmlText,
+      validateText: validateQuestionImportText,
+      onStateChange: (nextState) => (importState = nextState),
+      getState: () => importState
+    });
   }
 
   async function handleCommitImport(rows: QuestionImportRowPayload[]): Promise<void> {
-    if (!importTargetModuleNode || currentActor?.role !== 'admin') {
-      return;
-    }
-    let queuedRows: QuestionImportRowPayload[] = [];
-    importState = {
-      ...setImportUiSaveStatus(importState),
-      busy: true,
-      error: '',
-      draftRows: cloneImportRows(rows)
-    };
-    try {
-      const { validatedState, draftRows, queue, saveStatus } = await prepareImportSave({
-        moduleId: importTargetModuleNode.id,
-        rows,
-        validateRows: validateQuestionImportRows
-      });
-      importState = {
-        ...importState,
-        result: validatedState,
-        draftRows
-      };
-      queuedRows = queue;
-
-      const validationStatus =
-        saveStatus ?? (queue.length === 0 ? { message: 'Nothing new to save.', tone: 'info' as const } : null);
-      if (validationStatus) {
-        importState = {
-          ...setImportUiSaveStatus(importState, validationStatus.message, validationStatus.tone),
-          saveProgressTotal: 0,
-          saveProgressCompleted: 0
-        };
-        return;
-      }
-
-      const commitResult = await commitImportInChunks({
-        moduleId: importTargetModuleNode.id,
-        rows: queue,
-        commitRows: commitQuestionImport,
-        chunkSize: IMPORT_COMMIT_CHUNK_SIZE,
-        onProgress: ({ completed, total }) => {
-          importState = {
-            ...importState,
-            saveProgressCompleted: completed,
-            saveProgressTotal: total
-          };
-        }
-      });
-      if (!commitResult.completed) {
-        const rebuiltState = await rebuildImportStateAfterPartialSave({
-          moduleId: importTargetModuleNode.id,
-          rows: commitResult.remainingRows,
-          committedRows: commitResult.committedRows,
-          validateRows: validateQuestionImportRows
-        });
-        importState = {
-          ...setImportUiSaveStatus(importState, rebuiltState.saveStatus.message, rebuiltState.saveStatus.tone),
-          draftRows: rebuiltState.draftRows,
-          result: rebuiltState.validatedState
-        };
-        return;
-      }
-
-      importState = resetImportUiState(importState, true);
+    const result = await commitImportUiFlow({
+      state: importState,
+      actor: currentActor,
+      moduleNode: importTargetModuleNode,
+      rows,
+      validateRows: validateQuestionImportRows,
+      commitRows: commitQuestionImport,
+      chunkSize: IMPORT_COMMIT_CHUNK_SIZE,
+      onStateChange: (nextState) => (importState = nextState),
+      getState: () => importState
+    });
+    importState = result.state;
+    if (result.committedAll) {
       await reloadAfterQuestionMutation();
-    } catch (error) {
-      if (importState.saveProgressCompleted > 0 && queuedRows.length > 0) {
-        try {
-          const remainingRows = queuedRows.slice(importState.saveProgressCompleted);
-          const rebuiltState = await rebuildImportStateAfterPartialSave({
-            moduleId: importTargetModuleNode.id,
-            rows: remainingRows,
-            committedRows: importState.saveProgressCompleted,
-            validateRows: validateQuestionImportRows
-          });
-          importState = {
-            ...setImportUiSaveStatus(importState, rebuiltState.saveStatus.message, rebuiltState.saveStatus.tone),
-            draftRows: rebuiltState.draftRows,
-            result: rebuiltState.validatedState
-          };
-        } catch (rebuildError) {
-          console.error(rebuildError);
-          importState = {
-            ...importState,
-            error: error instanceof Error ? error.message : 'Unable to commit this upload.'
-          };
-        }
-      } else {
-        importState = {
-          ...importState,
-          error: error instanceof Error ? error.message : 'Unable to commit this upload.'
-        };
-      }
-    } finally {
-      importState = {
-        ...importState,
-        busy: false,
-        saveProgressTotal: 0,
-        saveProgressCompleted: 0
-      };
     }
   }
 
@@ -685,55 +582,26 @@
     questionIds: number[],
     payload: ModerationActionPayload
   ): Promise<BulkModerationResult> {
-    return handleBulkModeration(questionIds, payload, reviewQuestion);
+    const result = await runBulkModeration({
+      ids: questionIds,
+      payload,
+      handler: reviewQuestion
+    });
+    await reloadAfterModerationMutation();
+    return result;
   }
 
   async function handleBulkRevisionModeration(
     items: BulkRevisionModerationItem[],
     payload: ModerationActionPayload
   ): Promise<BulkModerationResult> {
-    let succeeded = 0;
-    let failed = 0;
-
-    for (const item of items) {
-      try {
-        await reviewQuestionRevision(item.proposalId, {
-          ...payload,
-          ...(payload.action === 'approve' ? { reset_stats: item.resetStats } : {})
-        });
-        succeeded += 1;
-      } catch (error) {
-        console.error(error);
-        failed += 1;
-      }
-    }
-
+    const result = await runBulkRevisionModeration({
+      items,
+      payload,
+      reviewQuestionRevision
+    });
     await reloadAfterModerationMutation();
-
-    return { succeeded, failed };
-  }
-
-  async function handleBulkModeration(
-    ids: number[],
-    payload: ModerationActionPayload,
-    handler: (id: number, payload: ModerationActionPayload) => Promise<Record<string, unknown>>
-  ): Promise<BulkModerationResult> {
-    let succeeded = 0;
-    let failed = 0;
-
-    for (const id of ids) {
-      try {
-        await handler(id, payload);
-        succeeded += 1;
-      } catch (error) {
-        console.error(error);
-        failed += 1;
-      }
-    }
-
-    await reloadAfterModerationMutation();
-
-    return { succeeded, failed };
+    return result;
   }
 
   onMount(() => {
@@ -755,10 +623,11 @@
     selectedModuleId === null
       ? modules[0]?.title ?? 'Selected Module'
       : findModuleTitle(modules, selectedModuleId) ?? 'Selected Module';
-  $: selectedModuleNode = selectedModuleId === null ? null : findModuleNode(modules, selectedModuleId);
+  $: selectedModuleNode = selectedModuleId === null ? null : findModuleNodeInTree(modules, selectedModuleId);
   $: selectedModuleIsLeaf = Boolean(selectedModuleNode && selectedModuleNode.children.length === 0);
   $: selectedModuleInstruction = selectedModuleNode?.instruction ?? '';
-  $: importTargetModuleNode = importState.targetModuleId === null ? null : findModuleNode(modules, importState.targetModuleId);
+  $: importTargetModuleNode =
+    importState.targetModuleId === null ? null : findModuleNodeInTree(modules, importState.targetModuleId);
   $: activeActorLabel = currentActor?.display_name ?? 'Current account';
   $: importStatus = importStatusSummary(importState);
   $: if (importState.sessionReady) {

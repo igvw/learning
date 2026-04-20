@@ -2,7 +2,7 @@
 
 ## Current Shape
 
-The current container deployment is:
+The container deployment is:
 
 - one `postgres` container
 - one `app` container
@@ -129,7 +129,7 @@ The sample `.env.example` also boots the first admin automatically:
 - handle: `admin`
 - password: `password123`
 
-If you intentionally clear the bootstrap admin vars before first startup, the app still starts and the auth screen falls back to the manual first-admin bootstrap flow.
+If you intentionally clear the bootstrap admin vars before first startup, the app starts and the auth screen falls back to the manual first-admin bootstrap flow.
 
 What this means for offline use:
 

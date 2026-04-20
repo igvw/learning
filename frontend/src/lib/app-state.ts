@@ -1,6 +1,6 @@
 import { findModuleNode } from './module-paths';
 import { cloneImportRows } from './import-rows';
-import type { ModuleNode, QuestionImportResult, QuestionImportRowPayload, User } from './types';
+import type { ModuleNode, QuestionImportResult, QuestionImportRowPayload } from './types';
 
 const LEGACY_ACTIVE_USER_STORAGE_KEY = 'learning.active-user-id';
 const LEGACY_ACTIVE_MODULE_STORAGE_KEY = 'learning.selected-module-id';
@@ -80,20 +80,6 @@ export function findModuleTitle(nodes: ModuleNode[], moduleId: number): string |
   return findModuleNode(nodes, moduleId)?.title ?? null;
 }
 
-export function findUser(users: User[], userId: number | null): User | null {
-  if (userId === null) {
-    return null;
-  }
-  return users.find((user) => user.id === userId) ?? null;
-}
-
-export function findUserIdByHandle(users: User[], handle: string | null): number | null {
-  if (!handle) {
-    return null;
-  }
-  return users.find((user) => user.handle === handle)?.id ?? null;
-}
-
 export function findModuleIdByFullSlug(nodes: ModuleNode[], fullSlug: string | null): number | null {
   if (!fullSlug) {
     return null;
@@ -111,32 +97,6 @@ export function findModuleIdByFullSlug(nodes: ModuleNode[], fullSlug: string | n
     stack.push(...node.children);
   }
   return null;
-}
-
-export function persistActiveUser(
-  storage: Storage,
-  {
-    instanceKey,
-    users,
-    userId
-  }: {
-    instanceKey: string;
-    users: User[];
-    userId: number | null;
-  }
-): void {
-  const key = storageKey(instanceKey, 'active-user-handle');
-  if (userId === null) {
-    storage.removeItem(key);
-    return;
-  }
-
-  const user = findUser(users, userId);
-  if (!user) {
-    storage.removeItem(key);
-    return;
-  }
-  storage.setItem(key, user.handle);
 }
 
 export function persistSelectedModule(
@@ -190,34 +150,6 @@ export function restoreSelectedModuleId(
     return savedModuleId;
   }
   return modules[0].id;
-}
-
-export function restoreActiveUserId(
-  storage: Storage,
-  {
-    instanceKey,
-    users,
-    activeUserId
-  }: {
-    instanceKey: string;
-    users: User[];
-    activeUserId: number | null;
-  }
-): number | null {
-  const currentUser = findUser(users, activeUserId);
-  if (currentUser) {
-    return currentUser.id;
-  }
-
-  const savedUserHandle = storage.getItem(storageKey(instanceKey, 'active-user-handle'));
-  const savedUserId = findUserIdByHandle(users, savedUserHandle);
-  if (savedUserId !== null && findUser(users, savedUserId)) {
-    return savedUserId;
-  }
-  if (users.length > 0) {
-    return users[0].id;
-  }
-  return null;
 }
 
 export function persistImportSession(

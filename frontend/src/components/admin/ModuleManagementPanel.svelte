@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { CreateModulePayload, ModuleNode, UpdateModulePayload } from '../../lib/types';
-  import type { FlatModule } from '../../lib/admin-page';
+  import type { FlatModule } from '../../lib/module-tree';
 
   export let currentActorId: number | null = null;
   export let isAdmin = false;

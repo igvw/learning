@@ -88,7 +88,7 @@ volumes:
 
 ## Source Build
 
-To build from the local working tree instead of the published image:
+To build from the local working tree:
 
 ```bash
 cp .env.example .env

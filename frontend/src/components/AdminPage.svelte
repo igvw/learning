@@ -5,7 +5,7 @@
   import ModerationOverlay from './admin/ModerationOverlay.svelte';
   import ModerationQueuePanel from './admin/ModerationQueuePanel.svelte';
   import ModuleManagementPanel from './admin/ModuleManagementPanel.svelte';
-  import { flattenModules } from '../lib/admin-page';
+  import { flattenModules } from '../lib/module-tree';
   import type {
     AuthActor,
     BulkRevisionModerationItem,

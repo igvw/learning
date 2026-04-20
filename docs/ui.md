@@ -1,6 +1,6 @@
 # Learning App UI
 
-This document describes the current UI structure and main interaction rules.
+This document indexes the UI structure and main interaction surfaces.
 
 See also:
 
@@ -10,186 +10,26 @@ See also:
 
 ## App Structure
 
-The app has three main pages plus a shared module menu:
+The app has three main pages plus shared navigation:
 
 - `Quiz`
 - `Stats`
 - `Admin`
 - hamburger menu for module selection
+- authenticated account badge and logout menu in the header
 
-The header also includes the authenticated account badge and logout menu.
+## Shared UI Rules
 
-Current header behavior:
-
-- brand text is `Learning`
-- no eyebrow/kicker is shown above the brand
-
-## Module Menu
-
-The hamburger menu controls module scope.
-
-Current behavior:
-
-- modules are shown as a tree
-- clicking a parent selects that scope and opens its branch
-- clicking a leaf selects it and closes the menu
+- the hamburger menu controls module scope for study and authoring flows
+- clicking a parent module selects that scope and opens its branch
+- clicking a leaf module selects it and closes the menu
 - top-level branches auto-collapse when switching roots
+- current-state UI docs describe behavior in present tense and do not keep historical comparison notes
 
-## Authentication
+## Page Docs
 
-The app now starts with an auth screen instead of a user switcher.
-
-Current behavior:
-
-- if no admin exists yet, the auth screen shows first-admin bootstrap
-- normal accounts sign in by handle and password
-- demo mode starts an ephemeral showcase session with no real writes
-- the top-right badge shows the current account and logout action
-
-## Quiz Page
-
-The quiz page is the keyboard-first study surface.
-
-Current behavior:
-
-- one unanswered question is active at a time
-- answered cards remain visible
-- `Enter` moves through multi-input answers and submits from the last field
-- correct answers tint the card green
-- incorrect answers tint the card red and show all accepted answers in the grey feedback box
-- correct answers that used a non-default accepted alternative expand that slot’s disabled input to all accepted answers
-- correct answers that used the default accepted answer do not show a separate neutral feedback box
-- the completed session becomes the review surface
-- the old helper card under the start controls is gone; the page now stays focused on scope and start actions
-
-Completed-session behavior:
-
-- start-another-quiz action is prominent
-- review actions live directly on answered cards
-- correctly answered cards can be hidden to focus review
-
-## Stats Page
-
-The stats page combines reporting and question maintenance.
-
-Current behavior:
-
-- recent session performance graph
-- spaced-repetition stages graph
-- entry-state graph
-- retry-eligibility graph
-- first-time questions answered by day over the last 7 app-timezone days
-- sortable question table
-- `Review only` checkbox that filters that same table between non-review and review-flagged rows
-- floating create-question action
-
-The question table currently focuses on:
-
-- rank
-- prompt
-- logical bucket
-- last seen
-- attempts
-- correctness
-
-Current table behavior:
-
-- when unchecked, the table shows only non-review rows
-- when checked, the table shows only review-flagged rows
-- summary cards and graphs stay based on the full module scope while the table is filtered
-- unverified uploaded questions and personal revision overlays show badges in the question table
-- chart layout is two rows:
-  `Latest quiz performance` with `Entry states` on the top row, then `Spaced repetition stages`, `Retry eligibility`, and `First-time questions answered` below
-- `Spaced repetition stages` shows the full fixed ladder through `60d`
-- clicking `Spaced repetition stages` opens a detail overlay with a due-day heatmap:
-  bucket columns `<1d`, `1d`, `3d`, `7d`, `14d`, `30d`, `60d`; day rows from `Today` through the latest scheduled fixed-stage day within the next 60 app-timezone days; overdue items collapse into `Today`
-- `Retry eligibility` groups fixed-bucket due times into `<1`, day buckets `1` through `7`, and `>7`
-- clicking `Retry eligibility` opens a detail overlay with the same graphs and only graph titles plus empty-state/status copy
-- review rows stay orange when shown in the filtered table
-- hot rows are shaded red in two intensities in the main table
-- logical bucket and hotness are separated intentionally
-- the detail overlays for `Retry eligibility` and `Spaced repetition stages` keep titles and empty-state/status messaging only; explanatory body copy and count blurbs are omitted
-
-## Revision Drawer
-
-The revision drawer is the question editing surface.
-
-Current behavior:
-
-- dense single-card layout for question details
-- one module selector, not a duplicate module-path display
-- prompt, type, and accepted answers grouped tightly
-- aggregated incorrect-answer history shown at the bottom in a compact table
-- create mode defaults the module selector to the current hamburger-selected scope
-- create mode keeps a live editable QML box in sync with the structured fields
-- revision mode can delete the current question after confirmation
-- regular-user revision mode on verified questions becomes a personal proposal flow:
-  module and order stay locked, and delete becomes `Request Delete`
-- admins still edit verified questions directly
-
-Incorrect-answer history currently shows:
-
-- answer text
-- count
-- latest incorrect time
-
-## Admin / Manage Page
-
-The third route is now role-aware instead of always being a pure admin page.
-
-Current behavior:
-
-- admins see:
-  compact top-row summary cards for `Accounts`, `Modules`, `Import`, and `Export`
-  overlay-based account creation and password reset
-  overlay-based global module editing
-  overlay-based manual full-content export
-  overlay-based QML import
-  moderation summary cards for pending modules, pending uploaded questions, and question revision/delete proposals
-- admins open each moderation category in its own overlay instead of keeping the full queue inline on the page
-- the pending uploaded questions overlay groups rows by module and supports bulk approve/reject per module table
-- the pending revisions overlay opens with module cards, then drills into one module at a time with collapsed change sections
-- each revision row now keeps all question details in one `Changes` snapshot:
-  - normal revisions show side-by-side current/proposed cards
-  - delete requests show a single red current snapshot
-- clicking a revision snapshot opens the shared question drawer in moderation-review mode, and saving approves the edited revision immediately
-- pending revisions support bulk approve/reject per expanded change section
-- the export panel downloads the full verified module tree as `modules-export.zip`
-- regular users see:
-  a compact `Modules` summary card that opens pending-module creation/editing
-  one wide `My contributions` summary card
-  a browsable contributions overlay with `Modules`, `Uploaded questions`, and active `Revisions`
-  read-only revision detail using the same snapshot/diff card style as admin moderation, but without moderation actions
-- non-admin import/upload UI is removed
-- demo shows the same contribution surface in a disabled/showcase form
-
-## Import Drawer
-
-The import drawer is a review-and-commit drawer for one leaf module.
-
-Current behavior:
-
-- paste or load QML text
-- validate rows into one review table
-- show exact duplicate counts in the summary instead of cluttering the table
-- show duplicate, relocation, invalid, and conflict rows together in the same table
-- keep original physical line numbers visible and color-coded
-- let editable rows change QML directly in the table
-- show answer chips grouped by answer slot
-- color-code answer chips by source:
-  - current answer
-  - imported answer
-  - manually added answer
-- persist the import session in `sessionStorage` so refresh restores the drawer state
-- save with one button and determinate chunk progress
-- allow the drawer to be hidden while an upload keeps running in the current tab
-- show a compact header upload-status pill that reopens the drawer
-- admin-only; regular users no longer have a QML upload path
-
-Current import-save behavior:
-
-- save submits the current edited rows
-- the frontend saves committable rows in 50-row chunks
-- while a chunked upload is active, the review rows become read-only status rows
-- partial success keeps the drawer open, removes already committed rows, and revalidates the remainder
-- blocking rows stay highlighted red until edited or removed
+- [Authentication and account entry](ui/auth.md)
+- [Quiz page](ui/quiz.md)
+- [Stats page](ui/stats.md)
+- [Manage page](ui/manage.md)
+- [Import drawer and upload flow](ui/imports.md)

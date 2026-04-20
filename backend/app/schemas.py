@@ -93,13 +93,6 @@ class UserRoleUpdateIn(BaseModel):
     role: Literal["admin", "user"]
 
 
-class ViewerProposalStateOut(BaseModel):
-    proposal_id: int
-    status: ProposalStatus
-    delete_requested: bool = False
-    admin_review_note: str = ""
-
-
 class ModerationActionIn(BaseModel):
     action: Literal["approve", "reject", "changes_requested"]
     note: str = ""
@@ -186,7 +179,6 @@ class QuizItemOut(BaseModel):
     moderation_status: ModerationStatus = "verified"
     created_by_user_id: int | None = None
     creator_display_name: str | None = None
-    viewer_proposal: ViewerProposalStateOut | None = None
     submitted_answer: list[str] | None = None
     is_correct: bool | None = None
     score_earned: float | None = None
@@ -327,7 +319,6 @@ class QuestionRowOut(BaseModel):
     moderation_status: ModerationStatus = "verified"
     created_by_user_id: int | None = None
     creator_display_name: str | None = None
-    viewer_proposal: ViewerProposalStateOut | None = None
     accepted_answers: list[list[str]]
     segments: list[str]
     recent_incorrect_answers: list[dict[str, Any]] = Field(default_factory=list)

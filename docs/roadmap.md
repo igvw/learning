@@ -52,9 +52,9 @@ Key roadmap conclusion:
 
 - QML v2
   - likely move away from inline math-style computed questions toward question bundles
-  - bundles would allow curated tested variants instead of inline expression syntax
+  - bundles would allow curated tested variants without relying on inline expression syntax
   - this may imply multiline bundle blocks in QML, or a dedicated bundle section inside QML/import flows
-  - exact syntax and storage model are intentionally still undecided
+  - exact syntax and storage model remain intentionally undecided
   - bundle direction matters because variants may need to stay logically grouped for study behavior
   - ghost text as lightweight authoring metadata
   - distractors for future multiple-choice support
@@ -81,7 +81,7 @@ These should come after:
 ## Assumptions
 
 - alpha is for secure private hosting, not a public-open release
-- alpha now includes moderated user contribution flows instead of only single-admin authoring
+- alpha includes moderated user contribution flows alongside single-admin authoring
 - beta is study-tool first, not experiment-lab first
 - complete revise mode is more important than themes
 - QML v2 should follow beta study-mode needs, not lead them

@@ -29,18 +29,18 @@ def module_visible_to_actor(row: Any, actor: Actor | None) -> bool:
     )
 
 
-def active_viewer_proposals_by_question(
+def active_viewer_proposal_question_ids(
     connection: DatabaseConnection,
     *,
     actor: Actor | None,
     question_ids: list[int],
-) -> dict[int, dict[str, Any]]:
+) -> set[int]:
     if actor is None or actor.role == "admin" or actor.user_id is None or not question_ids:
-        return {}
+        return set()
     placeholders = ",".join("?" for _ in question_ids)
     rows = connection.execute(
         f"""
-        SELECT id, question_id, prompt, question_type, type_config_json, delete_requested, status, admin_review_note
+        SELECT question_id
         FROM question_revision_proposals
         WHERE proposer_user_id = ?
           AND status IN ('pending', 'changes_requested')
@@ -48,18 +48,7 @@ def active_viewer_proposals_by_question(
         """,
         (actor.user_id, *question_ids),
     ).fetchall()
-    return {
-        int(row["question_id"]): {
-            "proposal_id": int(row["id"]),
-            "status": row["status"],
-            "delete_requested": bool(row["delete_requested"]),
-            "prompt": row["prompt"],
-            "question_type": row["question_type"],
-            "type_config": json.loads(row["type_config_json"]),
-            "admin_review_note": row["admin_review_note"] or "",
-        }
-        for row in rows
-    }
+    return {int(row["question_id"]) for row in rows}
 
 
 def list_effective_question_rows(
@@ -99,7 +88,7 @@ def list_effective_question_rows(
     ).fetchall()
 
     question_ids = [int(row["question_id"]) for row in rows]
-    proposals_by_question = active_viewer_proposals_by_question(
+    active_proposal_question_ids = active_viewer_proposal_question_ids(
         connection,
         actor=actor,
         question_ids=question_ids,
@@ -108,8 +97,7 @@ def list_effective_question_rows(
     for row in rows:
         if not question_visible_to_actor(row, actor):
             continue
-        proposal = proposals_by_question.get(int(row["question_id"]))
-        if proposal is not None and bool(row["admin_verified"]):
+        if int(row["question_id"]) in active_proposal_question_ids and bool(row["admin_verified"]):
             continue
 
         question_type = row["question_type"]
@@ -130,7 +118,6 @@ def list_effective_question_rows(
                 "admin_verified": bool(row["admin_verified"]),
                 "moderation_status": row["moderation_status"],
                 "creator_display_name": row["creator_display_name"],
-                "viewer_proposal": None,
             }
         )
     return effective_rows

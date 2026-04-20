@@ -60,13 +60,6 @@ export interface LoginPayload {
   password: string;
 }
 
-export interface ViewerProposalState {
-  proposal_id: number;
-  status: ProposalStatus;
-  delete_requested: boolean;
-  admin_review_note: string;
-}
-
 export interface QuizTypeConfig {
   expected_slots?: number;
   segments?: string[];
@@ -93,7 +86,6 @@ export interface QuizItem {
   moderation_status: ModerationStatus;
   created_by_user_id: number | null;
   creator_display_name: string | null;
-  viewer_proposal?: ViewerProposalState | null;
   submitted_answer: string[] | null;
   is_correct: boolean | null;
   score_earned?: number | null;
@@ -186,7 +178,6 @@ export interface QuestionRow {
   moderation_status: ModerationStatus;
   created_by_user_id: number | null;
   creator_display_name: string | null;
-  viewer_proposal?: ViewerProposalState | null;
   accepted_answers: string[][];
   segments: string[];
   recent_incorrect_answers: Array<{

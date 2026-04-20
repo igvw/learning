@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { RetryEligibilityHourlyGraph, RetryEligibilityLongRangeGraph } from '../lib/stats-page';
+  import type { RetryEligibilityHourlyGraph, RetryEligibilityLongRangeGraph } from '../lib/stats/retry-graphs';
 
   export let open = false;
   export let hourlyGraph: RetryEligibilityHourlyGraph;

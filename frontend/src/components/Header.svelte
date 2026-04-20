@@ -1,14 +1,11 @@
 <script lang="ts">
-  import type { AuthActor, RouteName, User } from '../lib/types';
+  import type { AuthActor, RouteName } from '../lib/types';
 
   export let currentRoute: RouteName = 'quiz';
   export let currentActor: AuthActor | null = null;
-  export let users: User[] = [];
-  export let activeUserId: number | null = null;
   export let onNavigate: (route: RouteName) => void = () => {};
   export let onToggleMenu: () => void = () => {};
   export let onLogout: () => Promise<void> | void = () => {};
-  export let onSelectUser: (userId: number) => void = () => {};
   export let importStatusVisible = false;
   export let importStatusLabel = '';
   export let importStatusDetail = '';
@@ -40,33 +37,8 @@
     await onLogout();
   }
 
-  function legacyActor(usersList: User[], userId: number | null): AuthActor | null {
-    if (userId === null) {
-      return null;
-    }
-    const user = usersList.find((candidate) => candidate.id === userId);
-    if (!user) {
-      return null;
-    }
-    return {
-      id: user.id,
-      handle: user.handle,
-      display_name: user.display_name,
-      role: user.role,
-      is_demo: false,
-      created_at: user.created_at
-    };
-  }
-
-  function handleLegacySelect(userId: number): void {
-    userMenuOpen = false;
-    onSelectUser(userId);
-  }
-
   $: manageLabel = currentActor?.role === 'admin' ? 'Admin' : 'Manage';
-  $: legacySelectedActor = legacyActor(users, activeUserId);
-  $: displayedActor = currentActor ?? legacySelectedActor;
-  $: legacySwitcherMode = activeUserId !== null && users.length > 0;
+  $: displayedActor = currentActor;
 </script>
 
 <svelte:window
@@ -129,36 +101,15 @@
       </button>
 
       {#if userMenuOpen && displayedActor}
-        {#if legacySwitcherMode}
-          <div class="user-menu" role="menu" aria-label="User menu" tabindex="-1">
-            <p class="user-menu-title">Switch user</p>
-            {#each users as user (user.id)}
-              <button
-                type="button"
-                class="user-menu-item"
-                class:active={user.id === activeUserId}
-                role="menuitemradio"
-                aria-checked={user.id === activeUserId}
-                on:click={() => handleLegacySelect(user.id)}
-              >
-                <span>{user.display_name}</span>
-                {#if user.id === activeUserId}
-                  <span class="user-menu-item-state">Current</span>
-                {/if}
-              </button>
-            {/each}
-          </div>
-        {:else}
-          <div class="user-menu" role="menu" aria-label="Account menu" tabindex="-1">
-            <p class="user-menu-title">{displayedActor.display_name}</p>
-            <p class="user-menu-empty">
-              {displayedActor.role}{displayedActor.is_demo ? ' account (ephemeral demo)' : ' account'}
-            </p>
-            <button type="button" class="user-menu-item" role="menuitem" on:click={() => void handleLogout()}>
-              <span>Log out</span>
-            </button>
-          </div>
-        {/if}
+        <div class="user-menu" role="menu" aria-label="Account menu" tabindex="-1">
+          <p class="user-menu-title">{displayedActor.display_name}</p>
+          <p class="user-menu-empty">
+            {displayedActor.role}{displayedActor.is_demo ? ' account (ephemeral demo)' : ' account'}
+          </p>
+          <button type="button" class="user-menu-item" role="menuitem" on:click={() => void handleLogout()}>
+            <span>Log out</span>
+          </button>
+        </div>
       {/if}
     </div>
   </div>

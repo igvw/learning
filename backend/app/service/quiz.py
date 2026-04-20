@@ -124,7 +124,6 @@ def create_quiz_session(
                 "moderation_status": row["moderation_status"],
                 "created_by_user_id": row["created_by_user_id"],
                 "creator_display_name": row["creator_display_name"],
-                "viewer_proposal": row["viewer_proposal"],
                 "submitted_answer": None,
                 "is_correct": None,
                 "score_earned": None,

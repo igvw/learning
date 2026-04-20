@@ -1,4 +1,5 @@
-import { moduleIdExists, restoreSelectedModuleId } from './app-state';
+import { clearLegacySelectionStorage, moduleIdExists, restoreSelectedModuleId } from './app-state';
+import type { ImportUiState } from './app-shell-import';
 import type {
   AuthActor,
   HealthResponse,
@@ -154,5 +155,153 @@ export async function loadStatsForActor({
       stats: null,
       errorMessage: error instanceof Error ? error.message : 'Unable to load stats.'
     };
+  }
+}
+
+export interface RefreshedShellState {
+  modules: ModuleNode[];
+  selectedModuleId: number | null;
+  importTargetModuleId: number | null;
+  users: User[];
+  moderationQueue: ModerationQueue | null;
+  contributions: MyContributions | null;
+  stats: StatsResponse | null;
+  statsErrorMessage: string;
+}
+
+export async function refreshAuthenticatedShellData({
+  actor,
+  currentRoute,
+  selectedModuleId,
+  importState,
+  instanceKey,
+  storage,
+  getModulesTree,
+  getUsers,
+  getModerationQueue,
+  getMyContributions,
+  getStats
+}: {
+  actor: AuthActor | null;
+  currentRoute: RouteName;
+  selectedModuleId: number | null;
+  importState: Pick<ImportUiState, 'targetModuleId'>;
+  instanceKey: string;
+  storage: Storage;
+  getModulesTree: () => Promise<ModuleNode[]>;
+  getUsers: () => Promise<User[]>;
+  getModerationQueue: () => Promise<ModerationQueue>;
+  getMyContributions: () => Promise<MyContributions>;
+  getStats: (moduleId: number | null) => Promise<StatsResponse>;
+}): Promise<RefreshedShellState> {
+  const loadedModules = await loadModulesForActor({
+    actor,
+    getModulesTree,
+    selectedModuleId,
+    importTargetModuleId: importState.targetModuleId,
+    instanceKey,
+    storage
+  });
+  const roleData = await loadRoleDataForActor({
+    actor,
+    getUsers,
+    getModerationQueue,
+    getMyContributions
+  });
+  const loadedStats =
+    currentRoute === 'stats'
+      ? await loadStatsForActor({
+          actor,
+          selectedModuleId: loadedModules.selectedModuleId,
+          getStats
+        })
+      : { stats: null, errorMessage: '' };
+
+  return {
+    modules: loadedModules.modules,
+    selectedModuleId: loadedModules.selectedModuleId,
+    importTargetModuleId: loadedModules.importTargetModuleId,
+    users: roleData.users,
+    moderationQueue: roleData.moderationQueue,
+    contributions: roleData.contributions,
+    stats: loadedStats.stats,
+    statsErrorMessage: loadedStats.errorMessage
+  };
+}
+
+export interface ResolvedAuthSessionState extends RefreshedShellState {
+  health: HealthResponse;
+  instanceKey: string;
+  currentActor: AuthActor | null;
+}
+
+function emptyShellState(health: HealthResponse, instanceKey: string): ResolvedAuthSessionState {
+  return {
+    health,
+    instanceKey,
+    currentActor: null,
+    modules: [],
+    selectedModuleId: null,
+    importTargetModuleId: null,
+    users: [],
+    moderationQueue: null,
+    contributions: null,
+    stats: null,
+    statsErrorMessage: ''
+  };
+}
+
+export async function resolveAuthSessionState({
+  currentRoute,
+  selectedModuleId,
+  importState,
+  storage,
+  getHealth,
+  getCurrentActor,
+  getModulesTree,
+  getUsers,
+  getModerationQueue,
+  getMyContributions,
+  getStats
+}: {
+  currentRoute: RouteName;
+  selectedModuleId: number | null;
+  importState: Pick<ImportUiState, 'targetModuleId'>;
+  storage: Storage;
+  getHealth: () => Promise<HealthResponse>;
+  getCurrentActor: () => Promise<AuthActor>;
+  getModulesTree: () => Promise<ModuleNode[]>;
+  getUsers: () => Promise<User[]>;
+  getModerationQueue: () => Promise<ModerationQueue>;
+  getMyContributions: () => Promise<MyContributions>;
+  getStats: (moduleId: number | null) => Promise<StatsResponse>;
+}): Promise<ResolvedAuthSessionState> {
+  const healthContext = await resolveHealthContext(getHealth);
+  clearLegacySelectionStorage(storage);
+
+  try {
+    const currentActor = await getCurrentActor();
+    const refreshed = await refreshAuthenticatedShellData({
+      actor: currentActor,
+      currentRoute,
+      selectedModuleId,
+      importState,
+      instanceKey: healthContext.instanceKey,
+      storage,
+      getModulesTree,
+      getUsers,
+      getModerationQueue,
+      getMyContributions,
+      getStats
+    });
+
+    return {
+      health: healthContext.health,
+      instanceKey: healthContext.instanceKey,
+      currentActor,
+      ...refreshed
+    };
+  } catch {
+    return emptyShellState(healthContext.health, healthContext.instanceKey);
   }
 }

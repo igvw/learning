@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { StageDueMatrixGraph } from '../lib/stats-page';
+  import type { StageDueMatrixGraph } from '../lib/stats/due-graphs';
 
   export let open = false;
   export let graph: StageDueMatrixGraph;

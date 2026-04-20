@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { reviewBadge } from '../../lib/admin-page';
+  import { reviewBadge } from '../../lib/moderation-display';
   import type { MyContributions, QuestionRevisionProposal } from '../../lib/types';
   import AdminSummaryCard from './AdminSummaryCard.svelte';
+  import ContributionSection from './ContributionSection.svelte';
   import ModerationOverlay from './ModerationOverlay.svelte';
   import RevisionSnapshot from './RevisionSnapshot.svelte';
 
@@ -43,75 +44,48 @@
     <p class="muted-copy">No pending submissions yet.</p>
   {:else}
     <div class="moderation-overlay-stack">
-      <section class="panel contribution-section">
-        <div class="panel-header">
-          <div><h3>Modules</h3></div>
-        </div>
-        {#if moduleCount === 0}
-          <p class="muted-copy">No module submissions.</p>
-        {:else}
-          <div class="contribution-list">
-            {#each contributions.modules as module (module.id)}
-              <div class="dynamic-card compact-dynamic-card contribution-row">
-                <strong>{module.full_slug}</strong>
-                <p class="muted-copy">{reviewBadge(module.moderation_status, module.admin_verified)}</p>
-                {#if module.admin_review_note}
-                  <p class="muted-copy">{module.admin_review_note}</p>
-                {/if}
-              </div>
-            {/each}
+      <ContributionSection title="Modules" count={moduleCount} emptyMessage="No module submissions.">
+        {#each contributions.modules as module (module.id)}
+          <div class="dynamic-card compact-dynamic-card contribution-row">
+            <strong>{module.full_slug}</strong>
+            <p class="muted-copy">{reviewBadge(module.moderation_status, module.admin_verified)}</p>
+            {#if module.admin_review_note}
+              <p class="muted-copy">{module.admin_review_note}</p>
+            {/if}
           </div>
-        {/if}
-      </section>
+        {/each}
+      </ContributionSection>
 
-      <section class="panel contribution-section">
-        <div class="panel-header">
-          <div><h3>Uploaded questions</h3></div>
-        </div>
-        {#if questionCount === 0}
-          <p class="muted-copy">No uploaded questions.</p>
-        {:else}
-          <div class="contribution-list">
-            {#each contributions.questions as question (question.question_id)}
-              <div class="dynamic-card compact-dynamic-card contribution-row">
-                <strong>{question.prompt}</strong>
-                <p class="muted-copy">{question.module_full_slug}</p>
-                <p class="muted-copy">{reviewBadge(question.moderation_status, question.admin_verified)}</p>
-                {#if question.admin_review_note}
-                  <p class="muted-copy">{question.admin_review_note}</p>
-                {/if}
-              </div>
-            {/each}
+      <ContributionSection title="Uploaded questions" count={questionCount} emptyMessage="No uploaded questions.">
+        {#each contributions.questions as question (question.question_id)}
+          <div class="dynamic-card compact-dynamic-card contribution-row">
+            <strong>{question.prompt}</strong>
+            <p class="muted-copy">{question.module_full_slug}</p>
+            <p class="muted-copy">{reviewBadge(question.moderation_status, question.admin_verified)}</p>
+            {#if question.admin_review_note}
+              <p class="muted-copy">{question.admin_review_note}</p>
+            {/if}
           </div>
-        {/if}
-      </section>
+        {/each}
+      </ContributionSection>
 
-      <section class="panel contribution-section">
-        <div class="panel-header">
-          <div><h3>Revisions</h3></div>
-        </div>
-        {#if revisionCount === 0}
-          <p class="muted-copy">No revisions.</p>
-        {:else}
-          <div class="contribution-list">
-            {#each contributions.revisions as revision (revision.proposal_id)}
-              <button
-                type="button"
-                class="dynamic-card compact-dynamic-card contribution-row contribution-revision-button"
-                on:click={() => {
-                  selectedRevision = revision;
-                }}
-              >
-                <strong>{revision.module_full_slug}</strong>
-                <p class="muted-copy">{reviewBadge(revision.status, false)}</p>
-                {#if revision.admin_review_note}
-                  <p class="muted-copy">{revision.admin_review_note}</p>
-                {/if}
-              </button>
-            {/each}
-          </div>
-        {/if}
-      </section>
+      <ContributionSection title="Revisions" count={revisionCount} emptyMessage="No revisions.">
+        {#each contributions.revisions as revision (revision.proposal_id)}
+          <button
+            type="button"
+            class="dynamic-card compact-dynamic-card contribution-row contribution-revision-button"
+            on:click={() => {
+              selectedRevision = revision;
+            }}
+          >
+            <strong>{revision.module_full_slug}</strong>
+            <p class="muted-copy">{reviewBadge(revision.status, false)}</p>
+            {#if revision.admin_review_note}
+              <p class="muted-copy">{revision.admin_review_note}</p>
+            {/if}
+          </button>
+        {/each}
+      </ContributionSection>
     </div>
   {/if}
 </ModerationOverlay>
