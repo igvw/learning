@@ -31,8 +31,7 @@ export async function startImportUiFlow({
       ? {
           ...stateToPublish,
           open: currentState.open,
-          targetModuleId: currentState.targetModuleId,
-          sessionReady: currentState.sessionReady
+          targetModuleId: currentState.targetModuleId
         }
       : stateToPublish;
     onStateChange(nextPublishedState);
@@ -105,8 +104,7 @@ export async function commitImportUiFlow({
       ? {
           ...stateToPublish,
           open: currentState.open,
-          targetModuleId: currentState.targetModuleId,
-          sessionReady: currentState.sessionReady
+          targetModuleId: currentState.targetModuleId
         }
       : stateToPublish;
     onStateChange(nextPublishedState);

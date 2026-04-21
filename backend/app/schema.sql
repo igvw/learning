@@ -43,7 +43,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_modules_pending_owner_full_slug
     ON modules (created_by_user_id, LOWER(full_slug))
     WHERE admin_verified = 0
       AND created_by_user_id IS NOT NULL
-      AND moderation_status IN ('pending', 'changes_requested');
+      AND moderation_status = 'pending';
 
 CREATE TABLE IF NOT EXISTS questions (
     id BIGSERIAL PRIMARY KEY,

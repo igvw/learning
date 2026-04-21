@@ -15,14 +15,6 @@ class ModuleApiTests(PostgresBackendTestCase):
         self.assertEqual(regular_user.status_code, 403)
         self.assertEqual(regular_user.json()["detail"], "Admin access is required.")
 
-        demo_response = self.client.post("/api/auth/demo-session")
-        self.assertEqual(demo_response.status_code, 200)
-        demo_headers = self._cookie_headers_from_response(demo_response)
-        self.client.cookies.clear()
-        demo_user = self.client.get("/api/modules/export", headers=demo_headers)
-        self.assertEqual(demo_user.status_code, 403)
-        self.assertEqual(demo_user.json()["detail"], "Admin access is required.")
-
     def test_content_export_returns_verified_zip_tree(self) -> None:
         norwegian = self.create_module_record("Norwegian", instruction="Translate the Norwegian term into English.")
         animals = self.create_module_record("Animals", norwegian["id"], "Use the animal name as the prompt.")
@@ -57,7 +49,7 @@ class ModuleApiTests(PostgresBackendTestCase):
                 "",
             )
 
-    def test_content_export_excludes_pending_and_changes_requested_content(self) -> None:
+    def test_content_export_excludes_pending_and_unverified_content(self) -> None:
         norwegian = self.create_module_record("Norwegian")
         verified_leaf = self.create_module_record("Animals", norwegian["id"], "Name the animal in English.")
         verified_question = self.create_question_record(verified_leaf["id"], "hund", [["dog"]])

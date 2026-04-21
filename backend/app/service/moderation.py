@@ -14,10 +14,6 @@ from .errors import NotFoundError, ValidationError
 from .text import title_from_slug
 
 
-def _stored_rejection_status(action: str) -> str:
-    return "rejected" if action == "reject" else action
-
-
 def _pending_module_rows(connection: DatabaseConnection, *, creator_user_id: int | None = None) -> list[Any]:
     where_sql = "WHERE modules.admin_verified = 0"
     params: tuple[Any, ...] = ()
@@ -174,7 +170,7 @@ def list_moderation_queue(connection: DatabaseConnection) -> dict[str, Any]:
     return {
         "pending_modules": [_module_payload(row) for row in _pending_module_rows(connection)],
         "pending_questions": [_question_payload(row) for row in _pending_question_rows(connection)],
-        "pending_revisions": [_proposal_payload(row) for row in _proposal_rows(connection) if row["status"] in {"pending", "changes_requested"}],
+        "pending_revisions": [_proposal_payload(row) for row in _proposal_rows(connection) if row["status"] == "pending"],
     }
 
 
@@ -185,7 +181,7 @@ def list_my_contributions(connection: DatabaseConnection, *, actor: Actor) -> di
         "revisions": [
             _proposal_payload(row)
             for row in _proposal_rows(connection, proposer_user_id=int(actor.user_id))
-            if row["status"] in {"pending", "changes_requested"}
+            if row["status"] == "pending"
         ],
     }
 
@@ -241,13 +237,13 @@ def review_module_submission(
             UPDATE modules
             SET
                 admin_verified = 0,
-                moderation_status = ?,
+                moderation_status = 'rejected',
                 admin_review_note = ?,
                 reviewed_by_user_id = ?,
                 reviewed_at = ?
             WHERE id = ?
             """,
-            (_stored_rejection_status(action), note.strip(), actor.user_id, utc_now(), module_id),
+            (note.strip(), actor.user_id, utc_now(), module_id),
         )
     refreshed = _pending_module_rows(connection)
     target = next((candidate for candidate in refreshed if int(candidate["id"]) == module_id), None)
@@ -339,13 +335,13 @@ def review_question_submission(
             UPDATE questions
             SET
                 admin_verified = 0,
-                moderation_status = ?,
+                moderation_status = 'rejected',
                 admin_review_note = ?,
                 reviewed_by_user_id = ?,
                 reviewed_at = ?
             WHERE id = ?
             """,
-            (_stored_rejection_status(action), note.strip(), actor.user_id, utc_now(), question_id),
+            (note.strip(), actor.user_id, utc_now(), question_id),
         )
     refreshed = _pending_question_rows(connection)
     target = next((candidate for candidate in refreshed if int(candidate["question_id"]) == question_id), None)
@@ -471,13 +467,13 @@ def review_question_revision(
             """
             UPDATE question_revision_proposals
             SET
-                status = ?,
+                status = 'rejected',
                 admin_review_note = ?,
                 reviewed_by_user_id = ?,
                 reviewed_at = ?
             WHERE id = ?
             """,
-            (_stored_rejection_status(action), note.strip(), actor.user_id, utc_now(), proposal_id),
+            (note.strip(), actor.user_id, utc_now(), proposal_id),
         )
 
     refreshed = connection.execute(

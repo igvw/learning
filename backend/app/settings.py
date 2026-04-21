@@ -16,7 +16,6 @@ DEFAULT_AUTH_COOKIE_NAME = "learning_app_session"
 DEFAULT_POSTGRES_HOST = "127.0.0.1"
 DEFAULT_POSTGRES_PORT = "5432"
 DEFAULT_AUTH_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30
-DEFAULT_DEMO_SESSION_TTL_SECONDS = 60 * 60 * 8
 DEFAULT_SCHEDULE_TIMEZONE = "UTC"
 _SETTINGS_ENV_NAMES = (
     "LEARNING_APP_DEV_ORIGIN",
@@ -36,7 +35,6 @@ _SETTINGS_ENV_NAMES = (
     "LEARNING_APP_AUTH_COOKIE_NAME",
     "LEARNING_APP_AUTH_COOKIE_SECURE",
     "LEARNING_APP_AUTH_SESSION_TTL_SECONDS",
-    "LEARNING_APP_DEMO_SESSION_TTL_SECONDS",
     "LEARNING_APP_SCHEDULE_TIMEZONE",
 )
 
@@ -61,7 +59,6 @@ class AppSettings(BaseSettings):
     learning_app_auth_cookie_name: str | None = None
     learning_app_auth_cookie_secure: bool = False
     learning_app_auth_session_ttl_seconds: int | None = None
-    learning_app_demo_session_ttl_seconds: int | None = None
     learning_app_schedule_timezone: str | None = None
 
     @field_validator(
@@ -209,11 +206,6 @@ def auth_cookie_secure() -> bool:
 def auth_session_ttl_seconds() -> int:
     value = _settings().learning_app_auth_session_ttl_seconds
     return max(value or DEFAULT_AUTH_SESSION_TTL_SECONDS, 60)
-
-
-def demo_session_ttl_seconds() -> int:
-    value = _settings().learning_app_demo_session_ttl_seconds
-    return max(value or DEFAULT_DEMO_SESSION_TTL_SECONDS, 60)
 
 
 def schedule_timezone_name() -> str:

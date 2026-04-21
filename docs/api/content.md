@@ -72,7 +72,7 @@ Export behavior:
 - every verified module gets `module.yaml`
 - every verified leaf gets `questions.qml`
 - `questions.qml` lines are emitted in shared order (`rank ASC, id ASC`)
-- pending, changes-requested, rejected, and viewer-specific overlay content is excluded
+- pending, rejected, and viewer-specific overlay content is excluded
 
 This is a manual content export for portability and inspection, not a database backup.
 
@@ -121,7 +121,7 @@ Returns the current regular user’s active contribution queue:
 
 - pending modules
 - pending uploaded questions
-- active revision/delete proposals (`pending` and `changes_requested`)
+- active revision/delete proposals (`pending`)
 
 Rejected revision proposals remain in the database for moderation history, but are not returned in this user-facing payload.
 

@@ -34,19 +34,6 @@ class ImportApiTests(PostgresBackendTestCase):
         self.assertEqual(commit_user.status_code, 403)
         self.assertEqual(commit_user.json()["detail"], "Admin access is required.")
 
-        demo_response = self.client.post("/api/auth/demo-session")
-        self.assertEqual(demo_response.status_code, 200)
-        demo_headers = self._cookie_headers_from_response(demo_response)
-        self.client.cookies.clear()
-
-        validate_demo = self.client.post("/api/question-imports/validate", json=validate_payload, headers=demo_headers)
-        self.assertEqual(validate_demo.status_code, 403)
-        self.assertEqual(validate_demo.json()["detail"], "Admin access is required.")
-
-        commit_demo = self.client.post("/api/question-imports/commit", json=commit_payload, headers=demo_headers)
-        self.assertEqual(commit_demo.status_code, 403)
-        self.assertEqual(commit_demo.json()["detail"], "Admin access is required.")
-
     def test_same_tree_reimport_moves_question_and_preserves_progress(self) -> None:
         module_ids = self.create_module_tree()
         self.create_question_record(module_ids["target"], "først", [["first"]], rank=1)

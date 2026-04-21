@@ -10,7 +10,6 @@ from backend.app.settings import (
     auth_session_ttl_seconds,
     bootstrap_admin_credentials,
     cors_origins,
-    demo_session_ttl_seconds,
     resolve_database_url,
     schedule_timezone_name,
     seed_on_boot,
@@ -156,14 +155,12 @@ class SettingsUnitTests(unittest.TestCase):
                 "LEARNING_APP_SEED_ON_BOOT": "false",
                 "LEARNING_APP_AUTH_COOKIE_SECURE": "yes",
                 "LEARNING_APP_AUTH_SESSION_TTL_SECONDS": "30",
-                "LEARNING_APP_DEMO_SESSION_TTL_SECONDS": "120",
             },
             clear=True,
         ):
             self.assertFalse(seed_on_boot())
             self.assertTrue(auth_cookie_secure())
             self.assertEqual(auth_session_ttl_seconds(), 60)
-            self.assertEqual(demo_session_ttl_seconds(), 120)
 
     def test_cors_origins_use_dev_defaults_when_not_explicitly_configured(self) -> None:
         with patch.dict(

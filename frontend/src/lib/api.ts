@@ -103,10 +103,6 @@ export function login(payload: LoginPayload): Promise<AuthActor> {
   });
 }
 
-export function createDemoSession(): Promise<AuthActor> {
-  return request<AuthActor>('/api/auth/demo-session', { method: 'POST' });
-}
-
 export function logout(): Promise<void> {
   return request<void>('/api/auth/logout', { method: 'POST' });
 }

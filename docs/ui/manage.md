@@ -35,7 +35,3 @@ Regular users see:
 - one wide `My contributions` summary card
 - a browsable contributions overlay with `Modules`, `Uploaded questions`, and active `Revisions`
 - read-only revision detail using the same snapshot or diff card style as admin moderation, without moderation actions
-
-## Demo View
-
-- demo shows the same contribution surface in a disabled showcase form

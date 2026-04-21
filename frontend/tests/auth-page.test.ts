@@ -22,8 +22,7 @@ describe('AuthPage', () => {
     expect(screen.getByPlaceholderText('Username')).toBeTruthy();
     expect(screen.getByPlaceholderText('Password')).toBeTruthy();
     expect(screen.queryByText('Sign in to continue.')).toBeNull();
-    expect(screen.queryByRole('heading', { name: 'Preview demo' })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Demo' }).className).toContain('review-button');
+    expect(screen.queryByRole('button', { name: 'Demo' })).toBeNull();
 
     await user.type(screen.getByLabelText('Username'), ' user-a ');
     await user.type(screen.getByLabelText('Password'), 'password123');
@@ -71,21 +70,5 @@ describe('AuthPage', () => {
     expect((screen.getByRole('button', { name: 'Create Admin' }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText('Passwords must match before creating the first admin.')).toBeTruthy();
     expect(bootstrapSpy).not.toHaveBeenCalled();
-  });
-
-  it('starts demo mode through the demo handler', async () => {
-    const user = userEvent.setup();
-    const demoSpy = vi.fn().mockResolvedValue(undefined);
-
-    render(AuthPage, {
-      props: {
-        bootstrapRequired: false,
-        onDemo: demoSpy,
-      },
-    });
-
-    await user.click(screen.getByRole('button', { name: 'Demo' }));
-
-    expect(demoSpy).toHaveBeenCalledTimes(1);
   });
 });

@@ -13,7 +13,7 @@ def question_visible_to_actor(row: Any, actor: Actor | None) -> bool:
     return (
         actor.user_id is not None
         and row["created_by_user_id"] == actor.user_id
-        and row["moderation_status"] in {"pending", "changes_requested"}
+        and row["moderation_status"] == "pending"
     )
 
 
@@ -25,7 +25,7 @@ def module_visible_to_actor(row: Any, actor: Actor | None) -> bool:
     return (
         actor.user_id is not None
         and row["created_by_user_id"] == actor.user_id
-        and row["moderation_status"] in {"pending", "changes_requested"}
+        and row["moderation_status"] == "pending"
     )
 
 
@@ -43,7 +43,7 @@ def active_viewer_proposal_question_ids(
         SELECT question_id
         FROM question_revision_proposals
         WHERE proposer_user_id = ?
-          AND status IN ('pending', 'changes_requested')
+          AND status = 'pending'
           AND question_id IN ({placeholders})
         """,
         (actor.user_id, *question_ids),

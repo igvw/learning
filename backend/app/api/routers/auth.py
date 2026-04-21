@@ -6,7 +6,6 @@ from ...schemas import AuthActorOut, AuthBootstrapAdminIn, AuthLoginIn, UserCrea
 from ...services import (
     Actor,
     bootstrap_admin,
-    create_demo_session,
     create_user,
     list_users,
     login_user,
@@ -54,13 +53,6 @@ def auth_login(
     return actor
 
 
-@router.post("/api/auth/demo-session", response_model=AuthActorOut)
-def auth_demo_session(response: Response) -> dict:
-    actor, token = create_demo_session()
-    set_session_cookie(response, token)
-    return actor
-
-
 @router.post("/api/auth/logout", response_model=AuthActorOut | None)
 def auth_logout(
     request: Request,
@@ -79,7 +71,6 @@ def auth_me(actor: Actor = Depends(require_actor)) -> dict:
         "handle": actor.handle,
         "display_name": actor.display_name,
         "role": actor.role,
-        "is_demo": actor.is_demo,
         "created_at": actor.created_at,
     }
 

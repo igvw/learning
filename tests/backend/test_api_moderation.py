@@ -13,6 +13,76 @@ def _flatten_module_tree(nodes: list[dict]) -> list[dict]:
 
 
 class ModerationApiTests(PostgresBackendTestCase):
+    def test_moderation_endpoints_reject_changes_requested_action(self) -> None:
+        norwegian = self.create_module_record("Norwegian")
+        words = self.create_module_record("Words", norwegian["id"])
+        verified_question = self.create_question_record(words["id"], "hund", [["dog"]], rank=1)
+        alice = self.create_user(handle="alice", display_name="Alice")
+
+        pending_module_response = self.client.post(
+            "/api/modules",
+            json={
+                "title": "Vocabulary",
+                "parent_id": norwegian["id"],
+                "instruction": "Translate the Norwegian term into English.",
+            },
+            headers=self.user_headers(int(alice["id"])),
+        )
+        self.assertEqual(pending_module_response.status_code, 200)
+        pending_module_id = int(pending_module_response.json()["id"])
+
+        pending_question_response = self.client.post(
+            "/api/questions",
+            json={
+                "module_id": words["id"],
+                "prompt": "katt",
+                "question_type": "single_text",
+                "rank": 2,
+                "accepted_answers": [["cat"]],
+                "segments": [],
+            },
+            headers=self.user_headers(int(alice["id"])),
+        )
+        self.assertEqual(pending_question_response.status_code, 200)
+        pending_question_id = int(pending_question_response.json()["question_id"])
+
+        revision_response = self.client.post(
+            f"/api/questions/{verified_question['question_id']}/revisions",
+            json={
+                "module_id": words["id"],
+                "prompt": "hunden",
+                "question_type": "single_text",
+                "rank": 1,
+                "accepted_answers": [["dog"]],
+                "segments": [],
+                "reset_stats": False,
+            },
+            headers=self.user_headers(int(alice["id"])),
+        )
+        self.assertEqual(revision_response.status_code, 200)
+        proposal_id = int(revision_response.json()["proposal_id"])
+
+        module_reject_response = self.client.post(
+            f"/api/moderation/modules/{pending_module_id}",
+            json={"action": "changes_requested", "note": "Please revise."},
+            headers=self.admin_headers,
+        )
+        self.assertEqual(module_reject_response.status_code, 422)
+
+        question_reject_response = self.client.post(
+            f"/api/moderation/questions/{pending_question_id}",
+            json={"action": "changes_requested", "note": "Please revise."},
+            headers=self.admin_headers,
+        )
+        self.assertEqual(question_reject_response.status_code, 422)
+
+        revision_reject_response = self.client.post(
+            f"/api/moderation/question-revisions/{proposal_id}",
+            json={"action": "changes_requested", "note": "Please revise."},
+            headers=self.admin_headers,
+        )
+        self.assertEqual(revision_reject_response.status_code, 422)
+
     def test_pending_module_is_visible_only_to_creator_and_admin_until_approved(self) -> None:
         norwegian = self.create_module_record("Norwegian")
         alice = self.create_user(handle="alice", display_name="Alice")

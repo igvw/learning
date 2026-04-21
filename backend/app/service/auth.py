@@ -5,10 +5,9 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from ..database import DatabaseConnection, execute_insert_returning_id, utc_now
-from ..settings import auth_session_ttl_seconds, bootstrap_admin_credentials, demo_session_ttl_seconds
+from ..settings import auth_session_ttl_seconds, bootstrap_admin_credentials
 from .errors import NotFoundError, ValidationError
 from .passwords import hash_password, verify_password_and_update
-_DEMO_SESSIONS: dict[str, dict[str, Any]] = {}
 
 
 @dataclass(slots=True)
@@ -17,7 +16,6 @@ class Actor:
     handle: str
     display_name: str
     role: str
-    is_demo: bool = False
     created_at: str | None = None
 
 
@@ -27,7 +25,6 @@ def actor_to_dict(actor: Actor) -> dict[str, Any]:
         "handle": actor.handle,
         "display_name": actor.display_name,
         "role": actor.role,
-        "is_demo": actor.is_demo,
         "created_at": actor.created_at,
     }
 
@@ -177,7 +174,6 @@ def _actor_from_user_row(row: Any) -> Actor:
         handle=row["handle"],
         display_name=row["display_name"],
         role=row["role"],
-        is_demo=False,
         created_at=row["created_at"],
     )
 
@@ -226,53 +222,11 @@ def login_user(connection: DatabaseConnection, *, handle: str, password: str) ->
     return actor_to_dict(actor), token
 
 
-def _cleanup_demo_sessions() -> None:
-    now = utc_now()
-    expired = [token_hash for token_hash, session in _DEMO_SESSIONS.items() if session["expires_at"] <= now]
-    for token_hash in expired:
-        _DEMO_SESSIONS.pop(token_hash, None)
-
-
-def create_demo_session() -> tuple[dict[str, Any], str]:
-    _cleanup_demo_sessions()
-    token = secrets.token_urlsafe(32)
-    token_hash = _hash_token(token)
-    created_at = utc_now()
-    expires_at = _future_timestamp(demo_session_ttl_seconds())
-    actor = Actor(
-        user_id=None,
-        handle="demo",
-        display_name="Demo",
-        role="demo",
-        is_demo=True,
-        created_at=created_at,
-    )
-    _DEMO_SESSIONS[token_hash] = {
-        "actor": actor_to_dict(actor),
-        "created_at": created_at,
-        "expires_at": expires_at,
-    }
-    return actor_to_dict(actor), token
-
-
 def get_actor_from_token(connection: DatabaseConnection, token: str | None) -> Actor | None:
     if not token:
         return None
 
     token_hash = _hash_token(token)
-    _cleanup_demo_sessions()
-    demo_session = _DEMO_SESSIONS.get(token_hash)
-    if demo_session is not None:
-        actor_payload = demo_session["actor"]
-        return Actor(
-            user_id=actor_payload["id"],
-            handle=actor_payload["handle"],
-            display_name=actor_payload["display_name"],
-            role=actor_payload["role"],
-            is_demo=True,
-            created_at=actor_payload.get("created_at"),
-        )
-
     _delete_expired_sessions(connection)
     row = connection.execute(
         """
@@ -301,5 +255,4 @@ def logout_session(connection: DatabaseConnection, token: str | None) -> None:
     if not token:
         return
     token_hash = _hash_token(token)
-    _DEMO_SESSIONS.pop(token_hash, None)
     connection.execute("DELETE FROM auth_sessions WHERE token_hash = ?", (token_hash,))

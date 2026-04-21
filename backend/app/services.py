@@ -10,7 +10,6 @@ from .service.auth import (
     admin_exists,
     bootstrap_admin,
     bootstrap_admin_from_environment,
-    create_demo_session,
     get_actor_from_token,
     login_user,
     logout_session,
@@ -25,7 +24,6 @@ from .service.authoring import (
     sync_seed_content,
 )
 from .service.catalog import create_module, create_user, export_verified_content_archive, get_module_tree, list_users, update_module
-from .service.demo import create_demo_quiz_session, demo_module_tree, get_demo_stats, set_demo_review_flag, submit_demo_answer
 from .service.errors import NotFoundError, ServiceError, ValidationError
 from .service.imports import commit_question_import, validate_question_import
 from .service.moderation import (
@@ -49,18 +47,14 @@ __all__ = [
     "bootstrap_admin",
     "bootstrap_admin_from_environment",
     "commit_question_import",
-    "create_demo_session",
-    "create_demo_quiz_session",
     "create_module",
     "create_question",
     "create_quiz_session",
     "create_user",
     "delete_question",
-    "demo_module_tree",
     "export_verified_content_archive",
     "get_module_tree",
     "get_actor_from_token",
-    "get_demo_stats",
     "get_stats",
     "login_user",
     "list_moderation_queue",
@@ -71,10 +65,8 @@ __all__ = [
     "review_module_submission",
     "review_question_revision",
     "review_question_submission",
-    "set_demo_review_flag",
     "set_question_review_flag",
     "submit_answer",
-    "submit_demo_answer",
     "sync_seed_content",
     "update_module",
     "update_user_password",

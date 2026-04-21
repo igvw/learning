@@ -21,17 +21,17 @@ The import drawer is a review-and-commit drawer for one leaf module.
   - current answer
   - imported answer
   - manually added answer
-- persist the import session in `sessionStorage` so refresh restores the drawer state
+- keep import draft and review state in memory only while the drawer stays open
 
 ## Save Behavior
 
 - save submits the current edited rows
 - the frontend saves committable rows in 50-row chunks
+- while validation or chunked save is active, the drawer stays open and cannot be closed
 - while a chunked upload is active, the review rows become read-only status rows
 - partial success keeps the drawer open, removes already committed rows, and revalidates the remainder
 - blocking rows stay highlighted red until edited or removed
-- the drawer can be hidden while an upload keeps running in the current tab
-- a compact header upload-status pill reopens the drawer
+- refreshing the page drops the current import session
 
 ## Access
 

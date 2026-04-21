@@ -4,7 +4,6 @@
 
   export let currentActorId: number | null = null;
   export let isAdmin = false;
-  export let isDemo = false;
   export let mode: 'all' | 'modules' | 'import' | 'export' = 'all';
   export let showHeading = true;
   export let flatModules: FlatModule[] = [];
@@ -167,16 +166,16 @@
 
       <label class="field">
         <span>Module title</span>
-        <input type="text" bind:value={editTitle} disabled={!selectedEditableLeafModule || editSaving || isDemo} />
+        <input type="text" bind:value={editTitle} disabled={!selectedEditableLeafModule || editSaving} />
       </label>
 
       <label class="field admin-wide-field">
         <span>Instruction</span>
-        <textarea rows="4" bind:value={editInstruction} disabled={!selectedEditableLeafModule || editSaving || isDemo}></textarea>
+        <textarea rows="4" bind:value={editInstruction} disabled={!selectedEditableLeafModule || editSaving}></textarea>
       </label>
 
       <div class="admin-action-slot">
-        <button class="primary-button" type="button" disabled={!selectedEditableLeafModule || editSaving || isDemo} on:click={() => void handleUpdateModule()}>
+        <button class="primary-button" type="button" disabled={!selectedEditableLeafModule || editSaving} on:click={() => void handleUpdateModule()}>
           {editSaving ? 'Saving...' : 'Save Module'}
         </button>
       </div>
@@ -195,11 +194,11 @@
       </div>
       <label class="field">
         <span>Module path</span>
-        <input type="text" bind:value={createTitle} placeholder="norwegian/vocabulary/nouns_to_english" disabled={isDemo} />
+        <input type="text" bind:value={createTitle} placeholder="norwegian/vocabulary/nouns_to_english" />
       </label>
       <label class="field">
         <span>Parent module</span>
-        <select bind:value={createParentId} disabled={isDemo}>
+        <select bind:value={createParentId}>
           <option value="">Top level</option>
           {#each editableParentModules as module}
             <option value={module.id}>{'\u00A0'.repeat(module.depth * 2)}{module.full_slug}</option>
@@ -208,10 +207,10 @@
       </label>
       <label class="field admin-wide-field">
         <span>Instruction</span>
-        <textarea rows="4" bind:value={createInstruction} disabled={isDemo}></textarea>
+        <textarea rows="4" bind:value={createInstruction}></textarea>
       </label>
       <div class="admin-action-slot">
-        <button class="primary-button" type="button" disabled={createSaving || isDemo} on:click={() => void handleCreateModule()}>
+        <button class="primary-button" type="button" disabled={createSaving} on:click={() => void handleCreateModule()}>
           {createSaving ? 'Creating...' : 'Create Module'}
         </button>
       </div>
@@ -239,7 +238,7 @@
         </p>
       </div>
       <div class="admin-action-slot">
-        <button class="primary-button" type="button" disabled={exportSaving || isDemo} on:click={() => void handleExportContent()}>
+        <button class="primary-button" type="button" disabled={exportSaving} on:click={() => void handleExportContent()}>
           {exportSaving ? 'Exporting...' : 'Export content'}
         </button>
       </div>
@@ -257,7 +256,7 @@
     <div class="admin-bar-form import-bar-form">
       <label class="field">
         <span>Import target</span>
-        <select bind:value={importModuleId} disabled={flatModules.length === 0 || isDemo}>
+        <select bind:value={importModuleId} disabled={flatModules.length === 0}>
           {#if flatModules.length === 0}
             <option value={null}>No modules available</option>
           {:else}
@@ -275,7 +274,7 @@
         {/if}
       </div>
       <div class="admin-action-slot">
-        <button class="primary-button" type="button" disabled={!selectedImportModule?.isLeaf || isDemo} on:click={handleOpenImport}>
+        <button class="primary-button" type="button" disabled={!selectedImportModule?.isLeaf} on:click={handleOpenImport}>
           Import QML
         </button>
       </div>

@@ -8,7 +8,6 @@
     display_name: string;
     password: string;
   }) => Promise<void> = async () => {};
-  export let onDemo: () => Promise<void> = async () => {};
 
   let handle = '';
   let password = '';
@@ -99,14 +98,9 @@
               <input type="password" bind:value={password} placeholder="Password" />
             </label>
             <div class="admin-action-slot">
-              <div class="auth-action-row">
-                <button class="primary-button" type="submit" disabled={busy}>
-                  {busy ? 'Signing in...' : 'Sign In'}
-                </button>
-                <button class="review-button" type="button" disabled={busy} on:click={() => void onDemo()}>
-                  {busy ? 'Opening demo...' : 'Demo'}
-                </button>
-              </div>
+              <button class="primary-button" type="submit" disabled={busy}>
+                {busy ? 'Signing in...' : 'Sign In'}
+              </button>
             </div>
           </form>
         </article>

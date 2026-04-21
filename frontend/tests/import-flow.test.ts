@@ -1,11 +1,10 @@
-import { render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../src/lib/api', () => ({
   bootstrapAdmin: vi.fn(),
   commitQuestionImport: vi.fn(),
-  createDemoSession: vi.fn(),
   createModule: vi.fn(),
   createQuestion: vi.fn(),
   createQuizSession: vi.fn(),
@@ -35,10 +34,8 @@ vi.mock('../src/lib/api', () => ({
 
 import App from '../src/App.svelte';
 import * as api from '../src/lib/api';
-import { persistImportSession } from '../src/lib/app-state';
 import {
   buildAuthActor,
-  buildStatsResponse,
   buildImportResult,
   buildImportReviewRow,
   buildImportRow,
@@ -61,7 +58,35 @@ function deferred<T>(): {
   return { promise, resolve, reject };
 }
 
-function mockAuthenticatedAdmin(modules: ReturnType<typeof buildModuleNode>[]) {
+function buildImportModules() {
+  return [
+    buildModuleNode({
+      id: 1,
+      title: 'Norwegian',
+      slug: 'norwegian',
+      full_slug: 'norwegian',
+      children: [
+        buildModuleNode({
+          id: 2,
+          title: 'Vocabulary',
+          slug: 'vocabulary',
+          full_slug: 'norwegian/vocabulary',
+          children: [
+            buildModuleNode({
+              id: 3,
+              title: 'noun2en',
+              slug: 'noun2en',
+              full_slug: 'norwegian/vocabulary/noun2en',
+              instruction: 'Translate each Norwegian noun into English.'
+            })
+          ]
+        })
+      ]
+    })
+  ];
+}
+
+function mockAuthenticatedAdmin(modules: ReturnType<typeof buildImportModules>) {
   vi.mocked(api.getHealth).mockResolvedValue({ status: 'ok', instance_key: 'local-dev', bootstrap_required: false });
   vi.mocked(api.getCurrentActor).mockResolvedValue(
     buildAuthActor({
@@ -75,36 +100,52 @@ function mockAuthenticatedAdmin(modules: ReturnType<typeof buildModuleNode>[]) {
   vi.mocked(api.getModerationQueue).mockResolvedValue(buildModerationQueue());
 }
 
+function getImportDrawer(): HTMLElement {
+  return screen.getByRole('complementary', { name: 'Question import' });
+}
+
+function findDrawerTextbox(value: string): HTMLInputElement | HTMLTextAreaElement | undefined {
+  return within(getImportDrawer())
+    .getAllByRole('textbox')
+    .find((element) => (element as HTMLInputElement | HTMLTextAreaElement).value === value) as
+    | HTMLInputElement
+    | HTMLTextAreaElement
+    | undefined;
+}
+
+async function openImportDrawer(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  await screen.findByText('Catalog and moderation');
+  await user.click(screen.getByRole('button', { name: /^Import Validate and commit QML into a verified leaf\.$/i }));
+  const importDialog = await screen.findByRole('dialog', { name: 'Import' });
+  await user.selectOptions(within(importDialog).getByLabelText('Import target'), '3');
+  await user.click(within(importDialog).getByRole('button', { name: 'Import QML' }));
+  await waitFor(() => {
+    expect(within(getImportDrawer()).getByRole('heading', { name: 'Import Questions' })).toBeTruthy();
+  });
+}
+
+async function setQmlText(value: string): Promise<void> {
+  await fireEvent.input(within(getImportDrawer()).getByLabelText('QML text'), { target: { value } });
+}
+
+async function startImport(user: ReturnType<typeof userEvent.setup>, qmlText: string): Promise<void> {
+  await setQmlText(qmlText);
+  await user.click(within(getImportDrawer()).getByRole('button', { name: 'Start Import' }));
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  window.localStorage.clear();
+  window.sessionStorage.clear();
+  window.history.replaceState({}, '', '/quiz');
+});
+
 describe('import flow', () => {
-  it('restores import drawer progress from session storage after a refresh', async () => {
+  it('does not restore import drawer progress after a refresh', async () => {
     const user = userEvent.setup();
     window.history.replaceState({}, '', '/admin');
 
-    const modules = [
-      buildModuleNode({
-        id: 1,
-        title: 'Norwegian',
-        slug: 'norwegian',
-        full_slug: 'norwegian',
-        children: [
-          buildModuleNode({
-            id: 2,
-            title: 'Vocabulary',
-            slug: 'vocabulary',
-            full_slug: 'norwegian/vocabulary',
-            children: [
-              buildModuleNode({
-                id: 3,
-                title: 'noun2en',
-                slug: 'noun2en',
-                full_slug: 'norwegian/vocabulary/noun2en',
-                instruction: 'Translate each Norwegian noun into English.'
-              })
-            ]
-          })
-        ]
-      })
-    ];
+    const modules = buildImportModules();
     const restoredResult = buildImportResult({
       ready_to_commit: true,
       rows: [buildImportRow({ row_number: 35, qml_line: 'mot [against | toward]' })],
@@ -128,76 +169,67 @@ describe('import flow', () => {
       report_text: '1 row ready'
     });
 
-    persistImportSession(window.sessionStorage, {
-      instanceKey: 'local-dev',
-      modules,
-      open: true,
-      targetModuleId: 3,
-      qmlText: 'mot [against | toward]',
-      rows: [buildImportRow({ row_number: 35, qml_line: 'mot [against | toward | opposite]' })],
-      result: restoredResult
-    });
-
     mockAuthenticatedAdmin(modules);
-    vi.mocked(api.validateQuestionImportRows).mockResolvedValue({
-      ...restoredResult,
-      rows: [buildImportRow({ row_number: 35, qml_line: 'mot [against | toward | opposite]' })]
-    });
-    vi.mocked(api.commitQuestionImport).mockResolvedValue({
-      ...restoredResult,
-      committed: true,
-      committed_count: 1
-    });
+    vi.mocked(api.validateQuestionImportText).mockResolvedValue(restoredResult);
 
-    render(App);
+    const firstRender = render(App);
+    await openImportDrawer(user);
+    await startImport(user, 'mot [against | toward]');
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Import Questions' })).toBeTruthy();
+      expect(screen.getByText('1 review rows')).toBeTruthy();
     });
 
-    expect(screen.getByDisplayValue('mot [against | toward | opposite]')).toBeTruthy();
-    expect(screen.getByText('1 review rows')).toBeTruthy();
+    firstRender.unmount();
 
-    await user.click(screen.getByRole('button', { name: 'Save' }));
+    mockAuthenticatedAdmin(modules);
+    render(App);
 
-    expect(api.commitQuestionImport).toHaveBeenCalledWith(3, [
-      { row_number: 35, qml_line: 'mot [against | toward | opposite]' }
-    ]);
+    await screen.findByText('Catalog and moderation');
+    expect(screen.queryByRole('heading', { name: 'Import Questions' })).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: /^Import\b/i }));
+    const importDialog = await screen.findByRole('dialog', { name: 'Import' });
+    await user.selectOptions(within(importDialog).getByLabelText('Import target'), '3');
+    await user.click(within(importDialog).getByRole('button', { name: 'Import QML' }));
+
+    await waitFor(() => {
+      expect(within(getImportDrawer()).getByRole('heading', { name: 'Import Questions' })).toBeTruthy();
+    });
+    expect((within(getImportDrawer()).getByLabelText('QML text') as HTMLTextAreaElement).value).toBe('');
   });
 
-  it('commits imports in 50-row chunks and shows determinate save progress', async () => {
+  it('clears an idle import drawer when it is closed', async () => {
     const user = userEvent.setup();
     window.history.replaceState({}, '', '/admin');
 
-    const modules = [
-      buildModuleNode({
-        id: 1,
-        title: 'Norwegian',
-        slug: 'norwegian',
-        full_slug: 'norwegian',
-        children: [
-          buildModuleNode({
-            id: 2,
-            title: 'Vocabulary',
-            slug: 'vocabulary',
-            full_slug: 'norwegian/vocabulary',
-            children: [
-              buildModuleNode({
-                id: 3,
-                title: 'noun2en',
-                slug: 'noun2en',
-                full_slug: 'norwegian/vocabulary/noun2en',
-                instruction: 'Translate each Norwegian noun into English.'
-              })
-            ]
-          })
-        ]
+    const modules = buildImportModules();
+    mockAuthenticatedAdmin(modules);
+
+    render(App);
+    await openImportDrawer(user);
+    await setQmlText('mot [against | toward]');
+
+    await user.click(within(getImportDrawer()).getByRole('button', { name: 'Close' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('complementary', { name: 'Question import' })).toBeNull();
+    });
+
+    await openImportDrawer(user);
+    expect((within(getImportDrawer()).getByLabelText('QML text') as HTMLTextAreaElement).value).toBe('');
+  });
+
+  it('commits imports in 50-row chunks, keeps progress in the drawer, and does not show a header status pill', async () => {
+    const user = userEvent.setup();
+    window.history.replaceState({}, '', '/admin');
+
+    const modules = buildImportModules();
+    const rows = Array.from({ length: 120 }, (_, index) =>
+      buildImportRow({
+        row_number: index + 1,
+        qml_line: `ord ${index + 1} [answer ${index + 1}]`
       })
-    ];
-    const rows = Array.from({ length: 120 }, (_, index) => buildImportRow({
-      row_number: index + 1,
-      qml_line: `ord ${index + 1} [answer ${index + 1}]`
-    }));
+    );
     const importResult = buildImportResult({
       ready_to_commit: true,
       rows,
@@ -206,21 +238,12 @@ describe('import flow', () => {
       report_text: '120 ready to commit'
     });
 
-    persistImportSession(window.sessionStorage, {
-      instanceKey: 'local-dev',
-      modules,
-      open: true,
-      targetModuleId: 3,
-      qmlText: rows.map((row) => row.qml_line).join('\n'),
-      rows,
-      result: importResult
-    });
-
     const firstChunk = deferred<typeof importResult>();
     const secondChunk = deferred<typeof importResult>();
     const thirdChunk = deferred<typeof importResult>();
 
     mockAuthenticatedAdmin(modules);
+    vi.mocked(api.validateQuestionImportText).mockResolvedValue(importResult);
     vi.mocked(api.validateQuestionImportRows).mockResolvedValue(importResult);
     vi.mocked(api.commitQuestionImport)
       .mockImplementationOnce(() => firstChunk.promise)
@@ -228,28 +251,32 @@ describe('import flow', () => {
       .mockImplementationOnce(() => thirdChunk.promise);
 
     render(App);
+    await openImportDrawer(user);
+    await startImport(user, rows.map((row) => row.qml_line).join('\n'));
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Import Questions' })).toBeTruthy();
+      expect(within(getImportDrawer()).getByRole('button', { name: 'Save' })).toBeTruthy();
     });
 
-    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await user.click(within(getImportDrawer()).getByRole('button', { name: 'Save' }));
 
     await waitFor(() => {
       expect(api.commitQuestionImport).toHaveBeenCalledTimes(1);
     });
-    expect(screen.getByRole('button', { name: 'Saving 0/120' })).toBeTruthy();
+    expect(within(getImportDrawer()).getByRole('button', { name: 'Saving 0/120' })).toBeTruthy();
+    expect((within(getImportDrawer()).getByRole('button', { name: 'Close' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: /Uploading 0\/120/i })).toBeNull();
 
     firstChunk.resolve({ ...importResult, committed: true, committed_count: 50 });
     await waitFor(() => {
       expect(api.commitQuestionImport).toHaveBeenCalledTimes(2);
-      expect(screen.getByRole('button', { name: 'Saving 50/120' })).toBeTruthy();
+      expect(within(getImportDrawer()).getByRole('button', { name: 'Saving 50/120' })).toBeTruthy();
     });
 
     secondChunk.resolve({ ...importResult, committed: true, committed_count: 50 });
     await waitFor(() => {
       expect(api.commitQuestionImport).toHaveBeenCalledTimes(3);
-      expect(screen.getByRole('button', { name: 'Saving 100/120' })).toBeTruthy();
+      expect(within(getImportDrawer()).getByRole('button', { name: 'Saving 100/120' })).toBeTruthy();
     });
 
     thirdChunk.resolve({ ...importResult, committed: true, committed_count: 20 });
@@ -262,31 +289,7 @@ describe('import flow', () => {
     const user = userEvent.setup();
     window.history.replaceState({}, '', '/admin');
 
-    const modules = [
-      buildModuleNode({
-        id: 1,
-        title: 'Norwegian',
-        slug: 'norwegian',
-        full_slug: 'norwegian',
-        children: [
-          buildModuleNode({
-            id: 2,
-            title: 'Vocabulary',
-            slug: 'vocabulary',
-            full_slug: 'norwegian/vocabulary',
-            children: [
-              buildModuleNode({
-                id: 3,
-                title: 'noun2en',
-                slug: 'noun2en',
-                full_slug: 'norwegian/vocabulary/noun2en',
-                instruction: 'Translate each Norwegian noun into English.'
-              })
-            ]
-          })
-        ]
-      })
-    ];
+    const modules = buildImportModules();
     const sessionResult = buildImportResult({
       ready_to_commit: true,
       rows: [buildImportRow({ row_number: 1, qml_line: 'mot [toward]' })],
@@ -315,29 +318,26 @@ describe('import flow', () => {
       report_text: '1 exact duplicates omitted'
     });
 
-    persistImportSession(window.sessionStorage, {
-      instanceKey: 'local-dev',
-      modules,
-      open: true,
-      targetModuleId: 3,
-      qmlText: 'mot [toward]',
-      rows: [buildImportRow({ row_number: 1, qml_line: 'mot [against]' })],
-      result: sessionResult
-    });
-
     mockAuthenticatedAdmin(modules);
+    vi.mocked(api.validateQuestionImportText).mockResolvedValue(sessionResult);
     vi.mocked(api.validateQuestionImportRows).mockResolvedValue(exactDuplicateResult);
 
     render(App);
+    await openImportDrawer(user);
+    await startImport(user, 'mot [toward]');
 
+    const [reviewInput] = within(getImportDrawer()).getAllByRole('textbox') as HTMLInputElement[];
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Import Questions' })).toBeTruthy();
+      expect(reviewInput).toBeTruthy();
     });
 
-    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await fireEvent.input(reviewInput, {
+      target: { value: 'mot [against]' }
+    });
+    await user.click(within(getImportDrawer()).getByRole('button', { name: 'Save' }));
 
     await waitFor(() => {
-      expect(screen.getByText('Nothing new to save.')).toBeTruthy();
+      expect(within(getImportDrawer()).getByText('Nothing new to save.')).toBeTruthy();
     });
     expect(api.commitQuestionImport).not.toHaveBeenCalled();
   });
@@ -346,35 +346,13 @@ describe('import flow', () => {
     const user = userEvent.setup();
     window.history.replaceState({}, '', '/admin');
 
-    const modules = [
-      buildModuleNode({
-        id: 1,
-        title: 'Norwegian',
-        slug: 'norwegian',
-        full_slug: 'norwegian',
-        children: [
-          buildModuleNode({
-            id: 2,
-            title: 'Vocabulary',
-            slug: 'vocabulary',
-            full_slug: 'norwegian/vocabulary',
-            children: [
-              buildModuleNode({
-                id: 3,
-                title: 'noun2en',
-                slug: 'noun2en',
-                full_slug: 'norwegian/vocabulary/noun2en',
-                instruction: 'Translate each Norwegian noun into English.'
-              })
-            ]
-          })
-        ]
+    const modules = buildImportModules();
+    const rows = Array.from({ length: 55 }, (_, index) =>
+      buildImportRow({
+        row_number: index + 1,
+        qml_line: `ord ${index + 1} [answer ${index + 1}]`
       })
-    ];
-    const rows = Array.from({ length: 55 }, (_, index) => buildImportRow({
-      row_number: index + 1,
-      qml_line: `ord ${index + 1} [answer ${index + 1}]`
-    }));
+    );
     const initialResult = buildImportResult({
       ready_to_commit: true,
       rows,
@@ -401,146 +379,42 @@ describe('import flow', () => {
       ],
       report_text: '4 ready to commit | 1 rows need review'
     });
-
-    persistImportSession(window.sessionStorage, {
-      instanceKey: 'local-dev',
-      modules,
-      open: true,
-      targetModuleId: 3,
-      qmlText: rows.map((row) => row.qml_line).join('\n'),
-      rows,
-      result: initialResult
-    });
+    const firstChunk = deferred<QuestionImportResult>();
 
     mockAuthenticatedAdmin(modules);
+    vi.mocked(api.validateQuestionImportText).mockResolvedValue(initialResult);
     vi.mocked(api.validateQuestionImportRows)
       .mockResolvedValueOnce(initialResult)
       .mockResolvedValueOnce(remainingResult);
     vi.mocked(api.commitQuestionImport)
-      .mockResolvedValueOnce({ ...initialResult, committed: true, committed_count: 50 })
+      .mockImplementationOnce(() => firstChunk.promise)
       .mockResolvedValueOnce({ ...remainingResult, committed: false, committed_count: 0 });
 
     render(App);
+    await openImportDrawer(user);
+    await startImport(user, rows.map((row) => row.qml_line).join('\n'));
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Import Questions' })).toBeTruthy();
+      expect(within(getImportDrawer()).getByRole('button', { name: 'Save' })).toBeTruthy();
     });
 
-    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await user.click(within(getImportDrawer()).getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(api.commitQuestionImport).toHaveBeenCalledTimes(1);
+    });
+
+    firstChunk.resolve({ ...initialResult, committed: true, committed_count: 50 });
 
     await waitFor(() => {
       expect(api.commitQuestionImport).toHaveBeenCalledTimes(2);
     });
     await waitFor(() => {
       expect(api.validateQuestionImportRows).toHaveBeenCalledTimes(2);
-      expect(screen.getByText('Saved 50 rows. Fix the highlighted rows to continue.')).toBeTruthy();
+      expect(within(getImportDrawer()).getByText('Saved 50 rows. Fix the highlighted rows to continue.')).toBeTruthy();
     });
-    expect(screen.getByDisplayValue('ord 52 [answer 52]')).toBeTruthy();
-    expect(screen.getByText('4 rows ready')).toBeTruthy();
-    expect(screen.queryByDisplayValue('ord 1 [answer 1]')).toBeNull();
-  });
-
-  it('keeps uploads running after the drawer is hidden and lets the header reopen them', async () => {
-    const user = userEvent.setup();
-    window.history.replaceState({}, '', '/admin');
-
-    const modules = [
-      buildModuleNode({
-        id: 1,
-        title: 'Norwegian',
-        slug: 'norwegian',
-        full_slug: 'norwegian',
-        children: [
-          buildModuleNode({
-            id: 2,
-            title: 'Vocabulary',
-            slug: 'vocabulary',
-            full_slug: 'norwegian/vocabulary',
-            children: [
-              buildModuleNode({
-                id: 3,
-                title: 'noun2en',
-                slug: 'noun2en',
-                full_slug: 'norwegian/vocabulary/noun2en',
-                instruction: 'Translate each Norwegian noun into English.'
-              })
-            ]
-          })
-        ]
-      })
-    ];
-    const rows = Array.from({ length: 60 }, (_, index) => buildImportRow({
-      row_number: index + 1,
-      qml_line: `ord ${index + 1} [answer ${index + 1}]`
-    }));
-    const importResult = buildImportResult({
-      ready_to_commit: true,
-      rows,
-      valid_row_count: 60,
-      committable_row_numbers: rows.map((row) => row.row_number),
-      report_text: '60 ready to commit'
-    });
-
-    persistImportSession(window.sessionStorage, {
-      instanceKey: 'local-dev',
-      modules,
-      open: true,
-      targetModuleId: 3,
-      qmlText: rows.map((row) => row.qml_line).join('\n'),
-      rows,
-      result: importResult
-    });
-
-    const firstChunk = deferred<typeof importResult>();
-    const secondChunk = deferred<typeof importResult>();
-
-    mockAuthenticatedAdmin(modules);
-    vi.mocked(api.getStats).mockResolvedValue(buildStatsResponse());
-    vi.mocked(api.validateQuestionImportRows).mockResolvedValue(importResult);
-    vi.mocked(api.commitQuestionImport)
-      .mockImplementationOnce(() => firstChunk.promise)
-      .mockImplementationOnce(() => secondChunk.promise);
-
-    render(App);
-
-    await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Import Questions' })).toBeTruthy();
-    });
-
-    await user.click(screen.getByRole('button', { name: 'Save' }));
-
-    await waitFor(() => {
-      expect(api.commitQuestionImport).toHaveBeenCalledTimes(1);
-      expect(screen.getByRole('button', { name: 'Saving 0/60' })).toBeTruthy();
-    });
-
-    await user.click(screen.getByRole('button', { name: 'Hide' }));
-
-    await waitFor(() => {
-      expect(screen.queryByRole('heading', { name: 'Import Questions' })).toBeNull();
-      expect(screen.getByRole('button', { name: 'Uploading 0/60' })).toBeTruthy();
-    });
-
-    await user.click(screen.getByRole('button', { name: 'Stats' }));
-    await waitFor(() => {
-      expect(api.getStats).toHaveBeenCalledTimes(1);
-    });
-
-    firstChunk.resolve({ ...importResult, committed: true, committed_count: 50 });
-    await waitFor(() => {
-      expect(api.commitQuestionImport).toHaveBeenCalledTimes(2);
-      expect(screen.getByRole('button', { name: 'Uploading 50/60' })).toBeTruthy();
-    });
-
-    await user.click(screen.getByRole('button', { name: 'Uploading 50/60' }));
-    await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Import Questions' })).toBeTruthy();
-      expect(screen.getByRole('button', { name: 'Saving 50/60' })).toBeTruthy();
-    });
-
-    secondChunk.resolve({ ...importResult, committed: true, committed_count: 10 });
-    await waitFor(() => {
-      expect(screen.queryByRole('heading', { name: 'Import Questions' })).toBeNull();
-    });
+    expect(findDrawerTextbox('ord 52 [answer 52]')).toBeTruthy();
+    expect(within(getImportDrawer()).getByText('4 rows ready')).toBeTruthy();
+    expect(findDrawerTextbox('ord 1 [answer 1]')).toBeUndefined();
   });
 });

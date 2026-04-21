@@ -24,13 +24,9 @@
   } from './lib/app-shell-data';
   import {
     closeImportUiState,
-    importStatusSummary,
     initialImportUiState,
     openImportUiForModule,
-    persistImportUiState,
-    reopenImportUiState,
     resetImportUiState,
-    restoreImportUiStateFromSession,
     updateImportUiDraft
   } from './lib/app-shell-import';
   import { commitImportUiFlow, startImportUiFlow } from './lib/app-shell-import-actions';
@@ -39,7 +35,6 @@
   import {
     bootstrapAdmin,
     commitQuestionImport,
-    createDemoSession,
     createModule,
     createQuestion,
     createQuizSession,
@@ -159,21 +154,8 @@
     importState = closeImportUiState(importState);
   }
 
-  function reopenImportDrawer(): void {
-    importState = reopenImportUiState(importState);
-  }
-
   function updateImportDraft(qmlText: string, rows: QuestionImportRowPayload[]): void {
     importState = updateImportUiDraft(importState, qmlText, rows);
-  }
-
-  function restoreImportStateFromSession(): void {
-    importState = restoreImportUiStateFromSession({
-      state: importState,
-      storage: window.sessionStorage,
-      instanceKey,
-      modules
-    });
   }
 
   async function loadRoleData(): Promise<void> {
@@ -219,11 +201,6 @@
       getStats
     });
     applyRefreshedShellData(refreshed);
-    restoreImportStateFromSession();
-    importState = {
-      ...importState,
-      sessionReady: true
-    };
   }
 
   async function loadStats(): Promise<void> {
@@ -260,20 +237,11 @@
 
     if (!resolvedState.currentActor) {
       resetAuthenticatedState();
-      importState = {
-        ...importState,
-        sessionReady: true
-      };
       authLoading = false;
       return;
     }
 
     applyRefreshedShellData(resolvedState);
-    restoreImportStateFromSession();
-    importState = {
-      ...importState,
-      sessionReady: true
-    };
     authLoading = false;
   }
 
@@ -328,19 +296,6 @@
       await refreshAuthenticatedData(currentActor);
     } catch (error) {
       authError = error instanceof Error ? error.message : 'Unable to create the first admin.';
-    } finally {
-      authBusy = false;
-    }
-  }
-
-  async function handleDemoSession(): Promise<void> {
-    authBusy = true;
-    authError = '';
-    try {
-      currentActor = await createDemoSession();
-      await refreshAuthenticatedData(currentActor);
-    } catch (error) {
-      authError = error instanceof Error ? error.message : 'Unable to start demo mode.';
     } finally {
       authBusy = false;
     }
@@ -628,16 +583,6 @@
   $: selectedModuleInstruction = selectedModuleNode?.instruction ?? '';
   $: importTargetModuleNode =
     importState.targetModuleId === null ? null : findModuleNodeInTree(modules, importState.targetModuleId);
-  $: activeActorLabel = currentActor?.display_name ?? 'Current account';
-  $: importStatus = importStatusSummary(importState);
-  $: if (importState.sessionReady) {
-    persistImportUiState({
-      storage: window.sessionStorage,
-      instanceKey,
-      modules,
-      state: importState
-    });
-  }
 </script>
 
 {#if authLoading}
@@ -653,7 +598,6 @@
     errorMessage={authError}
     onLogin={handleLogin}
     onBootstrapAdmin={handleBootstrapAdmin}
-    onDemo={handleDemoSession}
   />
 {:else}
   <div class="app-shell">
@@ -663,13 +607,8 @@
     <Header
       currentRoute={currentRoute}
       currentActor={currentActor}
-      importStatusVisible={currentActor?.role === 'admin' && importStatus.visible}
-      importStatusLabel={importStatus.label}
-      importStatusDetail={importStatus.detail}
-      importStatusTone={importStatus.tone}
       onNavigate={navigate}
       onToggleMenu={() => (moduleMenuOpen = !moduleMenuOpen)}
-      onOpenImportStatus={reopenImportDrawer}
       onLogout={handleLogout}
     />
 

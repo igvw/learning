@@ -96,7 +96,7 @@ class AuthApiTests(PostgresBackendTestCase):
         self.assertEqual(login_response.status_code, 400)
         self.assertEqual(login_response.json()["detail"], "Invalid handle or password.")
 
-    def test_login_me_logout_and_demo_session(self) -> None:
+    def test_login_me_and_logout(self) -> None:
         self.create_user(handle="alice", display_name="Alice")
         self.client.cookies.clear()
 
@@ -117,7 +117,6 @@ class AuthApiTests(PostgresBackendTestCase):
                 "handle": "alice",
                 "display_name": "Alice",
                 "role": "user",
-                "is_demo": False,
                 "created_at": login_response.json()["created_at"],
             },
         )
@@ -130,42 +129,6 @@ class AuthApiTests(PostgresBackendTestCase):
         me_after_logout = self.client.get("/api/auth/me")
         self.assertEqual(me_after_logout.status_code, 401)
         self.assertEqual(me_after_logout.json()["detail"], "Authentication is required.")
-
-        demo_response = self.client.post("/api/auth/demo-session")
-        self.assertEqual(demo_response.status_code, 200)
-        self.assertEqual(
-            demo_response.json(),
-            {
-                "id": None,
-                "handle": "demo",
-                "display_name": "Demo",
-                "role": "demo",
-                "is_demo": True,
-                "created_at": demo_response.json()["created_at"],
-            },
-        )
-
-        demo_me_response = self.client.get("/api/auth/me")
-        self.assertEqual(demo_me_response.status_code, 200)
-        self.assertEqual(demo_me_response.json()["role"], "demo")
-        self.assertTrue(demo_me_response.json()["is_demo"])
-
-    def test_demo_mode_cannot_save_changes(self) -> None:
-        self.client.post("/api/auth/demo-session")
-
-        create_question_response = self.client.post(
-            "/api/questions",
-            json={
-                "module_id": 1,
-                "prompt": "demo prompt",
-                "question_type": "single_text",
-                "rank": 1,
-                "accepted_answers": [["demo"]],
-                "segments": [],
-            },
-        )
-        self.assertEqual(create_question_response.status_code, 403)
-        self.assertEqual(create_question_response.json()["detail"], "Demo mode does not save changes.")
 
     def test_admin_can_promote_and_demote_roles_when_another_admin_exists(self) -> None:
         ignazio = self.create_user(handle="ignazio", display_name="Ignazio")

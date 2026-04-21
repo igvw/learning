@@ -189,14 +189,6 @@
                   class="ghost-button"
                   type="button"
                   disabled={moderationLocked}
-                  on:click={() => void handleModeration(question.question_id, 'changes_requested')}
-                >
-                  Request changes
-                </button>
-                <button
-                  class="ghost-button"
-                  type="button"
-                  disabled={moderationLocked}
                   on:click={() => void handleModeration(question.question_id, 'reject')}
                 >
                   Reject

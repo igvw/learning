@@ -11,7 +11,6 @@ The app starts with an auth screen.
 
 - if no admin exists yet, the auth screen shows first-admin bootstrap
 - normal accounts sign in by handle and password
-- demo mode starts an ephemeral showcase session with no real writes
 
 ## Account Badge
 

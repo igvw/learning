@@ -15,10 +15,6 @@ def quiz_sessions_create(
     actor: Actor = Depends(require_actor),
     connection: DatabaseConnection = Depends(database_connection),
 ) -> dict:
-    from ...services import create_demo_quiz_session
-
-    if actor.is_demo:
-        return create_demo_quiz_session(module_id=payload.module_id, count=payload.count)
     return create_quiz_session(
         connection,
         user_id=int(actor.user_id),
@@ -36,10 +32,6 @@ def quiz_sessions_submit(
     actor: Actor = Depends(require_actor),
     connection: DatabaseConnection = Depends(database_connection),
 ) -> dict:
-    from ...services import submit_demo_answer
-
-    if actor.is_demo:
-        return submit_demo_answer(session_id=session_id, item_id=item_id, answers=payload.answers)
     return submit_answer(
         connection,
         user_id=int(actor.user_id),

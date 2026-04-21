@@ -1,4 +1,4 @@
-import { clearLegacySelectionStorage, moduleIdExists, restoreSelectedModuleId } from './app-state';
+import { moduleIdExists, restoreSelectedModuleId } from './app-state';
 import type { ImportUiState } from './app-shell-import';
 import type {
   AuthActor,
@@ -103,7 +103,7 @@ export async function loadRoleDataForActor({
   moderationQueue: ModerationQueue | null;
   contributions: MyContributions | null;
 }> {
-  if (!actor || actor.is_demo) {
+  if (!actor) {
     return {
       users: [],
       moderationQueue: null,
@@ -277,7 +277,6 @@ export async function resolveAuthSessionState({
   getStats: (moduleId: number | null) => Promise<StatsResponse>;
 }): Promise<ResolvedAuthSessionState> {
   const healthContext = await resolveHealthContext(getHealth);
-  clearLegacySelectionStorage(storage);
 
   try {
     const currentActor = await getCurrentActor();

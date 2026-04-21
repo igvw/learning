@@ -27,7 +27,6 @@
     handle: 'admin',
     display_name: 'Admin',
     role: 'admin',
-    is_demo: false,
     created_at: null
   };
   export let modules: ModuleNode[] = [];
@@ -83,7 +82,6 @@
   let openOverlay: 'accounts' | 'modules' | 'import' | 'export' | null = null;
 
   $: isAdmin = currentActor?.role === 'admin';
-  $: isDemo = currentActor?.role === 'demo';
   $: flatModules = flattenModules(modules);
   $: selectedFlatModule = flatModules.find((module) => module.id === selectedModuleId) ?? null;
 </script>
@@ -91,14 +89,10 @@
 <section class="page admin-page">
   <div class="page-intro">
     <div>
-      <p class="eyebrow">{isAdmin ? 'Admin' : isDemo ? 'Demo' : 'Contributor'}</p>
+      <p class="eyebrow">{isAdmin ? 'Admin' : 'Contributor'}</p>
       <h2>{isAdmin ? 'Catalog and moderation' : 'Contributions and pending content'}</h2>
     </div>
   </div>
-
-  {#if isDemo}
-    <div class="banner info">Demo mode shows the contribution workflow, but authoring actions do not save.</div>
-  {/if}
 
   <div class="admin-stack">
     {#if isAdmin}
@@ -179,7 +173,6 @@
 >
   <AccountsPanel
     users={users}
-    isDemo={isDemo}
     showHeading={false}
     onCreateUser={onCreateUser}
     onUpdateUserRole={onUpdateUserRole}
@@ -199,7 +192,6 @@
   <ModuleManagementPanel
     currentActorId={currentActor?.id ?? null}
     isAdmin={isAdmin}
-    isDemo={isDemo}
     mode="modules"
     showHeading={false}
     flatModules={flatModules}
@@ -223,7 +215,6 @@
   <ModuleManagementPanel
     currentActorId={currentActor?.id ?? null}
     isAdmin={isAdmin}
-    isDemo={isDemo}
     mode="import"
     showHeading={false}
     flatModules={flatModules}
@@ -247,7 +238,6 @@
   <ModuleManagementPanel
     currentActorId={currentActor?.id ?? null}
     isAdmin={isAdmin}
-    isDemo={isDemo}
     mode="export"
     showHeading={false}
     flatModules={flatModules}

@@ -35,6 +35,13 @@
   let publishMarker = '';
   let saveAttempted = false;
 
+  function requestClose(): void {
+    if (busy) {
+      return;
+    }
+    onClose();
+  }
+
   function isLeaf(node: ModuleNode | null): boolean {
     return Boolean(node && node.children.length === 0);
   }
@@ -157,7 +164,7 @@
 </script>
 
 {#if open}
-  <div class="drawer-backdrop" role="presentation" on:click={onClose}>
+  <div class="drawer-backdrop" role="presentation" on:click={requestClose}>
     <div class="drawer-panel-shell import-drawer-shell" role="presentation" on:click|stopPropagation>
       <aside class="drawer-panel import-drawer" aria-label="Question import">
         <div class="panel-header sticky">
@@ -165,7 +172,7 @@
             <p class="eyebrow">QML import</p>
             <h2>Import Questions</h2>
           </div>
-          <button type="button" class="ghost-button" on:click={onClose}>{busy ? 'Hide' : 'Close'}</button>
+          <button type="button" class="ghost-button" disabled={busy} on:click={requestClose}>Close</button>
         </div>
 
         {#if errorMessage}

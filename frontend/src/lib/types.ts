@@ -1,8 +1,8 @@
 export type RouteName = 'quiz' | 'stats' | 'admin';
 export type QuestionType = 'single_text' | 'multi_text' | 'ordered_multi' | 'inline_cloze' | 'computed_text';
-export type UserRole = 'admin' | 'user' | 'demo';
-export type ModerationStatus = 'verified' | 'pending' | 'changes_requested' | 'rejected';
-export type ProposalStatus = 'pending' | 'changes_requested' | 'approved' | 'rejected';
+export type UserRole = 'admin' | 'user';
+export type ModerationStatus = 'verified' | 'pending' | 'rejected';
+export type ProposalStatus = 'pending' | 'approved' | 'rejected';
 export type ModerationKind = 'module' | 'question' | 'revision';
 export type ScheduleBucket =
   | 'hot0'
@@ -45,7 +45,6 @@ export interface AuthActor {
   handle: string;
   display_name: string;
   role: UserRole;
-  is_demo: boolean;
   created_at: string | null;
 }
 
@@ -244,7 +243,7 @@ export interface UpdateUserPasswordPayload {
 }
 
 export interface ModerationActionPayload {
-  action: 'approve' | 'reject' | 'changes_requested';
+  action: 'approve' | 'reject';
   note: string;
 }
 

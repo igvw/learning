@@ -230,7 +230,7 @@ def initialize_database(database_url: str) -> None:
                 ON modules (created_by_user_id, LOWER(full_slug))
                 WHERE admin_verified = 0
                   AND created_by_user_id IS NOT NULL
-                  AND moderation_status IN ('pending', 'changes_requested')
+                  AND moderation_status = 'pending'
                 """
             )
             connection.execute(

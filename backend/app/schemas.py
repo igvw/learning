@@ -6,9 +6,9 @@ from pydantic import BaseModel, Field, model_validator
 type QuestionType = Literal["single_text", "multi_text", "ordered_multi", "inline_cloze", "computed_text"]
 type PriorityMode = Literal["high", "mid", "low"]
 type QuestionImportReviewStatus = Literal["invalid", "duplicate", "relocation", "info", "conflict"]
-type UserRole = Literal["admin", "user", "demo"]
-type ModerationStatus = Literal["verified", "pending", "changes_requested", "rejected"]
-type ProposalStatus = Literal["pending", "changes_requested", "approved", "rejected"]
+type UserRole = Literal["admin", "user"]
+type ModerationStatus = Literal["verified", "pending", "rejected"]
+type ProposalStatus = Literal["pending", "approved", "rejected"]
 type ScheduleBucket = Literal[
     "hot0",
     "hot1",
@@ -81,7 +81,6 @@ class AuthActorOut(BaseModel):
     handle: str
     display_name: str
     role: UserRole
-    is_demo: bool = False
     created_at: str | None = None
 
 
@@ -94,7 +93,7 @@ class UserRoleUpdateIn(BaseModel):
 
 
 class ModerationActionIn(BaseModel):
-    action: Literal["approve", "reject", "changes_requested"]
+    action: Literal["approve", "reject"]
     note: str = ""
 
 

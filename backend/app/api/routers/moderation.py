@@ -10,7 +10,7 @@ from ...services import (
     review_question_revision,
     review_question_submission,
 )
-from ..dependencies import database_connection, require_admin_actor, require_real_actor
+from ..dependencies import database_connection, require_actor, require_admin_actor
 
 
 router = APIRouter()
@@ -18,7 +18,7 @@ router = APIRouter()
 
 @router.get("/api/contributions/me", response_model=MyContributionsOut)
 def contributions_me(
-    actor: Actor = Depends(require_real_actor),
+    actor: Actor = Depends(require_actor),
     connection: DatabaseConnection = Depends(database_connection),
 ) -> dict:
     return list_my_contributions(connection, actor=actor)

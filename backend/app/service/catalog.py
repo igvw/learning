@@ -19,7 +19,7 @@ def _module_visible_to_actor(row: Any, actor: Actor | None) -> bool:
     return (
         actor.user_id is not None
         and row["created_by_user_id"] == actor.user_id
-        and row["moderation_status"] in {"pending", "changes_requested"}
+        and row["moderation_status"] == "pending"
     )
 
 
@@ -129,7 +129,7 @@ def ensure_unique_module_slug(
         WHERE lower(full_slug) = lower(?)
           AND admin_verified = 0
           AND created_by_user_id = ?
-          AND moderation_status IN ('pending', 'changes_requested')
+          AND moderation_status = 'pending'
         """,
         (full_slug, actor.user_id),
     ).fetchone()
@@ -153,8 +153,6 @@ def create_module(
     instruction: str,
     actor: Actor | None = None,
 ) -> dict[str, Any]:
-    if actor is not None and actor.role == "demo":
-        raise ValidationError("Demo mode does not save changes.")
     if parent_id is not None:
         ensure_module_can_accept_children(connection, parent_id, actor=actor)
     slug = slugify_title(title)

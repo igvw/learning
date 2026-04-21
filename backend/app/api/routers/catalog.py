@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from ...database import DatabaseConnection
 from ...schemas import CreateModuleIn, ModuleNodeOut, UpdateModuleIn
 from ...services import Actor, create_module, export_verified_content_archive, get_module_tree, update_module
-from ..dependencies import database_connection, require_actor, require_admin_actor, require_real_actor
+from ..dependencies import database_connection, require_actor, require_admin_actor
 
 
 router = APIRouter()
@@ -24,17 +24,13 @@ def modules_tree(
     actor: Actor = Depends(require_actor),
     connection: DatabaseConnection = Depends(database_connection),
 ) -> list[dict]:
-    from ...services import demo_module_tree
-
-    if actor.is_demo:
-        return demo_module_tree()
     return get_module_tree(connection, actor=actor)
 
 
 @router.post("/api/modules", response_model=ModuleNodeOut)
 def modules_create(
     payload: CreateModuleIn,
-    actor: Actor = Depends(require_real_actor),
+    actor: Actor = Depends(require_actor),
     connection: DatabaseConnection = Depends(database_connection),
 ) -> dict:
     module = create_module(
@@ -54,7 +50,7 @@ def modules_create(
 def modules_update(
     module_id: int,
     payload: UpdateModuleIn,
-    actor: Actor = Depends(require_real_actor),
+    actor: Actor = Depends(require_actor),
     connection: DatabaseConnection = Depends(database_connection),
 ) -> dict:
     module = update_module(

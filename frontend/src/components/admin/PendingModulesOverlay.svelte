@@ -59,14 +59,6 @@
               class="ghost-button"
               type="button"
               disabled={moderationLocked}
-              on:click={() => void handleModeration(module.id, 'changes_requested')}
-            >
-              Request changes
-            </button>
-            <button
-              class="ghost-button"
-              type="button"
-              disabled={moderationLocked}
               on:click={() => void handleModeration(module.id, 'reject')}
             >
               Reject

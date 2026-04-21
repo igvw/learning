@@ -658,8 +658,8 @@ describe('ModerationQueuePanel', () => {
     expect(bulkSpy).toHaveBeenCalledWith([11, 12], { action: 'approve', note: '' });
     expect(await screen.findByText('Approved 2 questions.')).toBeTruthy();
 
-    await user.click(screen.getAllByRole('button', { name: 'Request changes' })[0]);
-    expect(moderationSpy).toHaveBeenCalledWith('question', 11, { action: 'changes_requested', note: '' });
+    await user.click(screen.getAllByRole('button', { name: 'Reject' })[0]);
+    expect(moderationSpy).toHaveBeenCalledWith('question', 11, { action: 'reject', note: '' });
   });
 
   it('reports partial bulk failures without removing the remaining selection', async () => {

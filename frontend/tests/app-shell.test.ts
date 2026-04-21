@@ -5,7 +5,6 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('../src/lib/api', () => ({
   bootstrapAdmin: vi.fn(),
   commitQuestionImport: vi.fn(),
-  createDemoSession: vi.fn(),
   createModule: vi.fn(),
   createQuestion: vi.fn(),
   createQuizSession: vi.fn(),
@@ -96,7 +95,6 @@ describe('App', () => {
     });
 
     expect(window.localStorage.getItem('learning.local-dev.selected-module-full-slug')).toBe('geography');
-    expect(window.localStorage.getItem('learning.selected-module-id')).toBeNull();
 
     firstRender.unmount();
 

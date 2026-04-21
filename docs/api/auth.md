@@ -42,10 +42,5 @@ Returns the current authenticated actor:
 - `id`
 - `handle`
 - `display_name`
-- `role` (`admin`, `user`, `demo`)
-- `is_demo`
+- `role` (`admin`, `user`)
 - `created_at`
-
-## `POST /api/auth/demo-session`
-
-Starts an ephemeral demo session.

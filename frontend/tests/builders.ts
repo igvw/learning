@@ -33,7 +33,6 @@ export function buildAuthActor(overrides: Partial<AuthActor> = {}): AuthActor {
     handle: 'user-a',
     display_name: 'User A',
     role: 'user',
-    is_demo: false,
     created_at: '2026-04-05T10:00:00Z',
     ...overrides
   };

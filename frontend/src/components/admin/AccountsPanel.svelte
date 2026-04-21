@@ -2,7 +2,6 @@
   import type { User } from '../../lib/types';
 
   export let users: User[] = [];
-  export let isDemo = false;
   export let showHeading = true;
   export let onCreateUser: (payload: {
     handle: string;
@@ -103,8 +102,7 @@
   $: createPasswordsMatch = userPassword === userPasswordConfirm;
   $: resetPasswordsMatch = passwordResetValue === passwordResetConfirm;
   $: canCreateUser = Boolean(
-    !isDemo &&
-      !userSaving &&
+    !userSaving &&
       userHandle.trim() &&
       userDisplayName.trim() &&
       userPassword &&
@@ -112,14 +110,12 @@
       createPasswordsMatch
   );
   $: canUpdateRole = Boolean(
-    !isDemo &&
-      !roleUpdateBusy &&
+    !roleUpdateBusy &&
       selectedManagedUser &&
       managedUserRole !== selectedManagedUser.role
   );
   $: canResetPassword = Boolean(
-    !isDemo &&
-      !passwordResetBusy &&
+    !passwordResetBusy &&
       selectedManagedUser &&
       passwordResetValue &&
       passwordResetConfirm &&

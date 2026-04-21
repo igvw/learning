@@ -58,13 +58,3 @@ def require_admin_actor(actor: Actor = Depends(require_actor)) -> Actor:
     if actor.role != "admin":
         raise HTTPException(status_code=403, detail="Admin access is required.")
     return actor
-
-
-def require_real_actor(actor: Actor = Depends(require_actor)) -> Actor:
-    if actor.is_demo:
-        raise HTTPException(status_code=403, detail="Demo mode does not save changes.")
-    return actor
-
-
-def actor_key(actor: Actor) -> str:
-    return actor.handle if actor.handle else "demo"

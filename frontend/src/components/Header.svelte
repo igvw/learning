@@ -6,11 +6,6 @@
   export let onNavigate: (route: RouteName) => void = () => {};
   export let onToggleMenu: () => void = () => {};
   export let onLogout: () => Promise<void> | void = () => {};
-  export let importStatusVisible = false;
-  export let importStatusLabel = '';
-  export let importStatusDetail = '';
-  export let importStatusTone: 'progress' | 'info' | 'error' = 'progress';
-  export let onOpenImportStatus: () => void = () => {};
 
   let userMenuOpen = false;
 
@@ -75,18 +70,6 @@
   </nav>
 
   <div class="header-user-tools">
-    {#if importStatusVisible}
-      <button
-        type="button"
-        class={`header-import-status tone-${importStatusTone}`}
-        title={importStatusDetail || importStatusLabel}
-        on:click={onOpenImportStatus}
-      >
-        <span class="header-import-status-indicator" aria-hidden="true"></span>
-        <span>{importStatusLabel}</span>
-      </button>
-    {/if}
-
     <div class="user-menu-shell">
       <button
         type="button"
@@ -103,9 +86,7 @@
       {#if userMenuOpen && displayedActor}
         <div class="user-menu" role="menu" aria-label="Account menu" tabindex="-1">
           <p class="user-menu-title">{displayedActor.display_name}</p>
-          <p class="user-menu-empty">
-            {displayedActor.role}{displayedActor.is_demo ? ' account (ephemeral demo)' : ' account'}
-          </p>
+          <p class="user-menu-empty">{displayedActor.role} account</p>
           <button type="button" class="user-menu-item" role="menuitem" on:click={() => void handleLogout()}>
             <span>Log out</span>
           </button>

@@ -14,12 +14,11 @@ See also:
 - request and response bodies are JSON unless otherwise noted
 - `question_type` is one of `single_text`, `computed_text`, `multi_text`, `ordered_multi`, `inline_cloze`
 - authenticated routes use the server-side session cookie
-- demo uses the same route surface, and write routes reject with a demo-mode error without mutating the real database
 
 ## Route Groups
 
 - [Authentication and sessions](api/auth.md)
-  Healthcheck, first-admin bootstrap, sign-in, sign-out, and demo session entry.
+  Healthcheck, first-admin bootstrap, sign-in, and sign-out.
 - [Content, accounts, moderation, and questions](api/content.md)
   Modules, users, contribution queues, moderation actions, question authoring, and review flags.
 - [Study and stats](api/study.md)
