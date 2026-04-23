@@ -171,9 +171,19 @@
               />
             </td>
             <td>
-              <strong>{question.prompt}</strong>
+              {#if question.question_type === 'bundle'}
+                <pre class="qml-line-preview">{question.bundle_qml}</pre>
+              {:else}
+                <strong>{question.prompt}</strong>
+              {/if}
             </td>
-            <td>{question.accepted_answers.map((answers) => answers.join(' / ')).join(' | ')}</td>
+            <td>
+              {#if question.question_type === 'bundle'}
+                <span class="muted-copy">Bundle variants</span>
+              {:else}
+                {question.accepted_answers.map((answers) => answers.join(' / ')).join(' | ')}
+              {/if}
+            </td>
             <td>{question.creator_display_name ?? 'Unknown'}</td>
             <td>
               <div class="moderation-row-actions">

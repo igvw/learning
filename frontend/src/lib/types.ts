@@ -1,5 +1,5 @@
 export type RouteName = 'quiz' | 'stats' | 'admin';
-export type QuestionType = 'single_text' | 'multi_text' | 'ordered_multi' | 'inline_cloze' | 'computed_text';
+export type QuestionType = 'single_text' | 'multi_text' | 'ordered_multi' | 'inline_cloze' | 'bundle';
 export type UserRole = 'admin' | 'user';
 export type ModerationStatus = 'verified' | 'pending' | 'rejected';
 export type ProposalStatus = 'pending' | 'approved' | 'rejected';
@@ -179,6 +179,7 @@ export interface QuestionRow {
   creator_display_name: string | null;
   accepted_answers: string[][];
   segments: string[];
+  bundle_qml?: string | null;
   recent_incorrect_answers: Array<{
     answer_text: string;
     count: number;
@@ -208,6 +209,7 @@ export interface QuestionDraftPayload {
   rank: number;
   accepted_answers: string[][];
   segments: string[];
+  bundle_qml?: string | null;
 }
 
 export interface ModerationEditedRevisionPayload extends QuestionDraftPayload {
@@ -284,6 +286,7 @@ export interface PendingQuestion {
   rank: number;
   accepted_answers: string[][];
   segments: string[];
+  bundle_qml?: string | null;
   admin_verified: boolean;
   moderation_status: ModerationStatus;
   created_by_user_id: number | null;
@@ -305,10 +308,12 @@ export interface QuestionRevisionProposal {
   current_question_type: QuestionType;
   current_accepted_answers: string[][];
   current_segments: string[];
+  current_bundle_qml?: string | null;
   proposed_prompt: string;
   proposed_question_type: QuestionType;
   proposed_accepted_answers: string[][];
   proposed_segments: string[];
+  proposed_bundle_qml?: string | null;
 }
 
 export interface ModerationQueue {
@@ -330,11 +335,19 @@ export interface QuestionImportMatchedQuestion {
   question_id?: number | null;
   module_id?: number | null;
   module_full_slug: string;
+  entry_kind?: 'plain' | 'bundle';
+  start_line?: number | null;
+  end_line?: number | null;
+  qml_text: string;
   qml_line: string;
   answer_blocks: string[];
 }
 
 export interface QuestionImportReviewRow {
+  start_line: number;
+  end_line: number;
+  entry_kind: 'plain' | 'bundle';
+  qml_text: string;
   row_number: number;
   qml_line: string;
   status: QuestionImportReviewStatus;
@@ -360,6 +373,10 @@ export interface QuestionImportResult {
 }
 
 export interface QuestionImportRowPayload {
+  start_line?: number;
+  end_line?: number;
+  entry_kind?: 'plain' | 'bundle';
+  qml_text?: string;
   row_number: number;
   qml_line: string;
 }

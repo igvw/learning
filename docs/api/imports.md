@@ -10,18 +10,18 @@ Imports are stateless and target one leaf module.
 
 ## QML Format
 
-Uploads use one question per line in `questions.dsl` / QML syntax.
+Uploads use one QML entry per plain line or bundle block in `questions.dsl` / QML syntax.
 
 Important behavior:
 
 - one upload targets one leaf module
 - repo seed authoring uses `questions.dsl`, and Admin uploads use pasted QML or `.qml` files
-- exact duplicate rows are omitted and summarized
-- same-leaf duplicate rows can revise the existing question in place
+- exact duplicate entries are omitted and summarized
+- same-leaf duplicate entries can revise the existing question in place
 - same-tree prompt matches can move an existing question into a different leaf while keeping question-linked progress
 - imported creates and same-tree relocations append at the end of the target leaf while preserving batch order
 - deletes and source-module moves leave sparse rank gaps; shared order is append-only
-- malformed or conflicting rows are returned for review
+- malformed or conflicting entries are returned for review
 - nothing is saved until commit succeeds
 - these routes are admin-only
 
@@ -29,14 +29,15 @@ Type inference:
 
 - trailing `{...}` = `multi_text`
 - trailing `[...]` with commas = `ordered_multi`
-- trailing `[...]` without commas = `single_text` or `computed_text`
+- trailing `[...]` without commas = `single_text`
 - embedded `[...]` in the sentence = `inline_cloze`
+- top-level `{ ... }` block = `bundle`
 
 ## `POST /api/question-imports/validate`
 
 Admin-only.
 
-Validates pasted QML text or an edited row list.
+Validates pasted QML text or an edited entry list.
 
 Request shape:
 
@@ -53,7 +54,7 @@ or:
 {
   "module_id": 12,
   "rows": [
-    { "row_number": 35, "qml_line": "mot [against|toward]" }
+    { "start_line": 35, "end_line": 35, "entry_kind": "plain", "qml_text": "mot [against|toward]" }
   ]
 }
 ```
@@ -72,6 +73,10 @@ Result fields:
 
 Each `review_row` includes:
 
+- `start_line`
+- `end_line`
+- `entry_kind`
+- `qml_text`
 - `row_number`
 - `qml_line`
 - `status`
@@ -95,14 +100,13 @@ Review statuses:
 
 Admin-only.
 
-Commits the submitted row list after revalidation.
+Commits the submitted entry list after revalidation.
 
 Commit behavior:
 
-- blocking review rows prevent commit
+- blocking review entries prevent commit
 - exact duplicates commit nothing and report `committed: false`
 - successful commits return the same result shape with:
   - `committed: true`
   - `committed_count`
-- the frontend uses this endpoint in 50-row chunks to show determinate save progress
-- imports can keep running in the current tab after the drawer is hidden; reopening the drawer shows the live remaining state
+- the frontend uses this endpoint in 50-entry chunks to show determinate save progress

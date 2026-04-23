@@ -83,8 +83,9 @@ def get_stats(
                 "moderation_status": row["moderation_status"],
                 "created_by_user_id": row["created_by_user_id"],
                 "creator_display_name": row["creator_display_name"],
-                "accepted_answers": type_config["accepted_answers"],
+                "accepted_answers": type_config.get("accepted_answers", []),
                 "segments": type_config.get("segments", []),
+                "bundle_qml": row.get("bundle_qml"),
                 "recent_incorrect_answers": recent_incorrect_answers.get(row["question_id"], []),
                 "schedule": {
                     "bucket": schedule["bucket"],

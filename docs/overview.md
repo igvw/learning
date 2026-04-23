@@ -15,6 +15,7 @@ For supporting docs, see:
 - [Development](development.md)
 - [Deployment](deployment.md)
 - [Question Markup DSL](question-markup.md)
+- [QML Revised](qml-revised.md)
 - [Question Markup LLM Prompt](question-markup-llm-prompt.md)
 - [TODO](TODO.md)
 - [Roadmap](roadmap.md)
@@ -50,10 +51,10 @@ Modules form a hierarchy such as `norwegian/vocabulary/nouns_to_english`.
 Questions belong to one leaf module and support:
 
 - `single_text`
-- `computed_text`
 - `multi_text`
 - `ordered_multi`
 - `inline_cloze`
+- `bundle`
 
 Verified questions are shared. Regular-user revisions and delete requests flow through personal proposals until an admin approves them. `rank` is the authoring and default ordering hint for the shared catalog.
 

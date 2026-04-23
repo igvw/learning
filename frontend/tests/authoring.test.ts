@@ -55,10 +55,9 @@ describe('EditorDrawer', () => {
     expect(screen.getByPlaceholderText('x^2')).toBeTruthy();
     expect(screen.getByPlaceholderText('.')).toBeTruthy();
 
-    await user.selectOptions(screen.getByLabelText('Question type'), 'computed_text');
-    expect(screen.getByPlaceholderText(/\$m=\[1-10\]\*100\$/)).toBeTruthy();
-    expect(screen.getByPlaceholderText('$m/v$ ml')).toBeTruthy();
-    expect(screen.getByText('QML')).toBeTruthy();
+    await user.selectOptions(screen.getByLabelText('Question type'), 'bundle');
+    expect(screen.getByText('Bundle QML')).toBeTruthy();
+    expect(screen.getByPlaceholderText(/\{A patient needs \{\}/)).toBeTruthy();
   });
 
   it('shows dense revision fields and aggregated incorrect answers without duplicate module UI', () => {

@@ -49,6 +49,7 @@
   let multiSlots: MultiSlot[] = [];
   let inlineBlanks: InlineBlank[] = [];
   let inlineTail = '';
+  let bundleQml = '';
   let qmlText = '';
   let qmlError = '';
   let formError = '';
@@ -65,6 +66,7 @@
       multiSlots,
       inlineBlanks,
       inlineTail,
+      bundleQml,
       qmlText
     };
   }
@@ -79,6 +81,7 @@
     multiSlots = nextState.multiSlots;
     inlineBlanks = nextState.inlineBlanks;
     inlineTail = nextState.inlineTail;
+    bundleQml = nextState.bundleQml;
     qmlText = nextState.qmlText;
   }
 
@@ -90,10 +93,19 @@
 
   function setQuestionType(type: QuestionType): void {
     questionType = type;
-    if (type === 'single_text' || type === 'computed_text') {
+    if (type === 'bundle') {
+      singleAnswersText = '';
       multiSlots = [];
       inlineBlanks = [];
       inlineTail = '';
+      bundleQml ||= '';
+      return;
+    }
+    if (type === 'single_text') {
+      multiSlots = [];
+      inlineBlanks = [];
+      inlineTail = '';
+      bundleQml = '';
       singleAnswersText ||= '';
       return;
     }
@@ -102,12 +114,14 @@
       multiSlots = multiSlots.length ? multiSlots : [{ answersText: '' }, { answersText: '' }];
       inlineBlanks = [];
       inlineTail = '';
+      bundleQml = '';
       return;
     }
     singleAnswersText = '';
     multiSlots = [];
     inlineBlanks = inlineBlanks.length ? inlineBlanks : [{ segmentBefore: '', answersText: '' }];
     inlineTail ||= '';
+    bundleQml = '';
   }
 
   function addMultiSlot(): void {
@@ -183,6 +197,7 @@
       multiSlots = parsedState.multiSlots;
       inlineBlanks = parsedState.inlineBlanks;
       inlineTail = parsedState.inlineTail;
+      bundleQml = parsedState.bundleQml;
       qmlError = '';
     } catch (error) {
       qmlError = error instanceof QmlError ? error.message : 'Invalid QML.';
@@ -219,16 +234,21 @@
     resetFromQuestion(editingQuestion);
   }
   $: if (open && !editingQuestion) {
-    qmlText = buildQmlLine(
-      buildStructuredDraft({
-        prompt,
-        questionType,
-        singleAnswersText,
-        multiSlots,
-        inlineBlanks,
-        inlineTail
-      })
-    );
+    if (questionType === 'bundle') {
+      qmlText = bundleQml;
+    } else {
+      qmlText = buildQmlLine(
+        buildStructuredDraft({
+          prompt,
+          questionType,
+          singleAnswersText,
+          multiSlots,
+          inlineBlanks,
+          inlineTail,
+          bundleQml
+        })
+      );
+    }
   }
 </script>
 
@@ -281,18 +301,20 @@
                     bind:value={questionType}
                     on:change={(event) => setQuestionType((event.currentTarget as HTMLSelectElement).value as QuestionType)}
                   >
+                    <option value="bundle">Bundle</option>
                     <option value="single_text">Single text</option>
-                    <option value="computed_text">Computed text</option>
                     <option value="multi_text">Multi text (any order)</option>
                     <option value="ordered_multi">Ordered multi</option>
                     <option value="inline_cloze">Inline cloze</option>
                   </select>
                 </label>
 
-                <label class="field editor-field-prompt editor-field-wide">
-                  <span>Prompt</span>
-                  <textarea rows="3" bind:value={prompt} placeholder={promptPlaceholder(questionType, Boolean(editingQuestion))}></textarea>
-                </label>
+                {#if questionType !== 'bundle'}
+                  <label class="field editor-field-prompt editor-field-wide">
+                    <span>Prompt</span>
+                    <textarea rows="3" bind:value={prompt} placeholder={promptPlaceholder(questionType, Boolean(editingQuestion))}></textarea>
+                  </label>
+                {/if}
               </div>
 
               {#if editingQuestion && isAdmin}
@@ -302,9 +324,18 @@
                 </label>
               {/if}
 
-              {#if questionType === 'single_text' || questionType === 'computed_text'}
+              {#if questionType === 'bundle'}
                 <label class="field">
-                  <span>{questionType === 'computed_text' ? 'Answer expression or accepted answers, one per line' : 'Accepted answers, one per line'}</span>
+                  <span>Bundle QML</span>
+                  <textarea
+                    rows="10"
+                    bind:value={bundleQml}
+                    placeholder={'{A patient needs {} mg of active ingredient. The medication has {} mg/ml of active ingredient. How much medication does the patient need? []\n {400} {20} [20]\n {500} {30} [16.7 | 16.67]}'}
+                  ></textarea>
+                </label>
+              {:else if questionType === 'single_text'}
+                <label class="field">
+                  <span>Accepted answers, one per line</span>
                   <textarea rows="5" bind:value={singleAnswersText} placeholder={singleAnswerPlaceholder(questionType, Boolean(editingQuestion))}></textarea>
                 </label>
               {:else if questionType === 'multi_text' || questionType === 'ordered_multi'}
@@ -357,7 +388,7 @@
                 </div>
               {/if}
 
-              {#if !editingQuestion}
+              {#if !editingQuestion && questionType !== 'bundle'}
                 <label class="field">
                   <span>QML</span>
                   <textarea rows="4" bind:value={qmlText} on:input={(event) => handleQmlInput((event.currentTarget as HTMLTextAreaElement).value)}></textarea>

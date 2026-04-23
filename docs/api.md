@@ -12,7 +12,7 @@ See also:
 
 - all app routes live under `/api`
 - request and response bodies are JSON unless otherwise noted
-- `question_type` is one of `single_text`, `computed_text`, `multi_text`, `ordered_multi`, `inline_cloze`
+- `question_type` is one of `single_text`, `multi_text`, `ordered_multi`, `inline_cloze`, `bundle`
 - authenticated routes use the server-side session cookie
 
 ## Route Groups

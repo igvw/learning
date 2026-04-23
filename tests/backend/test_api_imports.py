@@ -166,6 +166,46 @@ class ImportApiTests(PostgresBackendTestCase):
         self.assertEqual(target_stats["questions"][0]["accepted_answers"], [["against", "toward"]])
         self.assertEqual(target_stats["questions"][0]["rank"], 1)
 
+    def test_bundle_import_validates_and_commits_as_one_question(self) -> None:
+        norwegian = self.create_module_record("Norwegian")
+        target = self.create_module_record("Target", norwegian["id"])
+        bundle_qml = "{A patient needs {} mg. The solution has {} mg/ml. How much is needed? []\n {500} {40} [12.5 ml]\n {600} {30} [20 ml]}"
+
+        validate_payload = self.validate_import_payload(target["id"], qml_text=bundle_qml)
+        self.assertTrue(validate_payload["ready_to_commit"])
+        self.assertEqual(validate_payload["valid_row_count"], 1)
+        self.assertEqual(validate_payload["rows"][0]["entry_kind"], "bundle")
+        self.assertEqual(validate_payload["rows"][0]["start_line"], 1)
+        self.assertEqual(validate_payload["rows"][0]["end_line"], 3)
+
+        commit_payload = self.commit_import_payload(
+            target["id"],
+            [
+                {
+                    "start_line": 1,
+                    "end_line": 3,
+                    "entry_kind": "bundle",
+                    "qml_text": bundle_qml,
+                }
+            ],
+        )
+        self.assertTrue(commit_payload["committed"])
+        self.assertEqual(commit_payload["committed_count"], 1)
+
+        with get_connection(self.database_url) as connection:
+            row = connection.execute(
+                """
+                SELECT q.question_type, q.prompt, bundles.variants_json
+                FROM questions AS q
+                LEFT JOIN question_bundles AS bundles ON bundles.question_id = q.id
+                WHERE q.module_id = ?
+                """,
+                (target["id"],),
+            ).fetchone()
+        self.assertEqual(row["question_type"], "bundle")
+        self.assertIn("A patient needs {} mg.", row["prompt"])
+        self.assertIsNotNone(row["variants_json"])
+
     def test_same_leaf_exact_noop_duplicate_has_no_side_effects(self) -> None:
         norwegian = self.create_module_record("Norwegian")
         target = self.create_module_record("Target", norwegian["id"])

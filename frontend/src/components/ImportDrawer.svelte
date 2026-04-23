@@ -58,7 +58,18 @@
 
   function updateQmlLine(rowNumber: number, value: string): void {
     saveAttempted = false;
-    pendingRows = pendingRows.map((row) => (row.row_number === rowNumber ? { ...row, qml_line: value } : row));
+    pendingRows = pendingRows.map((row) => {
+      if (row.row_number !== rowNumber) {
+        return row;
+      }
+      return {
+        ...row,
+        qml_line: value,
+        ...((row.entry_kind || row.start_line !== undefined || row.end_line !== undefined)
+          ? { qml_text: value }
+          : {})
+      };
+    });
   }
 
   async function handleStartValidate(): Promise<void> {
@@ -74,11 +85,24 @@
 
   async function handleSave(): Promise<void> {
     saveAttempted = true;
-    await onCommit(pendingRows);
+    await onCommit(serializeRows(pendingRows));
   }
 
   function currentRowValue(rowNumber: number, fallback: string): string {
     return currentImportRowValue(pendingRows, rowNumber, fallback);
+  }
+
+  function serializeRows(rows: QuestionImportRowPayload[]): QuestionImportRowPayload[] {
+    return rows.map((row) => ({
+      ...(row.start_line !== undefined ? { start_line: row.start_line } : {}),
+      ...(row.end_line !== undefined ? { end_line: row.end_line } : {}),
+      ...(row.entry_kind ? { entry_kind: row.entry_kind } : {}),
+      ...(row.entry_kind === 'bundle' || row.start_line !== undefined || row.end_line !== undefined
+        ? { qml_text: row.qml_text ?? row.qml_line }
+        : {}),
+      row_number: row.row_number,
+      qml_line: row.qml_line
+    }));
   }
 
   function answerSelected(row: QuestionImportReviewRow, choice: AnswerChoice): boolean {
@@ -127,13 +151,7 @@
   $: draftStateMarker = `${open}:${qmlText}:${pendingRows.map((row) => `${row.row_number}:${row.qml_line}`).join('|')}`;
   $: if (open && draftStateMarker !== publishMarker) {
     publishMarker = draftStateMarker;
-    onDraftChange(
-      qmlText,
-      pendingRows.map((row) => ({
-        row_number: row.row_number,
-        qml_line: row.qml_line
-      }))
-    );
+    onDraftChange(qmlText, serializeRows(pendingRows));
   }
   $: saveStatusMessage = (() => {
     if (saveStatusMessageOverride) {
@@ -161,6 +179,8 @@
   })();
   $: saveProgressRatio = saveProgressTotal > 0 ? Math.min(1, saveProgressCompleted / saveProgressTotal) : 0;
   $: saveButtonLabel = busy && saveProgressTotal > 0 ? `Saving ${saveProgressCompleted}/${saveProgressTotal}` : busy ? 'Saving...' : 'Save';
+  $: plainReviewRows = displayReviewRows.filter((row) => row.entry_kind !== 'bundle');
+  $: bundleReviewRows = displayReviewRows.filter((row) => row.entry_kind === 'bundle');
 </script>
 
 {#if open}
@@ -241,103 +261,143 @@
                 </div>
               </div>
 
-              {#if displayReviewRows.length > 0}
+              {#if plainReviewRows.length > 0 || bundleReviewRows.length > 0}
                 <div class="field">
-                  <span>Review rows</span>
-                  <div class="table-shell import-review-shell">
-                    <table class="dense-table import-review-table">
-                      <colgroup>
-                        <col class="import-review-col-line" />
-                        <col class="import-review-col-qml" />
-                        <col class="import-review-col-answers" />
-                      </colgroup>
-                      <thead>
-                        <tr>
-                          <th>Line</th>
-                          <th>QML</th>
-                          <th>Answers</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {#each displayReviewRows as row (row.row_number)}
-                          {@const blockChoicesList = answerChoicesByBlock(row, currentRowValue(row.row_number, row.qml_line))}
-                          <tr class:review-row-blocking={row.blocking}>
-                            <td>
-                              <div
-                                class={`import-review-line status-${row.status}`}
-                                title={row.status_text}
-                                aria-label={row.status_text}
-                              >
-                                {row.row_number}
-                              </div>
-                            </td>
-                            <td>
-                              <div class="import-review-cell import-review-qml-cell">
-                                <div class="import-review-qml-field">
-                                  {#if row.editable}
-                                    <input
-                                      class="qml-line-input"
-                                      type="text"
-                                      value={currentRowValue(row.row_number, row.qml_line)}
-                                      disabled={busy}
-                                      on:input={(event) => updateQmlLine(row.row_number, (event.currentTarget as HTMLInputElement).value)}
-                                    />
+                  <span>Review entries</span>
+                  {#if plainReviewRows.length > 0}
+                    <div class="table-shell import-review-shell">
+                      <table class="dense-table import-review-table">
+                        <colgroup>
+                          <col class="import-review-col-line" />
+                          <col class="import-review-col-qml" />
+                          <col class="import-review-col-answers" />
+                        </colgroup>
+                        <thead>
+                          <tr>
+                            <th>Line</th>
+                            <th>QML</th>
+                            <th>Answers</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {#each plainReviewRows as row (row.row_number)}
+                            {@const blockChoicesList = answerChoicesByBlock(row, currentRowValue(row.row_number, row.qml_line))}
+                            <tr class:review-row-blocking={row.blocking}>
+                              <td>
+                                <div
+                                  class={`import-review-line status-${row.status}`}
+                                  title={row.status_text}
+                                  aria-label={row.status_text}
+                                >
+                                  {row.row_number}
+                                </div>
+                              </td>
+                              <td>
+                                <div class="import-review-cell import-review-qml-cell">
+                                  <div class="import-review-qml-field">
+                                    {#if row.editable}
+                                      <input
+                                        class="qml-line-input"
+                                        type="text"
+                                        value={currentRowValue(row.row_number, row.qml_line)}
+                                        disabled={busy}
+                                        on:input={(event) => updateQmlLine(row.row_number, (event.currentTarget as HTMLInputElement).value)}
+                                      />
+                                    {:else}
+                                      <code class="qml-line-preview qml-line-preview-compact">{row.qml_line}</code>
+                                    {/if}
+                                  </div>
+                                  <button
+                                    class="import-remove-button"
+                                    type="button"
+                                    disabled={busy}
+                                    aria-label={`Remove row ${row.row_number}`}
+                                    on:click={() => void handleDiscardRow(row.row_number)}
+                                  >
+                                    ×
+                                  </button>
+                                </div>
+                              </td>
+                              <td>
+                                <div class="import-review-cell">
+                                  {#if blockChoicesList.length > 0}
+                                    <div class="answer-block-stack">
+                                      {#each blockChoicesList as blockChoices, blockIndex}
+                                        <div class="answer-block-group">
+                                          {#if blockChoicesList.length > 1}
+                                            <p class="answer-block-label">Answer {blockIndex + 1}</p>
+                                          {/if}
+                                          {#if blockChoices.length > 0}
+                                            <div class="answer-chip-row">
+                                              {#each blockChoices as choice (choice.key)}
+                                                <button
+                                                  class={`answer-block-chip answer-choice-button ${answerChoiceSourceClass(choice)}`}
+                                                  class:selected-answer-choice={answerSelected(row, choice)}
+                                                  type="button"
+                                                  disabled={!row.editable || busy}
+                                                  title={answerChoiceSourceLabel(choice)}
+                                                  aria-label={`Toggle ${answerChoiceSourceLabel(choice).toLowerCase()} ${choice.text} in QML row ${row.row_number}`}
+                                                  on:click={() => handleToggleAnswer(row, choice)}
+                                                >
+                                                  {choice.text}
+                                                </button>
+                                              {/each}
+                                            </div>
+                                          {:else}
+                                            <p class="muted-copy">No answers for this field yet.</p>
+                                          {/if}
+                                        </div>
+                                      {/each}
+                                    </div>
                                   {:else}
-                                    <code class="qml-line-preview qml-line-preview-compact">{row.qml_line}</code>
+                                    <p class="muted-copy">No answers parsed yet.</p>
                                   {/if}
                                 </div>
-                                <button
-                                  class="import-remove-button"
-                                  type="button"
-                                  disabled={busy}
-                                  aria-label={`Remove row ${row.row_number}`}
-                                  on:click={() => void handleDiscardRow(row.row_number)}
-                                >
-                                  ×
-                                </button>
-                              </div>
-                            </td>
-                            <td>
-                              <div class="import-review-cell">
-                                {#if blockChoicesList.length > 0}
-                                  <div class="answer-block-stack">
-                                    {#each blockChoicesList as blockChoices, blockIndex}
-                                      <div class="answer-block-group">
-                                        {#if blockChoicesList.length > 1}
-                                          <p class="answer-block-label">Answer {blockIndex + 1}</p>
-                                        {/if}
-                                        {#if blockChoices.length > 0}
-                                          <div class="answer-chip-row">
-                                            {#each blockChoices as choice (choice.key)}
-                                              <button
-                                                class={`answer-block-chip answer-choice-button ${answerChoiceSourceClass(choice)}`}
-                                                class:selected-answer-choice={answerSelected(row, choice)}
-                                                type="button"
-                                                disabled={!row.editable || busy}
-                                                title={answerChoiceSourceLabel(choice)}
-                                                aria-label={`Toggle ${answerChoiceSourceLabel(choice).toLowerCase()} ${choice.text} in QML row ${row.row_number}`}
-                                                on:click={() => handleToggleAnswer(row, choice)}
-                                              >
-                                                {choice.text}
-                                              </button>
-                                            {/each}
-                                          </div>
-                                        {:else}
-                                          <p class="muted-copy">No answers for this field yet.</p>
-                                        {/if}
-                                      </div>
-                                    {/each}
-                                  </div>
-                                {:else}
-                                  <p class="muted-copy">No answers parsed yet.</p>
-                                {/if}
-                              </div>
-                            </td>
-                          </tr>
-                        {/each}
-                      </tbody>
-                    </table>
-                  </div>
+                              </td>
+                            </tr>
+                          {/each}
+                        </tbody>
+                      </table>
+                    </div>
+                  {/if}
+
+                  {#if bundleReviewRows.length > 0}
+                    <div class="dynamic-group compact-dynamic-group">
+                      <div class="subsection-header">
+                        <h3>Bundle entries</h3>
+                        <p class="muted-copy">{bundleReviewRows.length} bundle entries need review.</p>
+                      </div>
+                      {#each bundleReviewRows as row (row.row_number)}
+                        <div class={`dynamic-card compact-dynamic-card ${row.blocking ? 'review-row-blocking' : ''}`}>
+                          <div class="subsection-header">
+                            <div>
+                              <strong>Lines {row.start_line}{row.end_line !== row.start_line ? `-${row.end_line}` : ''}</strong>
+                              <p class="muted-copy">{row.status_text}</p>
+                            </div>
+                            <button
+                              class="ghost-button"
+                              type="button"
+                              disabled={busy}
+                              on:click={() => void handleDiscardRow(row.row_number)}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                          {#if row.editable}
+                            <textarea
+                              class="qml-textarea"
+                              rows="8"
+                              value={currentRowValue(row.row_number, row.qml_text)}
+                              disabled={busy}
+                              on:input={(event) => updateQmlLine(row.row_number, (event.currentTarget as HTMLTextAreaElement).value)}
+                            ></textarea>
+                          {:else}
+                            <pre class="qml-line-preview">{row.qml_text}</pre>
+                          {/if}
+                        </div>
+                      {/each}
+                    </div>
+                  {/if}
                 </div>
               {:else}
                 <p class="muted-copy">No review rows remain. Save when you are ready.</p>

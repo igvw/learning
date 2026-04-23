@@ -20,6 +20,7 @@ export type EditorState = {
   multiSlots: MultiSlot[];
   inlineBlanks: InlineBlank[];
   inlineTail: string;
+  bundleQml: string;
   qmlText: string;
 };
 
@@ -28,6 +29,7 @@ type StructuredDraft = {
   question_type: QuestionType;
   accepted_answers: string[][];
   segments: string[];
+  bundle_qml?: string | null;
 };
 
 function splitLines(value: string): string[] {
@@ -52,8 +54,19 @@ export function defaultCreateModuleId(modules: ModuleNode[], defaultModuleId: nu
   return options[0]?.id ?? 0;
 }
 
-export function buildStructuredDraft(state: Pick<EditorState, 'prompt' | 'questionType' | 'singleAnswersText' | 'multiSlots' | 'inlineBlanks' | 'inlineTail'>): StructuredDraft {
-  if (state.questionType === 'single_text' || state.questionType === 'computed_text') {
+export function buildStructuredDraft(
+  state: Pick<EditorState, 'prompt' | 'questionType' | 'singleAnswersText' | 'multiSlots' | 'inlineBlanks' | 'inlineTail' | 'bundleQml'>
+): StructuredDraft {
+  if (state.questionType === 'bundle') {
+    return {
+      prompt: '',
+      question_type: 'bundle',
+      accepted_answers: [],
+      segments: [],
+      bundle_qml: state.bundleQml.trim()
+    };
+  }
+  if (state.questionType === 'single_text') {
     return {
       prompt: state.prompt.trim(),
       question_type: state.questionType,
@@ -77,16 +90,30 @@ export function buildStructuredDraft(state: Pick<EditorState, 'prompt' | 'questi
   };
 }
 
-export function parseEditorStateFromQml(value: string): Pick<EditorState, 'prompt' | 'questionType' | 'singleAnswersText' | 'multiSlots' | 'inlineBlanks' | 'inlineTail'> {
+export function parseEditorStateFromQml(
+  value: string
+): Pick<EditorState, 'prompt' | 'questionType' | 'singleAnswersText' | 'multiSlots' | 'inlineBlanks' | 'inlineTail' | 'bundleQml'> {
   const parsed = parseQmlLine(value);
-  if (parsed.question_type === 'single_text' || parsed.question_type === 'computed_text') {
+  if (parsed.question_type === 'bundle') {
+    return {
+      prompt: parsed.prompt,
+      questionType: 'bundle',
+      singleAnswersText: '',
+      multiSlots: [],
+      inlineBlanks: [],
+      inlineTail: '',
+      bundleQml: parsed.bundle_qml ?? value
+    };
+  }
+  if (parsed.question_type === 'single_text') {
     return {
       prompt: parsed.prompt,
       questionType: parsed.question_type,
       singleAnswersText: (parsed.accepted_answers[0] ?? []).join('\n'),
       multiSlots: [],
       inlineBlanks: [],
-      inlineTail: ''
+      inlineTail: '',
+      bundleQml: ''
     };
   }
   if (parsed.question_type === 'multi_text' || parsed.question_type === 'ordered_multi') {
@@ -96,7 +123,8 @@ export function parseEditorStateFromQml(value: string): Pick<EditorState, 'promp
       singleAnswersText: '',
       multiSlots: parsed.accepted_answers.map((answers) => ({ answersText: answers.join('\n') })),
       inlineBlanks: [],
-      inlineTail: ''
+      inlineTail: '',
+      bundleQml: ''
     };
   }
   return {
@@ -108,7 +136,8 @@ export function parseEditorStateFromQml(value: string): Pick<EditorState, 'promp
       segmentBefore: parsed.segments[index] ?? '',
       answersText: answers.join('\n')
     })),
-    inlineTail: parsed.segments[parsed.segments.length - 1] ?? ''
+    inlineTail: parsed.segments[parsed.segments.length - 1] ?? '',
+    bundleQml: ''
   };
 }
 
@@ -127,8 +156,11 @@ export function buildEditorState(
   let multiSlots: MultiSlot[] = [];
   let inlineBlanks: InlineBlank[] = [];
   let inlineTail = '';
+  let bundleQml = question?.bundle_qml ?? '';
 
-  if (questionType === 'single_text' || questionType === 'computed_text') {
+  if (questionType === 'bundle') {
+    bundleQml = question?.bundle_qml ?? '';
+  } else if (questionType === 'single_text') {
     singleAnswersText = (question?.accepted_answers?.[0] ?? []).join('\n');
   } else if (questionType === 'multi_text' || questionType === 'ordered_multi') {
     multiSlots =
@@ -155,6 +187,7 @@ export function buildEditorState(
     multiSlots,
     inlineBlanks,
     inlineTail,
+    bundleQml,
     qmlText: buildQmlLine(
       buildStructuredDraft({
         prompt,
@@ -162,7 +195,8 @@ export function buildEditorState(
         singleAnswersText,
         multiSlots,
         inlineBlanks,
-        inlineTail
+        inlineTail,
+        bundleQml
       })
     )
   };
@@ -185,6 +219,20 @@ export function buildQuestionPayload(
   }
 
   const draft = buildStructuredDraft(state);
+  if (state.questionType === 'bundle') {
+    if (!state.bundleQml.trim()) {
+      throw new Error('Bundle QML is required.');
+    }
+    return {
+      module_id: normalizedModuleId,
+      prompt: '',
+      question_type: 'bundle',
+      rank: state.rank,
+      accepted_answers: [],
+      segments: [],
+      bundle_qml: state.bundleQml.trim()
+    };
+  }
   if (!draft.prompt) {
     throw new Error('Prompt is required.');
   }
@@ -214,20 +262,14 @@ export function promptPlaceholder(type: QuestionType, isEditing: boolean): strin
       return createPlaceholder(isEditing, 'Name the two rivers that meet at Khartoum.');
     case 'ordered_multi':
       return createPlaceholder(isEditing, 'Name the stages in order.');
-    case 'computed_text':
-      return createPlaceholder(
-        isEditing,
-        'Patient needs $m=[1-10]*100$ mg of trycoxigan. The solution has $v=[1-10]*10$ mg/ml. How much solution is needed?'
-      );
+    case 'bundle':
+      return createPlaceholder(isEditing, 'Bundle questions are authored as canonical bundle QML below.');
     case 'inline_cloze':
       return createPlaceholder(isEditing, 'The [Amazon | Amazon River] flows through South America.');
   }
 }
 
 export function singleAnswerPlaceholder(type: QuestionType, isEditing: boolean): string | undefined {
-  if (type === 'computed_text') {
-    return createPlaceholder(isEditing, '$m/v$ ml');
-  }
   return createPlaceholder(isEditing, 'oslo');
 }
 

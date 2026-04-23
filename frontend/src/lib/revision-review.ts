@@ -1,6 +1,6 @@
 import type { QuestionRevisionProposal, QuestionType } from './types';
 
-export type RevisionChangedField = 'prompt' | 'question_type' | 'answers' | 'segments';
+export type RevisionChangedField = 'prompt' | 'question_type' | 'answers' | 'segments' | 'bundle_qml';
 export type PendingRevisionPrimaryKind = 'delete' | 'type' | 'prompt' | 'answer_segment';
 
 export type PendingRevisionEntry = {
@@ -47,6 +47,15 @@ export function revisionChangedFields(proposal: QuestionRevisionProposal): Revis
   }
 
   const changedFields: RevisionChangedField[] = [];
+  if (proposal.current_question_type === 'bundle' || proposal.proposed_question_type === 'bundle') {
+    if (proposal.current_question_type !== proposal.proposed_question_type) {
+      changedFields.push('question_type');
+    }
+    if ((proposal.current_bundle_qml ?? '') !== (proposal.proposed_bundle_qml ?? '')) {
+      changedFields.push('bundle_qml');
+    }
+    return changedFields;
+  }
   if (proposal.current_prompt !== proposal.proposed_prompt) {
     changedFields.push('prompt');
   }
@@ -88,7 +97,7 @@ export function questionTypeLabel(questionType: QuestionType): string {
   if (questionType === 'inline_cloze') {
     return 'Inline cloze';
   }
-  return 'Computed text';
+  return 'Bundle';
 }
 
 export function groupPendingRevisionsByModule(revisions: QuestionRevisionProposal[]): PendingRevisionModuleGroup[] {

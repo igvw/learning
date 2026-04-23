@@ -9,6 +9,7 @@ from .authoring import (
     create_question_append_only,
     relocate_question_for_import,
 )
+from .bundles import bundle_qml_from_row, normalize_bundle_payload
 from .catalog import ensure_leaf_module
 from .errors import ValidationError
 from .questions import answer_blocks, build_qml_line, serialize_type_config, stored_prompt_key
@@ -42,7 +43,7 @@ def _result_payload(
         "ready_to_commit": bool(valid_rows) and not any(row["blocking"] for row in review_rows),
         "rows": normalized_rows,
         "valid_row_count": len(valid_rows),
-        "committable_row_numbers": [row["row_number"] for row in valid_rows],
+        "committable_row_numbers": [row["start_line"] for row in valid_rows],
         "exact_duplicate_count": exact_duplicate_count,
         "review_rows": review_rows,
         "report_text": _report_text(
@@ -60,16 +61,29 @@ def _normalize_import_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         raise ValidationError("Import must include at least one question row.")
 
     normalized_rows: list[dict[str, Any]] = []
-    seen_row_numbers: set[int] = set()
-    for row in sorted(rows, key=lambda candidate: candidate["row_number"]):
-        row_number = int(row["row_number"])
-        qml_line = row["qml_line"]
-        if row_number in seen_row_numbers:
-            raise ValidationError("Row numbers must be unique.")
-        if "\n" in qml_line or "\r" in qml_line:
-            raise ValidationError("Each QML row must stay on one line.")
-        seen_row_numbers.add(row_number)
-        normalized_rows.append({"row_number": row_number, "qml_line": qml_line})
+    seen_start_lines: set[int] = set()
+    for row in sorted(rows, key=lambda candidate: (candidate["start_line"], candidate["end_line"])):
+        start_line = int(row["start_line"])
+        end_line = int(row["end_line"])
+        entry_kind = row["entry_kind"]
+        qml_text = row["qml_text"]
+        if start_line in seen_start_lines:
+            raise ValidationError("Import entry start lines must be unique.")
+        if end_line < start_line:
+            raise ValidationError("Import entry end lines must be greater than or equal to start lines.")
+        if entry_kind == "plain" and ("\n" in qml_text or "\r" in qml_text):
+            raise ValidationError("Plain QML entries must stay on one line.")
+        seen_start_lines.add(start_line)
+        normalized_rows.append(
+            {
+                "start_line": start_line,
+                "end_line": end_line,
+                "entry_kind": entry_kind,
+                "qml_text": qml_text,
+                "row_number": start_line,
+                "qml_line": qml_text,
+            }
+        )
     return normalized_rows
 
 
@@ -104,9 +118,11 @@ def _existing_questions_for_prompt_keys(
             q.prompt,
             q.prompt_key,
             q.rank,
-            q.type_config_json
+            q.type_config_json,
+            bundles.variants_json
         FROM questions AS q
         JOIN modules AS m ON m.id = q.module_id
+        LEFT JOIN question_bundles AS bundles ON bundles.question_id = q.id
         WHERE q.prompt_key IN ({placeholders})
           AND (q.module_id = ? OR m.full_slug = ? OR m.full_slug LIKE ?)
         ORDER BY q.id ASC
@@ -117,6 +133,12 @@ def _existing_questions_for_prompt_keys(
     existing_rows: list[dict[str, Any]] = []
     for row in rows:
         parsed_type_config = json.loads(row["type_config_json"])
+        entry_kind = "bundle" if row["question_type"] == "bundle" else "plain"
+        qml_text = (
+            bundle_qml_from_row(str(row["prompt"]), row["variants_json"])
+            if row["question_type"] == "bundle"
+            else build_qml_line(row["question_type"], row["prompt"], parsed_type_config)
+        )
         existing_rows.append(
             {
                 "question_id": row["question_id"],
@@ -127,14 +149,21 @@ def _existing_questions_for_prompt_keys(
                 "rank": row["rank"],
                 "type_config": parsed_type_config,
                 "prompt_key": row["prompt_key"],
-                "qml_line": build_qml_line(row["question_type"], row["prompt"], parsed_type_config),
-                "answer_blocks": answer_blocks(parsed_type_config),
+                "entry_kind": entry_kind,
+                "qml_text": qml_text,
+                "qml_line": qml_text,
+                "bundle_qml": qml_text if entry_kind == "bundle" else None,
+                "answer_blocks": [] if entry_kind == "bundle" else answer_blocks(parsed_type_config),
             }
         )
     return existing_rows
 
 
 def _payload_matches_existing(payload: dict[str, Any], existing_row: dict[str, Any]) -> bool:
+    if payload["question_type"] == "bundle":
+        left_prompt, _, left_qml = normalize_bundle_payload(QuestionDraftIn(**payload))
+        _ = left_prompt
+        return left_qml == existing_row.get("bundle_qml")
     return (
         payload["question_type"] == existing_row["question_type"]
         and payload["prompt"].strip() == existing_row["prompt"].strip()
@@ -143,6 +172,12 @@ def _payload_matches_existing(payload: dict[str, Any], existing_row: dict[str, A
 
 
 def _payload_matches_payload(left_payload: dict[str, Any], right_payload: dict[str, Any]) -> bool:
+    if left_payload["question_type"] == "bundle" or right_payload["question_type"] == "bundle":
+        if left_payload["question_type"] != right_payload["question_type"]:
+            return False
+        _, _, left_qml = normalize_bundle_payload(QuestionDraftIn(**left_payload))
+        _, _, right_qml = normalize_bundle_payload(QuestionDraftIn(**right_payload))
+        return left_qml == right_qml
     left_draft = QuestionDraftIn(**left_payload)
     right_draft = QuestionDraftIn(**right_payload)
     return (
@@ -157,6 +192,8 @@ def _existing_reference(existing_row: dict[str, Any]) -> dict[str, Any]:
         "question_id": existing_row["question_id"],
         "module_id": existing_row["module_id"],
         "module_full_slug": existing_row["module_full_slug"],
+        "entry_kind": existing_row["entry_kind"],
+        "qml_text": existing_row["qml_text"],
         "qml_line": existing_row["qml_line"],
         "answer_blocks": existing_row["answer_blocks"],
     }
@@ -167,6 +204,8 @@ def _upload_reference(row: dict[str, Any]) -> dict[str, Any]:
         "question_id": None,
         "module_id": None,
         "module_full_slug": f"Earlier upload row {row['row_number']}",
+        "entry_kind": row["entry_kind"],
+        "qml_text": row["qml_text"],
         "qml_line": row["qml_line"],
         "answer_blocks": row["imported_answer_blocks"],
     }
@@ -183,8 +222,11 @@ def _combined_answer_blocks(references: list[dict[str, Any]]) -> list[str]:
 
 def _review_row(
     *,
+    start_line: int,
+    end_line: int,
+    entry_kind: str,
     row_number: int,
-    qml_line: str,
+    qml_text: str,
     status: str,
     status_text: str,
     editable: bool,
@@ -195,8 +237,12 @@ def _review_row(
 ) -> dict[str, Any]:
     references = matched_questions or []
     return {
+        "start_line": start_line,
+        "end_line": end_line,
+        "entry_kind": entry_kind,
+        "qml_text": qml_text,
         "row_number": row_number,
-        "qml_line": qml_line,
+        "qml_line": qml_text,
         "status": status,
         "status_text": status_text,
         "editable": editable,
@@ -227,8 +273,11 @@ def _classify_existing_and_relocation_rows(
     for row in parsed_rows:
         if row["issues"]:
             row["review_row"] = _review_row(
+                start_line=row["start_line"],
+                end_line=row["end_line"],
+                entry_kind=row["entry_kind"],
                 row_number=row["row_number"],
-                qml_line=row["qml_line"],
+                qml_text=row["qml_text"],
                 status="invalid",
                 status_text=f"Invalid QML: {'; '.join(row['issues'])}",
                 editable=True,
@@ -243,8 +292,11 @@ def _classify_existing_and_relocation_rows(
             references = [_existing_reference(match) for match in target_matches]
             if len(target_matches) > 1:
                 row["review_row"] = _review_row(
+                    start_line=row["start_line"],
+                    end_line=row["end_line"],
+                    entry_kind=row["entry_kind"],
                     row_number=row["row_number"],
-                    qml_line=row["qml_line"],
+                    qml_text=row["qml_text"],
                     status="conflict",
                     status_text="This prompt already matches multiple questions in the target leaf. Edit it to a unique prompt or remove the row.",
                     editable=True,
@@ -257,8 +309,11 @@ def _classify_existing_and_relocation_rows(
             match = target_matches[0]
             if payload["question_type"] != match["question_type"]:
                 row["review_row"] = _review_row(
+                    start_line=row["start_line"],
+                    end_line=row["end_line"],
+                    entry_kind=row["entry_kind"],
                     row_number=row["row_number"],
-                    qml_line=row["qml_line"],
+                    qml_text=row["qml_text"],
                     status="conflict",
                     status_text="This prompt already exists in the target leaf with a different question type. Edit it to a unique prompt or remove the row.",
                     editable=True,
@@ -273,8 +328,11 @@ def _classify_existing_and_relocation_rows(
                 continue
 
             row["review_row"] = _review_row(
+                start_line=row["start_line"],
+                end_line=row["end_line"],
+                entry_kind=row["entry_kind"],
                 row_number=row["row_number"],
-                qml_line=row["qml_line"],
+                qml_text=row["qml_text"],
                 status="duplicate",
                 status_text="This prompt already exists in the target leaf. Commit will revise the existing question in place unless you edit the row first.",
                 editable=True,
@@ -296,8 +354,11 @@ def _classify_existing_and_relocation_rows(
         references = [_existing_reference(match) for match in same_tree_matches]
         if len(same_tree_matches) > 1:
             row["review_row"] = _review_row(
+                start_line=row["start_line"],
+                end_line=row["end_line"],
+                entry_kind=row["entry_kind"],
                 row_number=row["row_number"],
-                qml_line=row["qml_line"],
+                qml_text=row["qml_text"],
                 status="conflict",
                 status_text="This prompt already matches multiple questions elsewhere in the same module tree. Edit it to a unique prompt or remove the row.",
                 editable=True,
@@ -311,8 +372,11 @@ def _classify_existing_and_relocation_rows(
         match = same_tree_matches[0]
         if payload["question_type"] != match["question_type"]:
             row["review_row"] = _review_row(
+                start_line=row["start_line"],
+                end_line=row["end_line"],
+                entry_kind=row["entry_kind"],
                 row_number=row["row_number"],
-                qml_line=row["qml_line"],
+                qml_text=row["qml_text"],
                 status="conflict",
                 status_text=f"This prompt already exists in {match['module_full_slug']} with a different question type. Edit it to a unique prompt or remove the row.",
                 editable=True,
@@ -325,8 +389,11 @@ def _classify_existing_and_relocation_rows(
 
         if _payload_matches_existing(payload, match):
             row["review_row"] = _review_row(
+                start_line=row["start_line"],
+                end_line=row["end_line"],
+                entry_kind=row["entry_kind"],
                 row_number=row["row_number"],
-                qml_line=row["qml_line"],
+                qml_text=row["qml_text"],
                 status="info",
                 status_text=f"Exact match already exists in {match['module_full_slug']}. Commit will move it to {context['module_full_slug']}.",
                 editable=False,
@@ -337,8 +404,11 @@ def _classify_existing_and_relocation_rows(
             )
         else:
             row["review_row"] = _review_row(
+                start_line=row["start_line"],
+                end_line=row["end_line"],
+                entry_kind=row["entry_kind"],
                 row_number=row["row_number"],
-                qml_line=row["qml_line"],
+                qml_text=row["qml_text"],
                 status="relocation",
                 status_text=f"This prompt already exists in {match['module_full_slug']}. Commit will move and revise that question in {context['module_full_slug']}.",
                 editable=True,
@@ -375,8 +445,11 @@ def _classify_same_upload_duplicates(parsed_rows: list[dict[str, Any]]) -> list[
                 row.pop("commit_action", None)
                 continue
             row["review_row"] = _review_row(
+                start_line=row["start_line"],
+                end_line=row["end_line"],
+                entry_kind=row["entry_kind"],
                 row_number=row["row_number"],
-                qml_line=row["qml_line"],
+                qml_text=row["qml_text"],
                 status="duplicate",
                 status_text=f"This row duplicates earlier upload row {leader['row_number']} with different answers. Edit it to a unique prompt or remove the row.",
                 editable=True,
@@ -400,7 +473,7 @@ def _validate_question_import_rows(
     parsed_rows: list[dict[str, Any]] = []
     for row in normalized_rows:
         row_number = row["row_number"]
-        qml_line = row["qml_line"]
+        qml_text = row["qml_text"]
         issues: list[str] = []
         inferred_type: str | None = None
         payload: dict[str, Any] | None = None
@@ -408,19 +481,23 @@ def _validate_question_import_rows(
         imported_answer_blocks: list[str] = []
         prompt_key: str | None = None
         try:
-            payload = parse_qml_line(line=qml_line, module_id=module_id, rank=row_number)
+            payload = parse_qml_line(line=qml_text, module_id=module_id, rank=row_number)
             draft = QuestionDraftIn(**payload)
             inferred_type = draft.question_type
             payload = draft.model_dump()
             type_config = serialize_type_config(draft)
-            imported_answer_blocks = answer_blocks(type_config)
+            imported_answer_blocks = [] if draft.question_type == "bundle" else answer_blocks(type_config)
             prompt_key = stored_prompt_key(draft.question_type, draft.prompt, type_config)
         except (QMLError, ValueError) as error:
             issues.append(str(error))
         parsed_rows.append(
             {
+                "start_line": row["start_line"],
+                "end_line": row["end_line"],
+                "entry_kind": row["entry_kind"],
                 "row_number": row_number,
-                "qml_line": qml_line,
+                "qml_text": qml_text,
+                "qml_line": qml_text,
                 "inferred_type": inferred_type,
                 "payload": payload,
                 "type_config": type_config,

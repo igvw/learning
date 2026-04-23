@@ -3,7 +3,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 
-type QuestionType = Literal["single_text", "multi_text", "ordered_multi", "inline_cloze", "computed_text"]
+type QuestionType = Literal["single_text", "multi_text", "ordered_multi", "inline_cloze", "bundle"]
 type PriorityMode = Literal["high", "mid", "low"]
 type QuestionImportReviewStatus = Literal["invalid", "duplicate", "relocation", "info", "conflict"]
 type UserRole = Literal["admin", "user"]
@@ -119,6 +119,7 @@ class PendingQuestionOut(BaseModel):
     rank: int
     accepted_answers: list[list[str]]
     segments: list[str]
+    bundle_qml: str | None = None
     admin_verified: bool = False
     moderation_status: ModerationStatus
     created_by_user_id: int | None = None
@@ -140,10 +141,12 @@ class QuestionRevisionProposalOut(BaseModel):
     current_question_type: QuestionType
     current_accepted_answers: list[list[str]]
     current_segments: list[str]
+    current_bundle_qml: str | None = None
     proposed_prompt: str
     proposed_question_type: QuestionType
     proposed_accepted_answers: list[list[str]]
     proposed_segments: list[str]
+    proposed_bundle_qml: str | None = None
 
 
 class ModerationQueueOut(BaseModel):
@@ -216,17 +219,42 @@ class SubmitAnswerOut(BaseModel):
     submitted_answer: list[str]
 
 
+class BundleVariantIn(BaseModel):
+    prompt_values: list[str] = Field(default_factory=list)
+    accepted_answers: list[str] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_values(self) -> "BundleVariantIn":
+        self.prompt_values = [value.strip() for value in self.prompt_values]
+        self.accepted_answers = [value.strip() for value in self.accepted_answers if value and value.strip()]
+        if not self.accepted_answers:
+            raise ValueError("Bundle variants need at least one accepted answer.")
+        return self
+
+
 class QuestionDraftIn(BaseModel):
     module_id: int
-    prompt: str = Field(min_length=1)
+    prompt: str = ""
     question_type: QuestionType
     rank: int = Field(default=1, ge=1)
     priority_mode: PriorityMode | None = None
-    accepted_answers: list[list[str]] = Field(min_length=1)
+    accepted_answers: list[list[str]] = Field(default_factory=list)
     segments: list[str] = Field(default_factory=list)
+    bundle_qml: str | None = None
+    bundle_variants: list[BundleVariantIn] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_shape(self) -> "QuestionDraftIn":
+        self.prompt = self.prompt.strip()
+        if self.question_type == "bundle":
+            if self.accepted_answers:
+                raise ValueError("bundle questions do not use accepted_answers directly.")
+            if self.segments:
+                raise ValueError("bundle questions do not use segments.")
+            if not (self.bundle_qml and self.bundle_qml.strip()) and not self.bundle_variants:
+                raise ValueError("bundle questions need bundle_qml or bundle_variants.")
+            return self
+
         cleaned_groups = []
         for group in self.accepted_answers:
             cleaned = [value.strip() for value in group if value and value.strip()]
@@ -235,7 +263,10 @@ class QuestionDraftIn(BaseModel):
             cleaned_groups.append(cleaned)
         self.accepted_answers = cleaned_groups
 
-        if self.question_type in {"single_text", "computed_text"}:
+        if not self.prompt:
+            raise ValueError("Prompt is required.")
+
+        if self.question_type == "single_text":
             if len(self.accepted_answers) != 1:
                 raise ValueError(f"{self.question_type} questions expect exactly one answer group.")
             if self.segments:
@@ -321,6 +352,7 @@ class QuestionRowOut(BaseModel):
     creator_display_name: str | None = None
     accepted_answers: list[list[str]]
     segments: list[str]
+    bundle_qml: str | None = None
     recent_incorrect_answers: list[dict[str, Any]] = Field(default_factory=list)
     schedule: QuestionScheduleOut
 
@@ -333,11 +365,49 @@ class StatsResponseOut(BaseModel):
 
 
 class QuestionImportRowIn(BaseModel):
-    row_number: int = Field(ge=1)
-    qml_line: str
+    start_line: int = Field(ge=1)
+    end_line: int = Field(ge=1)
+    entry_kind: Literal["plain", "bundle"] = "plain"
+    qml_text: str
+    row_number: int | None = Field(default=None, ge=1)
+    qml_line: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_legacy_shape(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        if "start_line" in data and "end_line" in data and "qml_text" in data:
+            return data
+        row_number = data.get("row_number")
+        qml_line = data.get("qml_line")
+        if row_number is None or qml_line is None:
+            return data
+        return {
+            "start_line": row_number,
+            "end_line": row_number,
+            "entry_kind": "plain",
+            "qml_text": qml_line,
+            "row_number": row_number,
+            "qml_line": qml_line,
+        }
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "QuestionImportRowIn":
+        if self.end_line < self.start_line:
+            raise ValueError("end_line must be greater than or equal to start_line.")
+        if not self.row_number:
+            self.row_number = self.start_line
+        if self.qml_line is None:
+            self.qml_line = self.qml_text
+        return self
 
 
 class QuestionImportRowOut(BaseModel):
+    start_line: int
+    end_line: int
+    entry_kind: Literal["plain", "bundle"]
+    qml_text: str
     row_number: int
     qml_line: str
 
@@ -365,11 +435,25 @@ class QuestionImportMatchedQuestionOut(BaseModel):
     question_id: int | None = None
     module_id: int | None = None
     module_full_slug: str
-    qml_line: str
+    qml_text: str
+    entry_kind: Literal["plain", "bundle"] = "plain"
+    start_line: int | None = None
+    end_line: int | None = None
+    qml_line: str | None = None
     answer_blocks: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def fill_alias(self) -> "QuestionImportMatchedQuestionOut":
+        if self.qml_line is None:
+            self.qml_line = self.qml_text
+        return self
 
 
 class QuestionImportReviewRowOut(BaseModel):
+    start_line: int
+    end_line: int
+    entry_kind: Literal["plain", "bundle"]
+    qml_text: str
     row_number: int
     qml_line: str
     status: QuestionImportReviewStatus

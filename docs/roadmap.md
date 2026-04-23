@@ -10,13 +10,13 @@ Product identity:
 
 Key roadmap conclusion:
 
-- the immediate next product step is the authoring transition: QML v2 bundles, deprecating math-style authoring, and giving regular users a smooth non-QML add flow
+- the immediate next product step is the authoring transition: explicit QML revised top-level bundle blocks, removing `computed_text`, and giving regular users a smooth non-QML add flow
 - the likely beta differentiator after that is still a more performant data model and database design that unlocks faster authoring, richer study modes, portability, and later experimentation
 
 ## Near-Term Focus
 
-- define QML v2 around bundles rather than math-style computed prompts
-- deprecate `computed_text` as the long-term primary authoring path
+- land QML revised as explicit top-level `{ ... }` bundle blocks while keeping plain one-line QML for non-bundle questions
+- remove `computed_text` instead of carrying it forward as a long-term authoring path
 - make the stats-page `Add` flow smooth for regular users now that QML is admin-only
 - keep admin QML tooling available while the structured regular-user authoring flow catches up
 
@@ -24,7 +24,7 @@ Key roadmap conclusion:
 
 - keep the private-hosting auth/session model production-safe
 - keep private-hosting deployment defaults strong enough for self-hosted use
-- keep a follow-up hardening pass for user-authored text and parsing paths after QML v2 settles
+- keep a follow-up hardening pass for user-authored text and parsing paths after QML revised settles
 - future backup/restore work is automation and polish, not basic capability, because a manual PostgreSQL migration and backup path is already documented
 
 ## Beta Release Focus
@@ -32,14 +32,14 @@ Key roadmap conclusion:
 ### Beta pillar 1: Study experience
 
 - complete the authoring transition before deeper study-mode expansion
-  - QML v2 bundles should be stable enough that regular-user creation does not depend on raw QML
+  - QML revised bundles should be stable enough that regular-user creation does not depend on raw QML
 - complete revise mode
   - full corpus in scope
   - sorted by review value rather than constrained by the normal serving algorithm
   - mastery and very strong items can naturally fall later in the order
 - mobile-friendly study modes
   - especially multiple choice
-  - authored distractors and prior incorrect answers can both become distractor sources
+  - better distractor sourcing can come later, for example from prior incorrect answers
 
 ### Beta pillar 2: Performance and architecture
 
@@ -54,14 +54,12 @@ Key roadmap conclusion:
 
 ### Beta pillar 3: Authoring and presentation
 
-- QML v2
-  - move away from inline math-style computed questions toward question bundles
-  - bundles should allow curated tested variants without relying on inline expression syntax
-  - this may imply multiline bundle blocks in QML, or a dedicated bundle section inside QML/import flows
-  - exact syntax and storage model remain intentionally undecided
-  - bundle direction matters because variants may need to stay logically grouped for study behavior
-  - ghost text as lightweight authoring metadata
-  - distractors for future multiple-choice support
+- QML revised
+  - use explicit top-level `{ ... }` bundle blocks alongside plain one-line QML
+  - remove `computed_text` and replace it with bundle-backed explicit variants
+  - bundles should stay one learning item with shared history while each quiz serving resolves one concrete variant
+  - first implementation priority is import/export, storage, and runtime before regular-user authoring UI
+  - see [QML Revised](qml-revised.md) for the current design/planning direction
 - regular-user question creation should become structured and non-QML-first
 - theme presets, color schemes, and background patterns
 - better automated backup/restore and import/export UX for the full database

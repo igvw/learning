@@ -9,10 +9,52 @@ export type AnswerChoice = {
 };
 
 export function parsePendingImportRows(value: string): QuestionImportRowPayload[] {
-  return value
-    .split(/\r?\n/)
-    .map((qmlLine, index) => ({ row_number: index + 1, qml_line: qmlLine }))
-    .filter((row) => row.qml_line.trim());
+  const lines = value.split(/\r?\n/);
+  const rows: QuestionImportRowPayload[] = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const rawLine = lines[index];
+    if (!rawLine.trim()) {
+      index += 1;
+      continue;
+    }
+
+    const startLine = index + 1;
+    if (rawLine.trimStart().startsWith('{')) {
+      const entryLines = [rawLine];
+      index += 1;
+      while (index < lines.length) {
+        entryLines.push(lines[index]);
+        if (lines[index].trimEnd().endsWith('}')) {
+          index += 1;
+          break;
+        }
+        index += 1;
+      }
+      rows.push({
+        start_line: startLine,
+        end_line: startLine + entryLines.length - 1,
+        entry_kind: 'bundle',
+        qml_text: entryLines.join('\n'),
+        row_number: startLine,
+        qml_line: entryLines.join('\n')
+      });
+      continue;
+    }
+
+    rows.push({
+      start_line: startLine,
+      end_line: startLine,
+      entry_kind: 'plain',
+      qml_text: rawLine,
+      row_number: startLine,
+      qml_line: rawLine
+    });
+    index += 1;
+  }
+
+  return rows;
 }
 
 export function effectiveImportRowsFromResult(result: QuestionImportResult): QuestionImportRowPayload[] {
@@ -27,6 +69,9 @@ export function reviewRowsForPendingRows(
 }
 
 function referenceAnswerBlocks(row: QuestionImportReviewRow): string[] {
+  if (row.entry_kind === 'bundle') {
+    return [];
+  }
   if (row.current_answer_blocks.length > 0) {
     return row.current_answer_blocks;
   }
@@ -81,6 +126,9 @@ function qmlAnswerGroups(qmlLine: string): string[][] {
 }
 
 export function answerChoicesByBlock(row: QuestionImportReviewRow, qmlLine: string = row.qml_line): AnswerChoice[][] {
+  if (row.entry_kind === 'bundle') {
+    return [];
+  }
   const currentGroups = answerGroupsFromBlocks(referenceAnswerBlocks(row));
   const newGroups = answerGroupsFromBlocks(row.imported_answer_blocks);
   const qmlGroups = qmlAnswerGroups(qmlLine);

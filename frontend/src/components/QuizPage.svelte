@@ -22,7 +22,7 @@
   let reviewMode = false;
 
   function slotCount(item: QuizItem): number {
-    if (item.question_type === 'single_text' || item.question_type === 'computed_text') {
+    if (item.question_type === 'single_text') {
       return 1;
     }
     if (item.question_type === 'multi_text' || item.question_type === 'ordered_multi') {
@@ -184,7 +184,7 @@
     }
 
     event.preventDefault();
-    if (item.question_type === 'single_text' || item.question_type === 'computed_text') {
+    if (item.question_type === 'single_text') {
       handleSubmit(item);
       return;
     }
@@ -335,7 +335,7 @@
                 {/if}
               </div>
 
-              {#if item.question_type === 'single_text' || item.question_type === 'computed_text'}
+              {#if item.question_type === 'single_text'}
                 <input
                   type="text"
                   class="answer-input"

@@ -158,6 +158,7 @@ class PostgresBackendTestCase(unittest.TestCase):
         question_type: str = "single_text",
         rank: int = 1,
         segments: list[str] | None = None,
+        bundle_qml: str | None = None,
     ) -> dict[str, object]:
         with get_connection(self.database_url) as connection:
             return create_question(
@@ -169,6 +170,7 @@ class PostgresBackendTestCase(unittest.TestCase):
                     rank=rank,
                     accepted_answers=accepted_answers,
                     segments=segments or [],
+                    bundle_qml=bundle_qml,
                 ),
                 actor=None,
             )

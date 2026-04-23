@@ -93,6 +93,29 @@ class QuizApiTests(PostgresBackendTestCase):
         self.assertEqual(stats_payload["questions"][0]["attempts"], 1)
         self.assertEqual(stats_payload["questions"][0]["correct_percentage"], 1.0)
 
+    def test_bundle_questions_resolve_to_single_text_quiz_items(self) -> None:
+        pharmacy = self.create_module_record("Pharmacy")
+        calculations = self.create_module_record("Calculations", pharmacy["id"])
+        question_id = self.create_question_record(
+            calculations["id"],
+            "A patient needs {} mg. The solution has {} mg/ml. How much is needed? []",
+            [],
+            question_type="bundle",
+            bundle_qml="{A patient needs {} mg. The solution has {} mg/ml. How much is needed? []\n {500} {40} [12.5 ml]\n {600} {30} [20 ml]}",
+        )["question_id"]
+
+        user = self.create_user("alice-bundle", "Alice Bundle")
+        session = self.start_quiz_session(user["id"], calculations["id"], 1)
+        item = session["items"][0]
+
+        self.assertEqual(item["question_id"], question_id)
+        self.assertEqual(item["question_type"], "single_text")
+        self.assertTrue(item["prompt"].startswith("A patient needs "))
+
+        answer = "20 ml" if "600 mg" in item["prompt"] else "12.5 ml"
+        submit_payload = self.submit_quiz_item(user["id"], session["id"], item["id"], [answer])
+        self.assertIn(submit_payload["default_answers"][0], {"12.5 ml", "20 ml"})
+
     def test_quiz_submission_returns_default_and_alternative_feedback(self) -> None:
         norwegian = self.create_module_record("Norwegian")
         weekdays = self.create_module_record("Weekdays", norwegian["id"])

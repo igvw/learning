@@ -1,12 +1,10 @@
-from __future__ import annotations
-
 import random
 import unittest
 from datetime import timedelta
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
-from backend.app.qml import parse_qml_line, render_prompt_and_answers
+from backend.app.qml import parse_qml_line
 from backend.app.service.text import title_from_slug
 from backend.app.service.schedule import (
     _bucketed_question_selection,
@@ -104,35 +102,24 @@ class SchedulerUnitTests(unittest.TestCase):
         self.assertEqual(title_from_slug("animals_to_english"), "Animals To English")
         self.assertEqual(title_from_slug("iv_med_calc"), "Iv Med Calc")
 
-    def test_qml_single_and_computed_questions_parse(self) -> None:
+    def test_qml_single_and_bundle_questions_parse(self) -> None:
         single = parse_qml_line(
             line="What is the capital of Norway? [oslo | christiania]",
             module_id=1,
             rank=1,
         )
-        computed = parse_qml_line(
-            line="Patient needs $m=[1-10]*100$ mg. Solution strength is $v=[1-10]*10$ mg/ml. How much is needed? [$m/v$ ml]",
+        bundle = parse_qml_line(
+            line="{Patient needs {} mg. Solution strength is {} mg/ml. How much is needed? []\n {500} {40} [12.5 ml]}",
             module_id=1,
             rank=2,
         )
 
         self.assertEqual(single["question_type"], "single_text")
         self.assertEqual(single["accepted_answers"], [["oslo", "christiania"]])
-        self.assertEqual(computed["question_type"], "computed_text")
-        self.assertEqual(computed["accepted_answers"], [["$m/v$ ml"]])
-
-    def test_computed_prompt_and_answers_resolve_once(self) -> None:
-        prompt, answers = render_prompt_and_answers(
-            prompt="Patient needs $m=[5-5]*100$ mg. Solution strength is $v=[4-4]*10$ mg/ml. How much is needed?",
-            accepted_answers=[["$m/v$ ml"]],
-            rng=random.Random(1),
-        )
-
-        self.assertEqual(
-            prompt,
-            "Patient needs 500 mg. Solution strength is 40 mg/ml. How much is needed?",
-        )
-        self.assertEqual(answers, [["12.5 ml"]])
+        self.assertEqual(bundle["question_type"], "bundle")
+        self.assertEqual(bundle["prompt"], "Patient needs {} mg. Solution strength is {} mg/ml. How much is needed? []")
+        self.assertEqual(bundle["bundle_variants"][0]["prompt_values"], ["500", "40"])
+        self.assertEqual(bundle["bundle_variants"][0]["accepted_answers"], ["12.5 ml"])
 
     def test_quiz_order_is_randomized_after_selection(self) -> None:
         shuffled = _randomize_quiz_order(

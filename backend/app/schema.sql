@@ -67,6 +67,11 @@ CREATE INDEX IF NOT EXISTS idx_questions_prompt_key ON questions(prompt_key);
 CREATE INDEX IF NOT EXISTS idx_questions_created_by_status
     ON questions(created_by_user_id, admin_verified, moderation_status);
 
+CREATE TABLE IF NOT EXISTS question_bundles (
+    question_id BIGINT PRIMARY KEY REFERENCES questions(id) ON DELETE CASCADE,
+    variants_json TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS user_review_flags (
     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     question_id BIGINT NOT NULL REFERENCES questions(id) ON DELETE CASCADE,

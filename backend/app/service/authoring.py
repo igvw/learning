@@ -7,6 +7,14 @@ from ..database import DatabaseConnection, execute_insert_returning_id, utc_now
 from ..qml import parse_qml_line, qml_lines_from_text
 from ..schemas import QuestionDraftIn
 from .auth import Actor
+from .bundles import (
+    bundle_snapshot_type_config,
+    bundle_summary,
+    delete_question_bundle,
+    normalize_bundle_payload,
+    question_bundle_variants_by_id,
+    upsert_question_bundle,
+)
 from .catalog import (
     ensure_leaf_module,
     ensure_module_can_accept_children,
@@ -25,6 +33,33 @@ def _append_rank(connection: DatabaseConnection, module_id: int) -> int:
         (module_id,),
     ).fetchone()
     return int(row["max_rank"]) + 1
+
+
+def _normalized_question_storage(payload: QuestionDraftIn) -> tuple[str, dict[str, Any], list[dict[str, Any]] | None]:
+    if payload.question_type == "bundle":
+        prompt, variants, _ = normalize_bundle_payload(payload)
+        return prompt, bundle_summary(prompt, variants), variants
+    return payload.prompt.strip(), serialize_type_config(payload), None
+
+
+def _proposal_type_config(payload: QuestionDraftIn) -> tuple[str, dict[str, Any], list[dict[str, Any]] | None]:
+    if payload.question_type == "bundle":
+        prompt, variants, _ = normalize_bundle_payload(payload)
+        return prompt, bundle_snapshot_type_config(prompt, variants), variants
+    return payload.prompt.strip(), serialize_type_config(payload), None
+
+
+def _store_bundle_definition(
+    connection: DatabaseConnection,
+    *,
+    question_id: int,
+    question_type: str,
+    bundle_variants: list[dict[str, Any]] | None,
+) -> None:
+    if question_type == "bundle":
+        upsert_question_bundle(connection, question_id=question_id, variants=bundle_variants or [])
+        return
+    delete_question_bundle(connection, question_id=question_id)
 
 
 def ensure_unique_question_prompt(
@@ -64,7 +99,7 @@ def _insert_question_record(
     user_id = actor.user_id if actor and actor.user_id is not None else None
     is_verified = actor is None or actor.role == "admin"
     moderation_status = "verified" if is_verified else "pending"
-    type_config = serialize_type_config(payload)
+    prompt, type_config, bundle_variants = _normalized_question_storage(payload)
     question_id = execute_insert_returning_id(
         connection,
         """
@@ -84,14 +119,20 @@ def _insert_question_record(
         (
             payload.module_id,
             payload.question_type,
-            payload.prompt.strip(),
-            stored_prompt_key(payload.question_type, payload.prompt, type_config),
+            prompt,
+            stored_prompt_key(payload.question_type, prompt, type_config),
             rank,
             json_dumps(type_config),
             user_id,
             1 if is_verified else 0,
             moderation_status,
         ),
+    )
+    _store_bundle_definition(
+        connection,
+        question_id=question_id,
+        question_type=payload.question_type,
+        bundle_variants=bundle_variants,
     )
     return {
         "question_id": question_id,
@@ -109,12 +150,12 @@ def create_question_append_only(
     actor: Actor | None = None,
 ) -> dict[str, Any]:
     ensure_leaf_module(connection, payload.module_id, actor=actor)
-    type_config = serialize_type_config(payload)
+    prompt, type_config, _ = _normalized_question_storage(payload)
     ensure_unique_question_prompt(
         connection,
         module_id=payload.module_id,
         question_type=payload.question_type,
-        prompt=payload.prompt.strip(),
+        prompt=prompt,
         type_config=type_config,
         actor=actor,
     )
@@ -123,12 +164,12 @@ def create_question_append_only(
 
 def create_question(connection: DatabaseConnection, payload: QuestionDraftIn, *, actor: Actor | None = None) -> dict[str, Any]:
     ensure_leaf_module(connection, payload.module_id, actor=actor)
-    type_config = serialize_type_config(payload)
+    prompt, type_config, _ = _normalized_question_storage(payload)
     ensure_unique_question_prompt(
         connection,
         module_id=payload.module_id,
         question_type=payload.question_type,
-        prompt=payload.prompt.strip(),
+        prompt=prompt,
         type_config=type_config,
         actor=actor,
     )
@@ -145,10 +186,12 @@ def _question_row(connection: DatabaseConnection, question_id: int) -> Any:
             question_type,
             prompt,
             type_config_json,
+            bundles.variants_json,
             created_by_user_id,
             admin_verified,
             moderation_status
         FROM questions
+        LEFT JOIN question_bundles AS bundles ON bundles.question_id = questions.id
         WHERE id = ?
         """,
         (question_id,),
@@ -171,12 +214,12 @@ def _apply_verified_question_revision(
 ) -> None:
     current = _require_question_row(connection, question_id)
     ensure_leaf_module(connection, payload.module_id)
-    type_config = serialize_type_config(payload)
+    prompt, type_config, bundle_variants = _normalized_question_storage(payload)
     ensure_unique_question_prompt(
         connection,
         module_id=payload.module_id,
         question_type=payload.question_type,
-        prompt=payload.prompt.strip(),
+        prompt=prompt,
         type_config=type_config,
         exclude_question_id=question_id,
     )
@@ -204,12 +247,18 @@ def _apply_verified_question_revision(
         (
             payload.module_id,
             payload.question_type,
-            payload.prompt.strip(),
-            stored_prompt_key(payload.question_type, payload.prompt, type_config),
+            prompt,
+            stored_prompt_key(payload.question_type, prompt, type_config),
             target_rank,
             json_dumps(type_config),
             question_id,
         ),
+    )
+    _store_bundle_definition(
+        connection,
+        question_id=question_id,
+        question_type=payload.question_type,
+        bundle_variants=bundle_variants,
     )
     connection.execute("DELETE FROM user_review_flags WHERE question_id = ?", (question_id,))
 
@@ -217,12 +266,12 @@ def _apply_verified_question_revision(
 def apply_import_revision(connection: DatabaseConnection, *, question_id: int, payload: QuestionDraftIn) -> None:
     _require_question_row(connection, question_id)
     ensure_leaf_module(connection, payload.module_id)
-    type_config = serialize_type_config(payload)
+    prompt, type_config, bundle_variants = _normalized_question_storage(payload)
     ensure_unique_question_prompt(
         connection,
         module_id=payload.module_id,
         question_type=payload.question_type,
-        prompt=payload.prompt.strip(),
+        prompt=prompt,
         type_config=type_config,
         exclude_question_id=question_id,
     )
@@ -241,11 +290,17 @@ def apply_import_revision(connection: DatabaseConnection, *, question_id: int, p
         """,
         (
             payload.question_type,
-            payload.prompt.strip(),
-            stored_prompt_key(payload.question_type, payload.prompt, type_config),
+            prompt,
+            stored_prompt_key(payload.question_type, prompt, type_config),
             json_dumps(type_config),
             question_id,
         ),
+    )
+    _store_bundle_definition(
+        connection,
+        question_id=question_id,
+        question_type=payload.question_type,
+        bundle_variants=bundle_variants,
     )
     connection.execute("DELETE FROM user_review_flags WHERE question_id = ?", (question_id,))
 
@@ -258,12 +313,12 @@ def relocate_question_for_import(
 ) -> int:
     current = _require_question_row(connection, question_id)
     ensure_leaf_module(connection, payload.module_id)
-    type_config = serialize_type_config(payload)
+    prompt, type_config, bundle_variants = _normalized_question_storage(payload)
     ensure_unique_question_prompt(
         connection,
         module_id=payload.module_id,
         question_type=payload.question_type,
-        prompt=payload.prompt.strip(),
+        prompt=prompt,
         type_config=type_config,
         exclude_question_id=question_id,
     )
@@ -286,12 +341,18 @@ def relocate_question_for_import(
         (
             payload.module_id,
             payload.question_type,
-            payload.prompt.strip(),
-            stored_prompt_key(payload.question_type, payload.prompt, type_config),
+            prompt,
+            stored_prompt_key(payload.question_type, prompt, type_config),
             target_rank,
             json_dumps(type_config),
             question_id,
         ),
+    )
+    _store_bundle_definition(
+        connection,
+        question_id=question_id,
+        question_type=payload.question_type,
+        bundle_variants=bundle_variants,
     )
     connection.execute("DELETE FROM user_review_flags WHERE question_id = ?", (question_id,))
     return int(current["module_id"])
@@ -304,12 +365,12 @@ def _proposal_payload(
     payload: QuestionDraftIn,
     delete_requested: bool,
 ) -> tuple[Any, ...]:
-    type_config = serialize_type_config(payload)
+    prompt, type_config, _ = _proposal_type_config(payload)
     now = utc_now()
     return (
         question_id,
         proposer_user_id,
-        payload.prompt.strip(),
+        prompt,
         payload.question_type,
         json_dumps(type_config),
         1 if delete_requested else 0,
@@ -363,6 +424,7 @@ def _upsert_question_revision_proposal(
         )
     else:
         proposal_id = int(existing["id"])
+        prompt, type_config, _ = _proposal_type_config(payload)
         connection.execute(
             """
             UPDATE question_revision_proposals
@@ -379,9 +441,9 @@ def _upsert_question_revision_proposal(
             WHERE id = ?
             """,
             (
-                payload.prompt.strip(),
+                prompt,
                 payload.question_type,
-                json_dumps(serialize_type_config(payload)),
+                json_dumps(type_config),
                 1 if delete_requested else 0,
                 utc_now(),
                 proposal_id,
@@ -433,12 +495,12 @@ def revise_question(
         raise ValidationError("You can only revise your own pending questions.")
 
     ensure_leaf_module(connection, payload.module_id, actor=actor)
-    type_config = serialize_type_config(payload)
+    prompt, type_config, bundle_variants = _normalized_question_storage(payload)
     ensure_unique_question_prompt(
         connection,
         module_id=payload.module_id,
         question_type=payload.question_type,
-        prompt=payload.prompt.strip(),
+        prompt=prompt,
         type_config=type_config,
         actor=actor,
         exclude_question_id=question_id,
@@ -463,12 +525,18 @@ def revise_question(
         (
             payload.module_id,
             payload.question_type,
-            payload.prompt.strip(),
-            stored_prompt_key(payload.question_type, payload.prompt, type_config),
+            prompt,
+            stored_prompt_key(payload.question_type, prompt, type_config),
             target_rank,
             json_dumps(type_config),
             question_id,
         ),
+    )
+    _store_bundle_definition(
+        connection,
+        question_id=question_id,
+        question_type=payload.question_type,
+        bundle_variants=bundle_variants,
     )
     return {
         "question_id": question_id,
@@ -503,14 +571,27 @@ def delete_question(connection: DatabaseConnection, question_id: int, *, actor: 
             "delete_requested": False,
         }
 
-    proposal_payload = QuestionDraftIn(
-        module_id=int(current["module_id"]),
-        prompt=current["prompt"],
-        question_type=current["question_type"],
-        rank=int(current["rank"]),
-        accepted_answers=json.loads(current["type_config_json"]).get("accepted_answers", []),
-        segments=json.loads(current["type_config_json"]).get("segments", []),
-    )
+    current_type_config = json.loads(current["type_config_json"])
+    if current["question_type"] == "bundle":
+        proposal_payload = QuestionDraftIn(
+            module_id=int(current["module_id"]),
+            prompt=current["prompt"],
+            question_type="bundle",
+            rank=int(current["rank"]),
+            bundle_variants=question_bundle_variants_by_id(
+                connection,
+                question_ids=[int(question_id)],
+            ).get(int(question_id), []),
+        )
+    else:
+        proposal_payload = QuestionDraftIn(
+            module_id=int(current["module_id"]),
+            prompt=current["prompt"],
+            question_type=current["question_type"],
+            rank=int(current["rank"]),
+            accepted_answers=current_type_config.get("accepted_answers", []),
+            segments=current_type_config.get("segments", []),
+        )
     proposal = _upsert_question_revision_proposal(
         connection,
         question_id=question_id,

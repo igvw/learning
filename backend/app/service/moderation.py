@@ -9,6 +9,7 @@ from .authoring import (
     delete_question_record,
     ensure_unique_question_prompt,
 )
+from .bundles import bundle_qml_from_row, bundle_qml_from_type_config
 from .catalog import ensure_unique_module_slug
 from .errors import NotFoundError, ValidationError
 from .text import title_from_slug
@@ -67,6 +68,7 @@ def _pending_question_rows(connection: DatabaseConnection, *, creator_user_id: i
             questions.question_type,
             questions.rank,
             questions.type_config_json,
+            bundles.variants_json,
             questions.admin_verified,
             questions.moderation_status,
             questions.created_by_user_id,
@@ -74,6 +76,7 @@ def _pending_question_rows(connection: DatabaseConnection, *, creator_user_id: i
             creators.display_name AS creator_display_name
         FROM questions
         JOIN modules ON modules.id = questions.module_id
+        LEFT JOIN question_bundles AS bundles ON bundles.question_id = questions.id
         LEFT JOIN users AS creators ON creators.id = questions.created_by_user_id
         {where_sql}
         ORDER BY modules.full_slug ASC, questions.rank ASC, questions.id ASC
@@ -105,10 +108,12 @@ def _proposal_rows(connection: DatabaseConnection, *, proposer_user_id: int | No
             questions.prompt AS current_prompt,
             questions.question_type AS current_question_type,
             questions.type_config_json AS current_type_config_json,
+            bundles.variants_json AS current_variants_json,
             proposers.display_name AS proposer_display_name
         FROM question_revision_proposals AS proposals
         JOIN questions ON questions.id = proposals.question_id
         JOIN modules ON modules.id = questions.module_id
+        LEFT JOIN question_bundles AS bundles ON bundles.question_id = questions.id
         LEFT JOIN users AS proposers ON proposers.id = proposals.proposer_user_id
         {where_sql}
         ORDER BY proposals.updated_at DESC, proposals.id DESC
@@ -134,6 +139,7 @@ def _module_payload(row: Any) -> dict[str, Any]:
 
 def _question_payload(row: Any) -> dict[str, Any]:
     type_config = json.loads(row["type_config_json"])
+    bundle_qml = bundle_qml_from_row(row["prompt"], row["variants_json"])
     return {
         "question_id": int(row["question_id"]),
         "module_id": int(row["module_id"]),
@@ -143,6 +149,7 @@ def _question_payload(row: Any) -> dict[str, Any]:
         "rank": int(row["rank"]),
         "accepted_answers": type_config.get("accepted_answers", []),
         "segments": type_config.get("segments", []),
+        "bundle_qml": bundle_qml,
         "admin_verified": bool(row["admin_verified"]),
         "moderation_status": row["moderation_status"],
         "created_by_user_id": row["created_by_user_id"],
@@ -154,6 +161,8 @@ def _question_payload(row: Any) -> dict[str, Any]:
 def _proposal_payload(row: Any) -> dict[str, Any]:
     current_type_config = json.loads(row["current_type_config_json"])
     proposed_type_config = json.loads(row["proposed_type_config_json"])
+    current_bundle_qml = bundle_qml_from_row(row["current_prompt"], row["current_variants_json"])
+    proposed_bundle_qml = bundle_qml_from_type_config(row["proposed_prompt"], proposed_type_config)
     return {
         "proposal_id": int(row["proposal_id"]),
         "question_id": int(row["question_id"]),
@@ -168,10 +177,12 @@ def _proposal_payload(row: Any) -> dict[str, Any]:
         "current_question_type": row["current_question_type"],
         "current_accepted_answers": current_type_config.get("accepted_answers", []),
         "current_segments": current_type_config.get("segments", []),
+        "current_bundle_qml": current_bundle_qml,
         "proposed_prompt": row["proposed_prompt"],
         "proposed_question_type": row["proposed_question_type"],
         "proposed_accepted_answers": proposed_type_config.get("accepted_answers", []),
         "proposed_segments": proposed_type_config.get("segments", []),
+        "proposed_bundle_qml": proposed_bundle_qml,
     }
 
 
@@ -365,6 +376,7 @@ def review_question_submission(
                 questions.question_type,
                 questions.rank,
                 questions.type_config_json,
+                bundles.variants_json,
                 questions.admin_verified,
                 questions.moderation_status,
                 questions.created_by_user_id,
@@ -372,6 +384,7 @@ def review_question_submission(
                 creators.display_name AS creator_display_name
             FROM questions
             JOIN modules ON modules.id = questions.module_id
+            LEFT JOIN question_bundles AS bundles ON bundles.question_id = questions.id
             LEFT JOIN users AS creators ON creators.id = questions.created_by_user_id
         ) AS question_rows
         WHERE question_id = ?
@@ -431,6 +444,7 @@ def review_question_submission(
             questions.question_type,
             questions.rank,
             questions.type_config_json,
+            bundles.variants_json,
             questions.admin_verified,
             questions.moderation_status,
             questions.created_by_user_id,
@@ -438,6 +452,7 @@ def review_question_submission(
             creators.display_name AS creator_display_name
         FROM questions
         JOIN modules ON modules.id = questions.module_id
+        LEFT JOIN question_bundles AS bundles ON bundles.question_id = questions.id
         LEFT JOIN users AS creators ON creators.id = questions.created_by_user_id
         WHERE questions.id = ?
         """,
@@ -472,12 +487,14 @@ def review_question_revision(
             questions.prompt AS current_prompt,
             questions.question_type AS current_question_type,
             questions.type_config_json AS current_type_config_json,
+            bundles.variants_json AS current_variants_json,
             modules.full_slug AS module_full_slug,
             proposers.display_name AS proposer_display_name,
             proposals.admin_review_note
         FROM question_revision_proposals AS proposals
         JOIN questions ON questions.id = proposals.question_id
         JOIN modules ON modules.id = questions.module_id
+        LEFT JOIN question_bundles AS bundles ON bundles.question_id = questions.id
         LEFT JOIN users AS proposers ON proposers.id = proposals.proposer_user_id
         WHERE proposals.id = ?
         """,
@@ -493,14 +510,19 @@ def review_question_revision(
 
     if action == "approve":
         if edited_revision is not None:
-            payload = QuestionDraftIn(
-                module_id=int(row["module_id"]),
-                prompt=edited_revision.prompt,
-                question_type=edited_revision.question_type,
-                rank=int(row["rank"]),
-                accepted_answers=edited_revision.accepted_answers,
-                segments=edited_revision.segments,
-            )
+            payload_kwargs: dict[str, Any] = {
+                "module_id": int(row["module_id"]),
+                "prompt": edited_revision.prompt,
+                "question_type": edited_revision.question_type,
+                "rank": int(row["rank"]),
+            }
+            if edited_revision.question_type == "bundle":
+                payload_kwargs["bundle_qml"] = edited_revision.bundle_qml
+                payload_kwargs["bundle_variants"] = edited_revision.bundle_variants
+            else:
+                payload_kwargs["accepted_answers"] = edited_revision.accepted_answers
+                payload_kwargs["segments"] = edited_revision.segments
+            payload = QuestionDraftIn(**payload_kwargs)
             _apply_verified_question_revision(
                 connection,
                 question_id=int(row["question_id"]),
@@ -511,17 +533,21 @@ def review_question_revision(
             delete_question_record(connection, int(row["question_id"]))
         else:
             proposed_type_config = json.loads(row["proposed_type_config_json"])
+            payload_kwargs = {
+                "module_id": int(row["module_id"]),
+                "prompt": row["proposed_prompt"],
+                "question_type": row["proposed_question_type"],
+                "rank": int(row["rank"]),
+            }
+            if row["proposed_question_type"] == "bundle":
+                payload_kwargs["bundle_qml"] = bundle_qml_from_type_config(row["proposed_prompt"], proposed_type_config)
+            else:
+                payload_kwargs["accepted_answers"] = proposed_type_config.get("accepted_answers", [])
+                payload_kwargs["segments"] = proposed_type_config.get("segments", [])
             _apply_verified_question_revision(
                 connection,
                 question_id=int(row["question_id"]),
-                payload=QuestionDraftIn(
-                    module_id=int(row["module_id"]),
-                    prompt=row["proposed_prompt"],
-                    question_type=row["proposed_question_type"],
-                    rank=int(row["rank"]),
-                    accepted_answers=proposed_type_config.get("accepted_answers", []),
-                    segments=proposed_type_config.get("segments", []),
-                ),
+                payload=QuestionDraftIn(**payload_kwargs),
                 reset_stats=bool(reset_stats),
             )
         connection.execute(
@@ -567,10 +593,12 @@ def review_question_revision(
             questions.prompt AS current_prompt,
             questions.question_type AS current_question_type,
             questions.type_config_json AS current_type_config_json,
+            bundles.variants_json AS current_variants_json,
             proposers.display_name AS proposer_display_name
         FROM question_revision_proposals AS proposals
         JOIN questions ON questions.id = proposals.question_id
         JOIN modules ON modules.id = questions.module_id
+        LEFT JOIN question_bundles AS bundles ON bundles.question_id = questions.id
         LEFT JOIN users AS proposers ON proposers.id = proposals.proposer_user_id
         WHERE proposals.id = ?
         """,

@@ -10,7 +10,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 
-CURRENT_SCHEMA_VERSION = 8
+CURRENT_SCHEMA_VERSION = 9
 SCHEMA_VERSION_TABLE = "app_schema_version"
 SCHEMA_SQL = Path(__file__).with_name("schema.sql").read_text()
 
@@ -160,7 +160,7 @@ def initialize_database(database_url: str) -> None:
 
         if existing_tables and current_version == 0:
             raise RuntimeError("Existing PostgreSQL database has no schema version. Refusing to mutate it automatically.")
-        if current_version not in {0, 1, 2, 3, 4, 5, 6, 7, CURRENT_SCHEMA_VERSION}:
+        if current_version not in {0, 1, 2, 3, 4, 5, 6, 7, 8, CURRENT_SCHEMA_VERSION}:
             raise RuntimeError(f"Unsupported PostgreSQL schema version {current_version}.")
 
         if current_version == 0:
@@ -286,6 +286,17 @@ def initialize_database(database_url: str) -> None:
             connection.execute("ALTER TABLE questions ALTER COLUMN prompt_key SET NOT NULL")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_questions_module_prompt_key ON questions(module_id, prompt_key)")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_questions_prompt_key ON questions(prompt_key)")
+        if current_version in {1, 2, 3, 4, 5, 6, 7, 8}:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS question_bundles (
+                    question_id BIGINT PRIMARY KEY REFERENCES questions(id) ON DELETE CASCADE,
+                    variants_json TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute("DELETE FROM question_revision_proposals WHERE question_type = 'computed_text'")
+            connection.execute("DELETE FROM questions WHERE question_type = 'computed_text'")
         if current_version != 0:
             connection.executescript(SCHEMA_SQL)
         _set_schema_version(connection, CURRENT_SCHEMA_VERSION)

@@ -4,6 +4,7 @@ from typing import Any
 
 from ..database import DatabaseConnection, execute_insert_returning_id, utc_now
 from .auth import Actor
+from .bundles import resolved_bundle_question_runtime
 from .catalog import ensure_user_exists, get_scope_module_ids
 from .errors import NotFoundError, ValidationError
 from .questions import accepted_answer_groups, canonical_answers, default_answers, public_type_config, resolved_runtime, score_possible
@@ -82,12 +83,21 @@ def create_quiz_session(
 
     items: list[dict[str, Any]] = []
     for index, row in enumerate(chosen_rows, start=1):
-        resolved_prompt, resolved_type_config = resolved_runtime(
-            row["question_type"],
-            row["prompt"],
-            row["type_config"],
-            rng=rng,
-        )
+        runtime_question_type = row["question_type"]
+        if row["question_type"] == "bundle":
+            resolved_prompt, resolved_type_config = resolved_bundle_question_runtime(
+                prompt=row["prompt"],
+                variants_json=row.get("bundle_variants_json"),
+                rng=rng or random.Random(),
+            )
+            runtime_question_type = "single_text"
+        else:
+            resolved_prompt, resolved_type_config = resolved_runtime(
+                row["question_type"],
+                row["prompt"],
+                row["type_config"],
+                rng=rng,
+            )
         connection.execute(
             """
             INSERT INTO quiz_session_items (
@@ -105,7 +115,7 @@ def create_quiz_session(
                 row["question_id"],
                 score_possible(resolved_type_config),
                 resolved_prompt,
-                json_dumps({**resolved_type_config, "__question_type__": row["question_type"]}),
+                json_dumps({**resolved_type_config, "__question_type__": runtime_question_type}),
             ),
         )
         items.append(
@@ -117,9 +127,9 @@ def create_quiz_session(
                 "module_instruction": row["module_instruction"] or "",
                 "review_flag": bool(row["review_flag"]),
                 "prompt": resolved_prompt,
-                "question_type": row["question_type"],
+                "question_type": runtime_question_type,
                 "rank": row["rank"],
-                "type_config": public_type_config(row["question_type"], resolved_type_config),
+                "type_config": public_type_config(runtime_question_type, resolved_type_config),
                 "admin_verified": bool(row["admin_verified"]),
                 "moderation_status": row["moderation_status"],
                 "created_by_user_id": row["created_by_user_id"],
@@ -218,7 +228,7 @@ def evaluate_answers(
             correct_slots += 1
 
     earned_score = correct_slots / slot_total
-    if question_type in {"single_text", "computed_text"} and len(expected_groups) == 1:
+    if question_type == "single_text" and len(expected_groups) == 1:
         return slot_results[0]["is_correct"], earned_score, possible_score, slot_results, matched_default_answers
     return all_correct, earned_score, possible_score, slot_results, matched_default_answers
 

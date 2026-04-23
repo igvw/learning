@@ -2,6 +2,10 @@ import type { QuestionImportResult, QuestionImportReviewRow, QuestionImportRowPa
 
 export function cloneImportRows(rows: QuestionImportRowPayload[]): QuestionImportRowPayload[] {
   return rows.map((row) => ({
+    start_line: row.start_line,
+    end_line: row.end_line,
+    entry_kind: row.entry_kind,
+    qml_text: row.qml_text,
     row_number: row.row_number,
     qml_line: row.qml_line
   }));
@@ -21,6 +25,10 @@ export function draftImportRowsFromResult(result: QuestionImportResult): Questio
 
   return cloneImportRows(
     result.rows.map((row) => ({
+      start_line: row.start_line,
+      end_line: row.end_line,
+      entry_kind: row.entry_kind,
+      qml_text: editableReviewRowLines.get(row.row_number) ?? row.qml_text,
       row_number: row.row_number,
       qml_line: editableReviewRowLines.get(row.row_number) ?? row.qml_line
     }))

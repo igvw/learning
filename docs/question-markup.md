@@ -16,6 +16,7 @@ See also:
 - [Overview](overview.md)
 - [API](api.md)
 - [TODO](TODO.md)
+- [QML Revised](qml-revised.md)
 - [LLM Prompt](question-markup-llm-prompt.md)
 
 ## File Shape
@@ -321,12 +322,10 @@ Patient needs $m=[1-10]*100$ mg. How much is needed? [$m/z$ ml]
 
 Reason: `z` is unbound.
 
-## Future Integration
+## Future Direction
 
-Later work can:
+This document describes the current QML/DSL format only.
 
-- add export in this format
-- extend the syntax in `QML v2`
-- add richer ghost-text authoring hints
+The future direction for explicit top-level `{ ... }` bundle blocks and continued plain one-line QML for non-bundle questions is tracked separately in [QML Revised](qml-revised.md).
 
-The format compiles into the app's runtime question model, including the explicit `computed_text` question type for variable-driven prompts.
+This document describes the legacy flat format. Bundle-backed authoring and review now live in the revised QML path instead of the old `computed_text` model.
