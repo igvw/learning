@@ -30,7 +30,7 @@
     open = false;
   }
 
-  function handleWindowClick(event: MouseEvent): void {
+  function handleWindowPointerDown(event: PointerEvent): void {
     if (!open || !shell) {
       return;
     }
@@ -47,7 +47,7 @@
   }
 </script>
 
-<svelte:window on:click={handleWindowClick} on:keydown={handleWindowKeydown} />
+<svelte:window on:pointerdown|capture={handleWindowPointerDown} on:keydown={handleWindowKeydown} />
 
 <div class="editor-module-picker" bind:this={shell}>
   <button

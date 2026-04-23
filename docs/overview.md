@@ -16,7 +16,7 @@ For supporting docs, see:
 - [Deployment](deployment.md)
 - [Question Markup DSL](question-markup.md)
 - [QML Revised](qml-revised.md)
-- [Question Markup LLM Prompt](question-markup-llm-prompt.md)
+- [QML Prompt Snippets](question-markup-prompts/index.md)
 - [TODO](TODO.md)
 - [Roadmap](roadmap.md)
 

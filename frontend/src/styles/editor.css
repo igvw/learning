@@ -78,11 +78,20 @@
   gap: 0.75rem;
 }
 
-.editor-card-grid {
+.editor-card-grid,
+.editor-top-row,
+.editor-meta-row {
   display: grid;
   gap: 0.75rem;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: start;
+}
+
+.editor-card-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.editor-top-row {
+  grid-template-columns: minmax(0, 22rem) minmax(0, 1fr);
 }
 
 .editor-field-wide {
@@ -93,9 +102,12 @@
   min-width: 0;
 }
 
+.editor-prompt-row .editor-auto-field {
+  width: 100%;
+}
+
 .editor-inline-note {
-  grid-column: 1 / -1;
-  margin: -0.25rem 0 0;
+  margin: 0;
 }
 
 .editor-compact-select,
@@ -328,6 +340,11 @@
   }
 
   .editor-card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .editor-top-row,
+  .editor-meta-row {
     grid-template-columns: 1fr;
   }
 

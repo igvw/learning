@@ -21,7 +21,7 @@ describe('EditorDrawer', () => {
     const user = userEvent.setup();
     const modules: ModuleNode[] = [buildModuleNode({ id: 1, title: 'Geography', slug: 'geography', full_slug: 'geography' })];
 
-    render(EditorDrawer, {
+    const { container } = render(EditorDrawer, {
       props: {
         open: true,
         modules,
@@ -39,6 +39,10 @@ describe('EditorDrawer', () => {
     expect(screen.getByPlaceholderText('What is another name for sodium chloride?')).toBeTruthy();
     expect(screen.getByPlaceholderText('sodium chloride | table salt')).toBeTruthy();
     expect(screen.getByText(/Answers are case-insensitive/)).toBeTruthy();
+    const topRow = container.querySelector('.editor-top-row');
+    expect(topRow?.textContent).toContain('Module');
+    expect(topRow?.textContent).toContain('Question type');
+    expect(topRow?.textContent).not.toContain('Prompt');
     expect(within(screen.getByLabelText('Question type')).getAllByRole('option').map((option) => option.getAttribute('value'))).toEqual([
       'single_text',
       'multi_text',
@@ -310,6 +314,33 @@ describe('EditorDrawer', () => {
         },
         true
       );
+    });
+  });
+
+  it('closes the module picker when clicking elsewhere in the drawer', async () => {
+    const user = userEvent.setup();
+    const modules: ModuleNode[] = [buildModuleNode({ id: 1, title: 'Geography', slug: 'geography', full_slug: 'geography' })];
+
+    render(EditorDrawer, {
+      props: {
+        open: true,
+        modules,
+        defaultModuleId: 1,
+        editingQuestion: null,
+        saving: false,
+        onClose: vi.fn(),
+        onSave: vi.fn(),
+        onDelete: vi.fn()
+      }
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Module' }));
+    expect(await screen.findByRole('dialog', { name: 'Module selection tree' })).toBeTruthy();
+
+    await user.click(screen.getByLabelText('Question type'));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Module selection tree' })).toBeNull();
     });
   });
 });

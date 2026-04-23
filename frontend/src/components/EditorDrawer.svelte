@@ -61,7 +61,7 @@
   let formError = '';
   let localMarker = '';
 
-  type AutoGrowParams = { maxMode?: 'compact' | 'wide' };
+  type AutoGrowParams = { maxMode?: 'compact' | 'wide'; value?: string };
 
   function autoGrow(node: HTMLTextAreaElement, params: AutoGrowParams = {}): { update: (next?: AutoGrowParams) => void; destroy: () => void } {
     let options = params;
@@ -503,7 +503,7 @@
         <div class="editor-layout">
           <div class="editor-form">
             <div class="editor-card">
-              <div class="editor-card-grid">
+              <div class="editor-top-row">
                 <label class="field editor-field-compact">
                   <span id="editor-module-label">Module</span>
                   <EditorModulePicker
@@ -529,24 +529,24 @@
                     <option value="bundle">Bundle</option>
                   </select>
                 </label>
-
-                {#if !selectedModuleIsLeaf}
-                  <p class="muted-copy editor-inline-note">Select a leaf module before saving this question.</p>
-                {/if}
-
-                {#if questionType !== 'bundle' && questionType !== 'inline_cloze'}
-                  <label class="field editor-field-compact">
-                    <span>Prompt</span>
-                    <textarea
-                      rows="1"
-                      class="editor-auto-field"
-                      use:autoGrow
-                      bind:value={prompt}
-                      placeholder={promptPlaceholder(questionType, Boolean(editingQuestion))}
-                    ></textarea>
-                  </label>
-                {/if}
               </div>
+
+              {#if !selectedModuleIsLeaf}
+                <p class="muted-copy editor-inline-note">Select a leaf module before saving this question.</p>
+              {/if}
+
+              {#if questionType !== 'bundle' && questionType !== 'inline_cloze'}
+                <label class="field editor-field-compact editor-prompt-row">
+                  <span>Prompt</span>
+                  <textarea
+                    rows="1"
+                    class="editor-auto-field"
+                    use:autoGrow={{ maxMode: 'wide', value: prompt }}
+                    bind:value={prompt}
+                    placeholder={promptPlaceholder(questionType, Boolean(editingQuestion))}
+                  ></textarea>
+                </label>
+              {/if}
 
               {#if editingQuestion && isAdmin}
                 <label class="checkbox-field dense-checkbox-field">
@@ -561,7 +561,7 @@
                   <textarea
                     rows="1"
                     class="editor-auto-field"
-                    use:autoGrow={{ maxMode: 'wide' }}
+                    use:autoGrow={{ maxMode: 'wide', value: bundleQml }}
                     bind:value={bundleQml}
                     placeholder={bundleQmlPlaceholder(Boolean(editingQuestion))}
                     on:input={(event) => handleBundleQmlInput((event.currentTarget as HTMLTextAreaElement).value)}
@@ -669,7 +669,7 @@
                   <textarea
                     rows="1"
                     class="editor-auto-field"
-                    use:autoGrow={{ maxMode: 'wide' }}
+                    use:autoGrow={{ maxMode: 'wide', value: qmlText }}
                     bind:value={qmlText}
                     placeholder={inlineQmlPlaceholder(Boolean(editingQuestion))}
                     on:input={(event) => handleInlineQmlInput((event.currentTarget as HTMLTextAreaElement).value)}
@@ -708,7 +708,7 @@
                   <textarea
                     rows="1"
                     class="editor-auto-field"
-                    use:autoGrow={{ maxMode: 'wide' }}
+                    use:autoGrow={{ maxMode: 'wide', value: qmlText }}
                     bind:value={qmlText}
                     on:input={(event) => handlePlainQmlInput((event.currentTarget as HTMLTextAreaElement).value)}
                   ></textarea>
