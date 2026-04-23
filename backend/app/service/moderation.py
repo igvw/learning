@@ -14,12 +14,21 @@ from .errors import NotFoundError, ValidationError
 from .text import title_from_slug
 
 
-def _pending_module_rows(connection: DatabaseConnection, *, creator_user_id: int | None = None) -> list[Any]:
-    where_sql = "WHERE modules.admin_verified = 0"
-    params: tuple[Any, ...] = ()
+def _module_rows(
+    connection: DatabaseConnection,
+    *,
+    moderation_statuses: tuple[str, ...],
+    creator_user_id: int | None = None,
+) -> list[Any]:
+    status_placeholders = ", ".join("?" for _ in moderation_statuses)
+    where_sql = f"""
+        WHERE modules.admin_verified = 0
+          AND modules.moderation_status IN ({status_placeholders})
+    """
+    params: tuple[Any, ...] = moderation_statuses
     if creator_user_id is not None:
         where_sql += " AND modules.created_by_user_id = ?"
-        params = (creator_user_id,)
+        params = (*params, creator_user_id)
     return connection.execute(
         f"""
         SELECT
@@ -168,7 +177,12 @@ def _proposal_payload(row: Any) -> dict[str, Any]:
 
 def list_moderation_queue(connection: DatabaseConnection) -> dict[str, Any]:
     return {
-        "pending_modules": [_module_payload(row) for row in _pending_module_rows(connection)],
+        "pending_modules": [
+            _module_payload(row) for row in _module_rows(connection, moderation_statuses=("pending",))
+        ],
+        "rejected_modules": [
+            _module_payload(row) for row in _module_rows(connection, moderation_statuses=("rejected",))
+        ],
         "pending_questions": [_question_payload(row) for row in _pending_question_rows(connection)],
         "pending_revisions": [_proposal_payload(row) for row in _proposal_rows(connection) if row["status"] == "pending"],
     }
@@ -176,7 +190,14 @@ def list_moderation_queue(connection: DatabaseConnection) -> dict[str, Any]:
 
 def list_my_contributions(connection: DatabaseConnection, *, actor: Actor) -> dict[str, Any]:
     return {
-        "modules": [_module_payload(row) for row in _pending_module_rows(connection, creator_user_id=int(actor.user_id))],
+        "modules": [
+            _module_payload(row)
+            for row in _module_rows(
+                connection,
+                moderation_statuses=("pending",),
+                creator_user_id=int(actor.user_id),
+            )
+        ],
         "questions": [_question_payload(row) for row in _pending_question_rows(connection, creator_user_id=int(actor.user_id))],
         "revisions": [
             _proposal_payload(row)
@@ -245,7 +266,7 @@ def review_module_submission(
             """,
             (note.strip(), actor.user_id, utc_now(), module_id),
         )
-    refreshed = _pending_module_rows(connection)
+    refreshed = _module_rows(connection, moderation_statuses=("pending",))
     target = next((candidate for candidate in refreshed if int(candidate["id"]) == module_id), None)
     if target is not None:
         return _module_payload(target)
@@ -269,6 +290,59 @@ def review_module_submission(
         (module_id,),
     ).fetchone()
     return _module_payload(row)
+
+
+def delete_rejected_module_submission(connection: DatabaseConnection, *, module_id: int) -> None:
+    row = connection.execute(
+        """
+        SELECT id, admin_verified, moderation_status
+        FROM modules
+        WHERE id = ?
+        """,
+        (module_id,),
+    ).fetchone()
+    if row is None:
+        raise NotFoundError(f"Module {module_id} was not found.")
+    if bool(row["admin_verified"]) or row["moderation_status"] != "rejected":
+        raise ValidationError("Only rejected unverified modules can be deleted from moderation.")
+
+    subtree_rows = connection.execute(
+        """
+        WITH RECURSIVE module_tree AS (
+            SELECT id, parent_id, full_slug, admin_verified, moderation_status
+            FROM modules
+            WHERE id = ?
+            UNION ALL
+            SELECT child.id, child.parent_id, child.full_slug, child.admin_verified, child.moderation_status
+            FROM modules AS child
+            JOIN module_tree AS parent ON child.parent_id = parent.id
+        )
+        SELECT id, full_slug, admin_verified, moderation_status
+        FROM module_tree
+        ORDER BY full_slug ASC
+        """,
+        (module_id,),
+    ).fetchall()
+    verified_descendant = next(
+        (
+            candidate
+            for candidate in subtree_rows
+            if int(candidate["id"]) != module_id
+            and (bool(candidate["admin_verified"]) or candidate["moderation_status"] == "verified")
+        ),
+        None,
+    )
+    if verified_descendant is not None:
+        raise ValidationError(
+            "Cannot delete a rejected module subtree that contains verified descendants."
+        )
+
+    module_ids = [int(candidate["id"]) for candidate in subtree_rows]
+    placeholders = ", ".join("?" for _ in module_ids)
+    connection.execute(
+        f"DELETE FROM modules WHERE id IN ({placeholders})",
+        tuple(module_ids),
+    )
 
 
 def review_question_submission(

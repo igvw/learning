@@ -21,6 +21,8 @@ Admins see:
 Moderation behavior:
 
 - each moderation category opens in its own overlay
+- the `Modules` moderation overlay opens with `Pending` and `Rejected` summary cards before drilling into either list
+- rejected modules move out of the pending list, stay admin-visible, and can be either approved or hard-deleted
 - the pending uploaded questions overlay groups rows by module and supports bulk approve/reject per module table
 - the pending revisions overlay opens with module cards, then drills into one module at a time with collapsed change sections
 - each revision row keeps all question details in one `Changes` snapshot
@@ -33,5 +35,5 @@ Regular users see:
 
 - a compact `Modules` summary card that opens pending-module creation and editing
 - one wide `My contributions` summary card
-- a browsable contributions overlay with `Modules`, `Uploaded questions`, and active `Revisions`
+- a browsable contributions overlay with pending `Modules`, `Uploaded questions`, and active `Revisions`
 - read-only revision detail using the same snapshot or diff card style as admin moderation, without moderation actions

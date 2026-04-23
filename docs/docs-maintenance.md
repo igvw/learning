@@ -59,3 +59,4 @@ Keep `docs/ui.md` as the short UI index and shared navigation overview.
 - Update the focused doc that owns the behavior instead of duplicating prose across multiple docs.
 - Keep operational fallback notes only when they still matter to users or operators.
 - Keep edits small and meaningful; do not expand `README.md` when a focused doc is the better home.
+- Use `pyproject.toml` as the default home for Python tool config when that avoids adding extra top-level config files without adding packaging complexity.

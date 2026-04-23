@@ -203,7 +203,7 @@ describe('QuizPage', () => {
     expect(screen.getByRole('button', { name: 'Show All Answers' })).toBeTruthy();
   });
 
-  it('marks a completed question for revision', async () => {
+  it('shows all accepted answers inside the input for a correct primary single-slot answer', async () => {
     const user = userEvent.setup();
     const markSpy = vi.fn().mockResolvedValue(undefined);
     const session = buildQuizSession({
@@ -244,7 +244,7 @@ describe('QuizPage', () => {
 
     expect(answeredCard?.className).toContain('correct');
     expect(answeredInput.className).toContain('answer-correct');
-    expect((answeredInput as HTMLInputElement).value).toBe('Nile');
+    expect((answeredInput as HTMLInputElement).value).toBe('nile / the nile');
     expect(screen.queryByText('nile')).toBeNull();
     expect(screen.queryByText('nile / the nile')).toBeNull();
     expect(screen.queryByRole('list')).toBeNull();
@@ -291,7 +291,7 @@ describe('QuizPage', () => {
     expect(screen.queryByText('nile / the nile')).toBeNull();
   });
 
-  it('keeps submitted input values and shows full accepted answers below for incorrect multi-slot submissions', () => {
+  it('shows alternatives in correct slots and only incorrect-slot answers below for incorrect multi-slot submissions', () => {
     const session = buildQuizSession({
       id: 26,
       completed_at: '2026-04-04T10:00:00Z',
@@ -335,17 +335,17 @@ describe('QuizPage', () => {
     expect(inputs[0].className).toContain('answer-correct');
     expect(inputs[1].className).toContain('answer-correct');
     expect(inputs[2].className).toContain('answer-incorrect');
-    expect((inputs[0] as HTMLInputElement).value).toBe('head');
+    expect((inputs[0] as HTMLInputElement).value).toBe('head / skull');
     expect((inputs[1] as HTMLInputElement).value).toBe('thorax');
     expect((inputs[2] as HTMLInputElement).value).toBe('legs');
-    expect(screen.getByText('head / skull')).toBeTruthy();
-    expect(screen.getByText('thorax')).toBeTruthy();
-    expect(screen.getByText('abdomen')).toBeTruthy();
-    expect(screen.getAllByRole('listitem')).toHaveLength(3);
+    const answerBox = screen.getByText('abdomen').closest('.answer-box');
+    expect(answerBox?.className).toContain('plain-answer-box');
+    expect(screen.queryByText('thorax')).toBeNull();
+    expect(screen.queryAllByRole('listitem')).toHaveLength(0);
     expect(screen.getByRole('button', { name: 'Flag for revision' })).toBeTruthy();
   });
 
-  it('only expands the slots that used non-primary correct answers for fully correct multi-slot submissions', () => {
+  it('shows all accepted answers in every correct slot for fully correct multi-slot submissions', () => {
     const session = buildQuizSession({
       id: 28,
       completed_at: '2026-04-04T10:00:00Z',
@@ -358,19 +358,19 @@ describe('QuizPage', () => {
           question_type: 'ordered_multi',
           rank: 4,
           type_config: { expected_slots: 3 },
-          submitted_answer: ['skull', 'thorax', 'abdomen'],
+          submitted_answer: ['head', 'thorax', 'abdomen'],
           is_correct: true,
           score_earned: 1,
           score_possible: 1,
           slot_results: [
             { index: 0, is_correct: true, expected: 'head / skull' },
             { index: 1, is_correct: true, expected: 'thorax' },
-            { index: 2, is_correct: true, expected: 'abdomen' }
+            { index: 2, is_correct: true, expected: 'abdomen / belly' }
           ],
-          canonical_answers: ['head / skull', 'thorax', 'abdomen'],
+          canonical_answers: ['head / skull', 'thorax', 'abdomen / belly'],
           default_answers: ['head', 'thorax', 'abdomen'],
-          accepted_answer_groups: [['head', 'skull'], ['thorax'], ['abdomen']],
-          matched_default_answers: [false, true, true]
+          accepted_answer_groups: [['head', 'skull'], ['thorax'], ['abdomen', 'belly']],
+          matched_default_answers: [true, true, true]
         })
       ]
     });
@@ -387,7 +387,7 @@ describe('QuizPage', () => {
     const inputs = view.getAllByRole('textbox');
     expect((inputs[0] as HTMLInputElement).value).toBe('head / skull');
     expect((inputs[1] as HTMLInputElement).value).toBe('thorax');
-    expect((inputs[2] as HTMLInputElement).value).toBe('abdomen');
+    expect((inputs[2] as HTMLInputElement).value).toBe('abdomen / belly');
     expect(screen.queryByRole('list')).toBeNull();
   });
 });

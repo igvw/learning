@@ -23,6 +23,9 @@
   ) => Promise<void> = async () => {
     throw new Error('Moderation handler is not configured.');
   };
+  export let onDeleteRejectedModule: (moduleId: number) => Promise<void> = async () => {
+    throw new Error('Rejected module delete handler is not configured.');
+  };
   export let onBulkQuestionModeration: (
     questionIds: number[],
     payload: ModerationActionPayload
@@ -40,6 +43,7 @@
   let openOverlay: ModerationOverlayKind = null;
 
   $: pendingModules = moderationQueue?.pending_modules ?? [];
+  $: rejectedModules = moderationQueue?.rejected_modules ?? [];
   $: pendingQuestions = moderationQueue?.pending_questions ?? [];
   $: pendingRevisions = moderationQueue?.pending_revisions ?? [];
 
@@ -55,6 +59,7 @@
 {#if moderationQueue}
   <ModerationSummaryCards
     pendingModulesCount={pendingModules.length}
+    rejectedModulesCount={rejectedModules.length}
     pendingQuestionsCount={pendingQuestions.length}
     pendingRevisionsCount={pendingRevisions.length}
     onOpen={openModerationOverlay}
@@ -63,8 +68,10 @@
   <PendingModulesOverlay
     open={openOverlay === 'modules'}
     {pendingModules}
+    {rejectedModules}
     onClose={closeModerationOverlay}
     onModuleModeration={(id, payload) => onModerationAction('module', id, payload)}
+    {onDeleteRejectedModule}
   />
 
   <PendingQuestionsOverlay

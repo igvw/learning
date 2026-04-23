@@ -154,19 +154,17 @@
     return slotCount(item) === 1 ? item.is_correct === true : false;
   }
 
-  function slotUsedNonPrimaryCorrectAnswer(item: QuizItem, slotIndex: number): boolean {
-    return item.is_correct === true && slotWasCorrect(item, slotIndex) && item.matched_default_answers?.[slotIndex] === false;
-  }
-
   function displayedAnswerValue(item: QuizItem, slotIndex: number, currentValue: string): string {
-    if (!item.submitted_answer || item.is_correct !== true || !slotUsedNonPrimaryCorrectAnswer(item, slotIndex)) {
+    if (!item.submitted_answer || !slotWasCorrect(item, slotIndex)) {
       return currentValue;
     }
     return feedbackAnswerGroups(item)[slotIndex]?.join(' / ') ?? currentValue;
   }
 
   function incorrectFeedbackAnswers(item: QuizItem): string[] {
-    return feedbackAnswerGroups(item).map((group) => group.join(' / '));
+    return feedbackAnswerGroups(item)
+      .filter((_, index) => !slotWasCorrect(item, index))
+      .map((group) => group.join(' / '));
   }
 
   function shouldShowFeedback(item: QuizItem): boolean {

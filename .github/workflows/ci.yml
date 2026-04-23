@@ -51,6 +51,9 @@ jobs:
       - name: Install frontend dependencies
         run: npm --prefix frontend ci
 
+      - name: Run Ruff
+        run: ruff check backend tests
+
       - name: Compile backend modules
         run: python -m py_compile backend/app/database.py backend/app/main.py backend/app/cli.py backend/app/services.py backend/app/api/*.py backend/app/api/routers/*.py backend/app/service/*.py
 

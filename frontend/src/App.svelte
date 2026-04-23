@@ -40,6 +40,7 @@
     createQuizSession,
     createUser,
     deleteQuestion,
+    deleteRejectedModule,
     exportContentArchive,
     getCurrentActor,
     getHealth,
@@ -533,6 +534,11 @@
     await reloadAfterModerationMutation();
   }
 
+  async function handleDeleteRejectedModule(moduleId: number): Promise<void> {
+    await deleteRejectedModule(moduleId);
+    await reloadAfterModerationMutation();
+  }
+
   async function handleBulkQuestionModeration(
     questionIds: number[],
     payload: ModerationActionPayload
@@ -664,6 +670,7 @@
           onOpenImport={handleOpenImportForModule}
           onExportContent={handleExportContent}
           onModerationAction={handleModerationAction}
+          onDeleteRejectedModule={handleDeleteRejectedModule}
           onBulkQuestionModeration={handleBulkQuestionModeration}
           onBulkRevisionModeration={handleBulkRevisionModeration}
           onOpenRevisionEditor={handleOpenRevisionEditor}

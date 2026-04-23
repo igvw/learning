@@ -19,6 +19,7 @@ class ServiceFacadeUnitTests(unittest.TestCase):
             "create_question",
             "create_quiz_session",
             "create_user",
+            "delete_rejected_module_submission",
             "delete_question",
             "export_verified_content_archive",
             "get_actor_from_token",

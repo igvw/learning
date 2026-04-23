@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response, status
 
 from ...database import DatabaseConnection
 from ...schemas import ModerationActionIn, ModerationQueueOut, ModerationRevisionActionIn, MyContributionsOut
 from ...services import (
     Actor,
+    delete_rejected_module_submission,
     list_moderation_queue,
     list_my_contributions,
     review_module_submission,
@@ -46,6 +47,16 @@ def moderation_module_review(
         note=payload.note,
         actor=actor,
     )
+
+
+@router.delete("/api/moderation/modules/{module_id}", status_code=status.HTTP_204_NO_CONTENT)
+def moderation_module_delete(
+    module_id: int,
+    _: Actor = Depends(require_admin_actor),
+    connection: DatabaseConnection = Depends(database_connection),
+) -> Response:
+    delete_rejected_module_submission(connection, module_id=module_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/api/moderation/questions/{question_id}", response_model=dict)

@@ -155,6 +155,12 @@ export function reviewModule(moduleId: number, payload: ModerationActionPayload)
   });
 }
 
+export function deleteRejectedModule(moduleId: number): Promise<void> {
+  return request<void>(`/api/moderation/modules/${moduleId}`, {
+    method: 'DELETE'
+  });
+}
+
 export function reviewQuestion(questionId: number, payload: ModerationActionPayload): Promise<Record<string, unknown>> {
   return request<Record<string, unknown>>(`/api/moderation/questions/${questionId}`, {
     method: 'POST',

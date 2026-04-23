@@ -1,10 +1,12 @@
 <script lang="ts">
   export let pendingModulesCount = 0;
+  export let rejectedModulesCount = 0;
   export let pendingQuestionsCount = 0;
   export let pendingRevisionsCount = 0;
   export let onOpen: (kind: 'modules' | 'questions' | 'revisions') => void = () => {};
 
-  $: totalPendingCount = pendingModulesCount + pendingQuestionsCount + pendingRevisionsCount;
+  $: moduleModerationCount = pendingModulesCount + rejectedModulesCount;
+  $: totalModerationCount = moduleModerationCount + pendingQuestionsCount + pendingRevisionsCount;
 </script>
 
 <article class="panel admin-bar-panel">
@@ -15,8 +17,8 @@
     </div>
   </div>
 
-  {#if totalPendingCount === 0}
-    <p class="muted-copy">No pending submissions right now.</p>
+  {#if totalModerationCount === 0}
+    <p class="muted-copy">No moderation items right now.</p>
   {/if}
 
   <div class="moderation-summary-grid">
@@ -27,7 +29,7 @@
       on:click={() => onOpen('modules')}
     >
       <strong>Modules</strong>
-      <span class="moderation-summary-count">{pendingModulesCount}</span>
+      <span class="moderation-summary-count">{moduleModerationCount}</span>
     </button>
 
     <button

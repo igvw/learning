@@ -137,6 +137,190 @@ class ModerationApiTests(PostgresBackendTestCase):
             {node["full_slug"] for node in _flatten_module_tree(approved_tree.json())},
         )
 
+    def test_rejected_modules_move_from_pending_queue_to_rejected_queue_and_leave_user_contributions(self) -> None:
+        norwegian = self.create_module_record("Norwegian")
+        alice = self.create_user(handle="alice", display_name="Alice")
+
+        create_response = self.client.post(
+            "/api/modules",
+            json={
+                "title": "Vocabulary",
+                "parent_id": norwegian["id"],
+                "instruction": "Translate the Norwegian term into English.",
+            },
+            headers=self.user_headers(int(alice["id"])),
+        )
+        self.assertEqual(create_response.status_code, 200)
+        module_id = int(create_response.json()["id"])
+
+        queue_before = self.client.get("/api/moderation/queue", headers=self.admin_headers)
+        self.assertEqual(queue_before.status_code, 200)
+        self.assertIn(
+            module_id,
+            {module["id"] for module in queue_before.json()["pending_modules"]},
+        )
+        self.assertEqual(queue_before.json()["rejected_modules"], [])
+
+        reject_response = self.client.post(
+            f"/api/moderation/modules/{module_id}",
+            json={"action": "reject", "note": "Not ready yet."},
+            headers=self.admin_headers,
+        )
+        self.assertEqual(reject_response.status_code, 200)
+        self.assertEqual(reject_response.json()["moderation_status"], "rejected")
+
+        queue_after = self.client.get("/api/moderation/queue", headers=self.admin_headers)
+        self.assertEqual(queue_after.status_code, 200)
+        self.assertNotIn(
+            module_id,
+            {module["id"] for module in queue_after.json()["pending_modules"]},
+        )
+        self.assertIn(
+            module_id,
+            {module["id"] for module in queue_after.json()["rejected_modules"]},
+        )
+
+        contributions_response = self.client.get(
+            "/api/contributions/me",
+            headers=self.user_headers(int(alice["id"])),
+        )
+        self.assertEqual(contributions_response.status_code, 200)
+        self.assertNotIn(
+            module_id,
+            {module["id"] for module in contributions_response.json()["modules"]},
+        )
+
+    def test_admin_can_delete_rejected_leaf_module(self) -> None:
+        norwegian = self.create_module_record("Norwegian")
+        alice = self.create_user(handle="alice", display_name="Alice")
+
+        create_response = self.client.post(
+            "/api/modules",
+            json={
+                "title": "Vocabulary",
+                "parent_id": norwegian["id"],
+                "instruction": "Translate the Norwegian term into English.",
+            },
+            headers=self.user_headers(int(alice["id"])),
+        )
+        self.assertEqual(create_response.status_code, 200)
+        module_id = int(create_response.json()["id"])
+
+        reject_response = self.client.post(
+            f"/api/moderation/modules/{module_id}",
+            json={"action": "reject", "note": "Not ready yet."},
+            headers=self.admin_headers,
+        )
+        self.assertEqual(reject_response.status_code, 200)
+
+        delete_response = self.client.delete(
+            f"/api/moderation/modules/{module_id}",
+            headers=self.admin_headers,
+        )
+        self.assertEqual(delete_response.status_code, 204)
+
+        with get_connection(self.database_url) as connection:
+            deleted_module = connection.execute(
+                "SELECT id FROM modules WHERE id = ?",
+                (module_id,),
+            ).fetchone()
+        self.assertIsNone(deleted_module)
+
+    def test_admin_can_delete_rejected_module_subtree_and_cascade_descendant_questions(self) -> None:
+        norwegian = self.create_module_record("Norwegian")
+        rejected_root = self.create_module_record("Rejected Root", norwegian["id"])
+        pending_child = self.create_module_record("Pending Child", rejected_root["id"])
+        rejected_leaf = self.create_module_record("Rejected Leaf", pending_child["id"])
+        question = self.create_question_record(rejected_leaf["id"], "hund", [["dog"]], rank=1)
+
+        with get_connection(self.database_url) as connection:
+            connection.execute(
+                "UPDATE modules SET admin_verified = 0, moderation_status = 'rejected' WHERE id = ?",
+                (rejected_root["id"],),
+            )
+            connection.execute(
+                "UPDATE modules SET admin_verified = 0, moderation_status = 'pending' WHERE id = ?",
+                (pending_child["id"],),
+            )
+            connection.execute(
+                "UPDATE modules SET admin_verified = 0, moderation_status = 'rejected' WHERE id = ?",
+                (rejected_leaf["id"],),
+            )
+
+        delete_response = self.client.delete(
+            f"/api/moderation/modules/{rejected_root['id']}",
+            headers=self.admin_headers,
+        )
+        self.assertEqual(delete_response.status_code, 204)
+
+        with get_connection(self.database_url) as connection:
+            remaining_modules = connection.execute(
+                "SELECT id FROM modules WHERE id IN (?, ?, ?)",
+                (rejected_root["id"], pending_child["id"], rejected_leaf["id"]),
+            ).fetchall()
+            remaining_question = connection.execute(
+                "SELECT id FROM questions WHERE id = ?",
+                (question["question_id"],),
+            ).fetchone()
+        self.assertEqual(remaining_modules, [])
+        self.assertIsNone(remaining_question)
+
+    def test_rejected_module_delete_refuses_verified_descendants(self) -> None:
+        norwegian = self.create_module_record("Norwegian")
+        rejected_root = self.create_module_record("Rejected Root", norwegian["id"])
+        verified_child = self.create_module_record("Verified Child", rejected_root["id"])
+
+        with get_connection(self.database_url) as connection:
+            connection.execute(
+                "UPDATE modules SET admin_verified = 0, moderation_status = 'rejected' WHERE id = ?",
+                (rejected_root["id"],),
+            )
+            connection.execute(
+                "UPDATE modules SET admin_verified = 1, moderation_status = 'verified' WHERE id = ?",
+                (verified_child["id"],),
+            )
+
+        delete_response = self.client.delete(
+            f"/api/moderation/modules/{rejected_root['id']}",
+            headers=self.admin_headers,
+        )
+        self.assertEqual(delete_response.status_code, 400)
+        self.assertEqual(
+            delete_response.json()["detail"],
+            "Cannot delete a rejected module subtree that contains verified descendants.",
+        )
+
+    def test_rejected_module_delete_refuses_pending_or_verified_targets(self) -> None:
+        norwegian = self.create_module_record("Norwegian")
+        pending_module = self.create_module_record("Pending Module", norwegian["id"])
+        verified_module = self.create_module_record("Verified Module", norwegian["id"])
+
+        with get_connection(self.database_url) as connection:
+            connection.execute(
+                "UPDATE modules SET admin_verified = 0, moderation_status = 'pending' WHERE id = ?",
+                (pending_module["id"],),
+            )
+
+        pending_delete = self.client.delete(
+            f"/api/moderation/modules/{pending_module['id']}",
+            headers=self.admin_headers,
+        )
+        self.assertEqual(pending_delete.status_code, 400)
+        self.assertEqual(
+            pending_delete.json()["detail"],
+            "Only rejected unverified modules can be deleted from moderation.",
+        )
+
+        verified_delete = self.client.delete(
+            f"/api/moderation/modules/{verified_module['id']}",
+            headers=self.admin_headers,
+        )
+        self.assertEqual(verified_delete.status_code, 400)
+        self.assertEqual(
+            verified_delete.json()["detail"],
+            "Only rejected unverified modules can be deleted from moderation.",
+        )
+
     def test_pending_question_and_revision_overlay_are_scoped_until_admin_approval(self) -> None:
         norwegian = self.create_module_record("Norwegian")
         words = self.create_module_record("Words", norwegian["id"])

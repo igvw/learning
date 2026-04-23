@@ -219,6 +219,7 @@ export function buildImportResult(
 export function buildModerationQueue(overrides: Partial<ModerationQueue> = {}): ModerationQueue {
   return {
     pending_modules: [],
+    rejected_modules: [],
     pending_questions: [],
     pending_revisions: [],
     ...overrides

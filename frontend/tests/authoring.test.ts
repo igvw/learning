@@ -289,7 +289,7 @@ describe('AdminPage', () => {
         modules,
         users: [{ id: 9, handle: 'ignazio', display_name: 'Ignazio', role: 'user', created_at: '2026-04-05T10:00:00Z' }],
         selectedModuleId: 2,
-        moderationQueue: { pending_modules: [], pending_questions: [], pending_revisions: [] },
+        moderationQueue: { pending_modules: [], rejected_modules: [], pending_questions: [], pending_revisions: [] },
         onCreateUser: createUserSpy,
         onUpdateUserRole: updateRoleSpy,
         onUpdateUserPassword: updatePasswordSpy,
@@ -454,6 +454,7 @@ describe('ModerationQueuePanel', () => {
   it('shows summary cards, opens overlays, and supports bulk approve by module', async () => {
     const user = userEvent.setup();
     const moderationSpy = vi.fn().mockResolvedValue(undefined);
+    const deleteRejectedModuleSpy = vi.fn().mockResolvedValue(undefined);
     const bulkSpy = vi.fn().mockResolvedValue({ succeeded: 2, failed: 0 });
     const bulkRevisionSpy = vi.fn().mockResolvedValue({ succeeded: 1, failed: 0 });
     const openRevisionEditorSpy = vi.fn();
@@ -473,6 +474,20 @@ describe('ModerationQueuePanel', () => {
               created_by_user_id: 2,
               creator_display_name: 'Alice',
               admin_review_note: ''
+            }
+          ],
+          rejected_modules: [
+            {
+              id: 8,
+              title: 'Animals',
+              full_slug: 'norwegian/animals',
+              parent_id: 1,
+              instruction: 'Translate the animal into English.',
+              admin_verified: false,
+              moderation_status: 'rejected',
+              created_by_user_id: 2,
+              creator_display_name: 'Alice',
+              admin_review_note: 'Needs a different structure.'
             }
           ],
           pending_questions: [
@@ -570,6 +585,7 @@ describe('ModerationQueuePanel', () => {
           ]
         }),
         onModerationAction: moderationSpy,
+        onDeleteRejectedModule: deleteRejectedModuleSpy,
         onBulkQuestionModeration: bulkSpy,
         onBulkRevisionModeration: bulkRevisionSpy,
         onOpenRevisionEditor: openRevisionEditorSpy
@@ -581,7 +597,27 @@ describe('ModerationQueuePanel', () => {
     expect(screen.getByRole('button', { name: /^Revisions/i })).toBeTruthy();
 
     await user.click(screen.getByRole('button', { name: /^Modules/i }));
+    expect(screen.getByRole('heading', { name: 'Modules' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Pending/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Rejected/i })).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: /^Pending/i }));
     expect(screen.getByRole('heading', { name: 'Pending modules' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Back' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Reject' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Reject' }));
+    expect(moderationSpy).toHaveBeenCalledWith('module', 7, { action: 'reject', note: '' });
+
+    await user.click(screen.getByRole('button', { name: 'Back' }));
+    await user.click(screen.getByRole('button', { name: /^Rejected/i }));
+    expect(screen.getByRole('heading', { name: 'Rejected modules' })).toBeTruthy();
+    expect(screen.getByText('Needs a different structure.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+    expect(deleteRejectedModuleSpy).toHaveBeenCalledWith(8);
+
     await user.click(screen.getByRole('button', { name: 'Close' }));
 
     await user.click(screen.getByRole('button', { name: /^Revisions/i }));

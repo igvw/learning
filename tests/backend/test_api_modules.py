@@ -18,7 +18,7 @@ class ModuleApiTests(PostgresBackendTestCase):
     def test_content_export_returns_verified_zip_tree(self) -> None:
         norwegian = self.create_module_record("Norwegian", instruction="Translate the Norwegian term into English.")
         animals = self.create_module_record("Animals", norwegian["id"], "Use the animal name as the prompt.")
-        numbers = self.create_module_record("Numbers", norwegian["id"])
+        self.create_module_record("Numbers", norwegian["id"])
         self.create_question_record(animals["id"], "hund", [["dog"]], rank=2)
         self.create_question_record(animals["id"], "katt", [["cat"]], rank=1)
 

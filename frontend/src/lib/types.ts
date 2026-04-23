@@ -313,6 +313,7 @@ export interface QuestionRevisionProposal {
 
 export interface ModerationQueue {
   pending_modules: PendingModule[];
+  rejected_modules: PendingModule[];
   pending_questions: PendingQuestion[];
   pending_revisions: QuestionRevisionProposal[];
 }

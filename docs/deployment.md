@@ -193,6 +193,13 @@ This recreates the app container while keeping the PostgreSQL volume.
 
 Study data lives in the named Docker volume `postgres_data`.
 
+Two different export paths exist:
+
+- `GET /api/modules/export` for verified shared content only
+- PostgreSQL dump/restore for the real app database, including users, quiz history, moderation state, and pending contributions
+
+For real backup or migration, use PostgreSQL dump/restore.
+
 What to back up:
 
 - the PostgreSQL data volume, or
@@ -201,7 +208,9 @@ What to back up:
 Example SQL backup:
 
 ```bash
-docker compose -f docker-compose.deploy.yml exec postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > learning-backup.sql
+docker compose -f docker-compose.deploy.yml exec postgres \
+  pg_dump --clean --if-exists --no-owner --no-privileges -U "$POSTGRES_USER" "$POSTGRES_DB" \
+  > learning-backup.sql
 ```
 
 Example restore into a fresh stack:
@@ -210,6 +219,85 @@ Example restore into a fresh stack:
 cat learning-backup.sql | docker compose -f docker-compose.deploy.yml exec -T postgres psql -U "$POSTGRES_USER" "$POSTGRES_DB"
 ```
 
+Restore is intended for a fresh or disposable target database. In practice it overwrites the target state.
+
+If the target machine already has data you care about, dump that target first before restoring anything into it.
+
+## Migrate An Existing Database To Another Machine
+
+Use this when moving from a current development machine to a Debian home server.
+
+Before starting:
+
+- make sure both machines are running the same app version or at least a compatible schema
+- make sure the Debian server has the same `.env` database settings you intend to keep
+- treat the Debian target database as replaceable for this migration
+
+### 1. Create a dump on the source machine
+
+If the source machine is running the repo-local stack:
+
+```bash
+docker compose exec postgres \
+  pg_dump --clean --if-exists --no-owner --no-privileges -U "$POSTGRES_USER" "$POSTGRES_DB" \
+  > learning-migration.sql
+```
+
+If the source machine is running the deploy stack instead:
+
+```bash
+docker compose -f docker-compose.deploy.yml exec postgres \
+  pg_dump --clean --if-exists --no-owner --no-privileges -U "$POSTGRES_USER" "$POSTGRES_DB" \
+  > learning-migration.sql
+```
+
+### 2. Copy the dump file to the Debian server
+
+Example:
+
+```bash
+scp learning-migration.sql your-user@debian-server:/home/your-user/
+```
+
+### 3. Start PostgreSQL on the Debian server
+
+Run this on the Debian server from the repo root:
+
+```bash
+docker compose -f docker-compose.deploy.yml up -d postgres
+```
+
+If the app container is already running and you want the cleanest restore window:
+
+```bash
+docker compose -f docker-compose.deploy.yml stop app
+```
+
+### 4. Restore the dump into the Debian database
+
+Run this on the Debian server:
+
+```bash
+cat learning-migration.sql | docker compose -f docker-compose.deploy.yml exec -T postgres psql -U "$POSTGRES_USER" "$POSTGRES_DB"
+```
+
+### 5. Start or restart the app
+
+Run this on the Debian server:
+
+```bash
+docker compose -f docker-compose.deploy.yml up -d app
+```
+
+### 6. Verify the migrated state
+
+Confirm:
+
+- you can sign in with the expected accounts
+- modules and verified questions are present
+- quiz history and stats are still visible
+- pending uploads, pending modules, and revision proposals are still present where expected
+
 ## Notes For The Next Phase
 
-The next productionization step is to add a proper migration/deploy workflow and a Postgres-backed automated test harness.
+If the manual flow becomes tedious later, the next step is to automate backup and migration operations without changing the database model.

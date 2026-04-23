@@ -65,6 +65,9 @@
   ) => Promise<void> = async () => {
     throw new Error('Moderation handler is not configured.');
   };
+  export let onDeleteRejectedModule: (moduleId: number) => Promise<void> = async () => {
+    throw new Error('Rejected module delete handler is not configured.');
+  };
   export let onBulkQuestionModeration: (
     questionIds: number[],
     payload: ModerationActionPayload
@@ -152,6 +155,7 @@
       <ModerationQueuePanel
         moderationQueue={moderationQueue}
         onModerationAction={onModerationAction}
+        onDeleteRejectedModule={onDeleteRejectedModule}
         onBulkQuestionModeration={onBulkQuestionModeration}
         onBulkRevisionModeration={onBulkRevisionModeration}
         onOpenRevisionEditor={onOpenRevisionEditor}

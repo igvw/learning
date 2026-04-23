@@ -27,6 +27,7 @@ from .service.catalog import create_module, create_user, export_verified_content
 from .service.errors import NotFoundError, ServiceError, ValidationError
 from .service.imports import commit_question_import, validate_question_import
 from .service.moderation import (
+    delete_rejected_module_submission,
     list_moderation_queue,
     list_my_contributions,
     review_module_submission,
@@ -51,6 +52,7 @@ __all__ = [
     "create_question",
     "create_quiz_session",
     "create_user",
+    "delete_rejected_module_submission",
     "delete_question",
     "export_verified_content_archive",
     "get_module_tree",

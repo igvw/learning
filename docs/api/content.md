@@ -124,12 +124,22 @@ Returns the current regular user’s active contribution queue:
 - active revision/delete proposals (`pending`)
 
 Rejected revision proposals remain in the database for moderation history, but are not returned in this user-facing payload.
+Rejected modules are also excluded from this user-facing payload.
 
 ### `GET /api/moderation/queue`
 
-Admin-only. Returns pending module submissions, pending question uploads, and pending question revisions/delete requests.
+Admin-only. Returns:
+
+- `pending_modules`
+- `rejected_modules`
+- pending question uploads
+- pending question revisions/delete requests
 
 ### `POST /api/moderation/modules/{module_id}`
+
+### `DELETE /api/moderation/modules/{module_id}`
+
+Admin-only. Deletes one rejected unverified module and its entire unverified descendant subtree. If any descendant module is verified, the delete is rejected instead of partially deleting the tree.
 
 ### `POST /api/moderation/questions/{question_id}`
 

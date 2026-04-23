@@ -10,6 +10,7 @@ vi.mock('../src/lib/api', () => ({
   createQuizSession: vi.fn(),
   createUser: vi.fn(),
   deleteQuestion: vi.fn(),
+  deleteRejectedModule: vi.fn(),
   exportContentArchive: vi.fn(),
   getCurrentActor: vi.fn(),
   getHealth: vi.fn(),
@@ -145,6 +146,7 @@ describe('App', () => {
     ]);
     vi.mocked(api.getModerationQueue).mockResolvedValue({
       pending_modules: [],
+      rejected_modules: [],
       pending_questions: [],
       pending_revisions: []
     });

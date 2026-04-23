@@ -148,6 +148,7 @@ class QuestionRevisionProposalOut(BaseModel):
 
 class ModerationQueueOut(BaseModel):
     pending_modules: list[PendingModuleOut] = Field(default_factory=list)
+    rejected_modules: list[PendingModuleOut] = Field(default_factory=list)
     pending_questions: list[PendingQuestionOut] = Field(default_factory=list)
     pending_revisions: list[QuestionRevisionProposalOut] = Field(default_factory=list)
 
