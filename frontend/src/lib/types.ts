@@ -335,11 +335,10 @@ export interface QuestionImportMatchedQuestion {
   question_id?: number | null;
   module_id?: number | null;
   module_full_slug: string;
-  entry_kind?: 'plain' | 'bundle';
+  entry_kind: 'plain' | 'bundle';
   start_line?: number | null;
   end_line?: number | null;
   qml_text: string;
-  qml_line: string;
   answer_blocks: string[];
 }
 
@@ -348,8 +347,6 @@ export interface QuestionImportReviewRow {
   end_line: number;
   entry_kind: 'plain' | 'bundle';
   qml_text: string;
-  row_number: number;
-  qml_line: string;
   status: QuestionImportReviewStatus;
   status_text: string;
   editable: boolean;
@@ -364,7 +361,7 @@ export interface QuestionImportResult {
   ready_to_commit: boolean;
   rows: QuestionImportRowPayload[];
   valid_row_count: number;
-  committable_row_numbers?: number[];
+  committable_start_lines: number[];
   exact_duplicate_count: number;
   review_rows: QuestionImportReviewRow[];
   report_text: string;
@@ -373,10 +370,8 @@ export interface QuestionImportResult {
 }
 
 export interface QuestionImportRowPayload {
-  start_line?: number;
-  end_line?: number;
-  entry_kind?: 'plain' | 'bundle';
-  qml_text?: string;
-  row_number: number;
-  qml_line: string;
+  start_line: number;
+  end_line: number;
+  entry_kind: 'plain' | 'bundle';
+  qml_text: string;
 }

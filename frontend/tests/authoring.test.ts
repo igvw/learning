@@ -36,28 +36,33 @@ describe('EditorDrawer', () => {
 
     expect(screen.queryByLabelText('Priority')).toBeNull();
     expect(screen.queryByLabelText('Rank')).toBeNull();
-    expect(screen.getByPlaceholderText('What is the capital of Norway?')).toBeTruthy();
-    expect(screen.getByPlaceholderText('oslo')).toBeTruthy();
+    expect(screen.getByPlaceholderText('What is another name for sodium chloride?')).toBeTruthy();
+    expect(screen.getByPlaceholderText('sodium chloride | table salt')).toBeTruthy();
+    expect(screen.getByText(/Answers are case-insensitive/)).toBeTruthy();
+    expect(within(screen.getByLabelText('Question type')).getAllByRole('option').map((option) => option.getAttribute('value'))).toEqual([
+      'single_text',
+      'multi_text',
+      'ordered_multi',
+      'inline_cloze',
+      'bundle'
+    ]);
 
     await user.selectOptions(screen.getByLabelText('Question type'), 'multi_text');
-    expect(screen.getByPlaceholderText('Name the two rivers that meet at Khartoum.')).toBeTruthy();
-    expect(screen.getByPlaceholderText('white nile')).toBeTruthy();
-    expect(screen.getByPlaceholderText('blue nile')).toBeTruthy();
+    expect(screen.getByPlaceholderText('Name two primary colors.')).toBeTruthy();
+    expect(screen.getByPlaceholderText('red')).toBeTruthy();
+    expect(screen.getByPlaceholderText('blue')).toBeTruthy();
 
     await user.selectOptions(screen.getByLabelText('Question type'), 'ordered_multi');
-    expect(screen.getByPlaceholderText('Name the stages in order.')).toBeTruthy();
-    expect(screen.getByPlaceholderText('stage one')).toBeTruthy();
-    expect(screen.getByPlaceholderText('stage two')).toBeTruthy();
+    expect(screen.getByPlaceholderText('Name the first two stages in order.')).toBeTruthy();
+    expect(screen.getByPlaceholderText('prophase')).toBeTruthy();
+    expect(screen.getByPlaceholderText('metaphase')).toBeTruthy();
 
     await user.selectOptions(screen.getByLabelText('Question type'), 'inline_cloze');
-    expect(screen.getByPlaceholderText('The [Amazon | Amazon River] flows through South America.')).toBeTruthy();
-    expect(screen.getByPlaceholderText(/The derivative of/)).toBeTruthy();
-    expect(screen.getByPlaceholderText('x^2')).toBeTruthy();
-    expect(screen.getByPlaceholderText('.')).toBeTruthy();
+    expect(screen.getByPlaceholderText('The [heart] pumps [blood] through the body.')).toBeTruthy();
 
     await user.selectOptions(screen.getByLabelText('Question type'), 'bundle');
     expect(screen.getByText('Bundle QML')).toBeTruthy();
-    expect(screen.getByPlaceholderText(/\{A patient needs \{\}/)).toBeTruthy();
+    expect(screen.getByPlaceholderText(/A patient needs \{\}/)).toBeTruthy();
   });
 
   it('shows dense revision fields and aggregated incorrect answers without duplicate module UI', () => {
@@ -216,6 +221,96 @@ describe('EditorDrawer', () => {
     expect(deleteSpy).toHaveBeenCalledWith(41);
 
     confirmSpy.mockRestore();
+  });
+
+  it('derives inline cloze answer fields from QML and keeps them synchronized', async () => {
+    const user = userEvent.setup();
+    const modules: ModuleNode[] = [buildModuleNode({ id: 1, title: 'Geography', slug: 'geography', full_slug: 'geography' })];
+
+    render(EditorDrawer, {
+      props: {
+        open: true,
+        modules,
+        defaultModuleId: 1,
+        editingQuestion: null,
+        saving: false,
+        onClose: vi.fn(),
+        onSave: vi.fn(),
+        onDelete: vi.fn()
+      }
+    });
+
+    await user.selectOptions(screen.getByLabelText('Question type'), 'inline_cloze');
+    const qmlInput = screen.getByLabelText('QML');
+    await fireEvent.input(qmlInput, { target: { value: 'The [heart] pumps [blood].' } });
+
+    const firstBlank = await screen.findByLabelText('Blank 1 accepted answers');
+    const secondBlank = await screen.findByLabelText('Blank 2 accepted answers');
+    expect((firstBlank as HTMLTextAreaElement).value).toBe('heart');
+    expect((secondBlank as HTMLTextAreaElement).value).toBe('blood');
+
+    await user.clear(secondBlank);
+    await user.type(secondBlank, 'blood | plasma');
+
+    await waitFor(() => {
+      expect((screen.getByLabelText('QML') as HTMLTextAreaElement).value).toBe('The [heart] pumps [blood | plasma].');
+    });
+  });
+
+  it('shows unwrapped bundle QML in the editor and saves wrapped canonical bundle QML', async () => {
+    const user = userEvent.setup();
+    const saveSpy = vi.fn().mockResolvedValue(undefined);
+    const modules: ModuleNode[] = [buildModuleNode({ id: 1, title: 'Geography', slug: 'geography', full_slug: 'geography' })];
+
+    render(EditorDrawer, {
+      props: {
+        open: true,
+        modules,
+        defaultModuleId: 1,
+        editingQuestion: null,
+        saving: false,
+        onClose: vi.fn(),
+        onSave: saveSpy,
+        onDelete: vi.fn()
+      }
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Module' }));
+    await user.click(await screen.findByRole('button', { name: 'Geography' }));
+    await user.selectOptions(screen.getByLabelText('Question type'), 'bundle');
+
+    const bundleInput = screen.getByLabelText('Bundle QML');
+    await fireEvent.input(bundleInput, {
+      target: {
+        value:
+          'A patient needs {} mg of active ingredient. The medication has {} mg/ml of active ingredient. How much medication does the patient need? []\n {400} {20} [20]'
+      }
+    });
+
+    expect((await screen.findByLabelText('Bundle row 1 parameter 1') as HTMLTextAreaElement).value).toBe('400');
+    expect((screen.getByLabelText('Bundle row 1 parameter 2') as HTMLTextAreaElement).value).toBe('20');
+
+    const answersField = screen.getByLabelText('Bundle row 1 accepted answers');
+    await user.clear(answersField);
+    await user.type(answersField, '20 | 20.0');
+
+    await user.click(screen.getByRole('button', { name: 'Create Question' }));
+
+    await waitFor(() => {
+      expect(saveSpy).toHaveBeenCalledWith(
+        {
+          module_id: 1,
+          prompt: '',
+          question_type: 'bundle',
+          rank: 1,
+          accepted_answers: [],
+          segments: [],
+          bundle_qml:
+            '{A patient needs {} mg of active ingredient. The medication has {} mg/ml of active ingredient. How much medication does the patient need? []\n {400} {20} [20 | 20.0]}'
+        },
+        true
+      );
+    });
   });
 });
 
@@ -766,16 +861,18 @@ describe('ImportDrawer', () => {
     const result: QuestionImportResult = {
       ready_to_commit: false,
       rows: [
-        { row_number: 1, qml_line: 'hund [dog]' },
-        { row_number: 2, qml_line: 'ordered: stage one' },
-        { row_number: 4, qml_line: 'mot [against | toward]' }
+        { start_line: 1, end_line: 1, entry_kind: 'plain', qml_text: 'hund [dog]' },
+        { start_line: 2, end_line: 2, entry_kind: 'plain', qml_text: 'ordered: stage one' },
+        { start_line: 4, end_line: 4, entry_kind: 'plain', qml_text: 'mot [against | toward]' }
       ],
       valid_row_count: 2,
       exact_duplicate_count: 1,
       review_rows: [
         {
-          row_number: 2,
-          qml_line: 'ordered: stage one',
+          start_line: 2,
+          end_line: 2,
+          entry_kind: 'plain',
+          qml_text: 'ordered: stage one',
           status: 'invalid',
           status_text: 'Invalid QML: Question lines cannot be blank.',
           editable: true,
@@ -785,8 +882,10 @@ describe('ImportDrawer', () => {
           matched_questions: []
         },
         {
-          row_number: 4,
-          qml_line: 'mot [toward]',
+          start_line: 4,
+          end_line: 4,
+          entry_kind: 'plain',
+          qml_text: 'mot [toward]',
           status: 'duplicate',
           status_text: 'This prompt already exists in the target leaf. Commit will revise the existing question in place unless you edit the row first.',
           editable: true,
@@ -798,7 +897,8 @@ describe('ImportDrawer', () => {
               question_id: 8,
               module_id: 12,
               module_full_slug: 'norwegian/vocabulary/noun2en',
-              qml_line: 'mot [against]',
+              entry_kind: 'plain',
+              qml_text: 'mot [against]',
               answer_blocks: ['against']
             }
           ]
@@ -868,9 +968,9 @@ describe('ImportDrawer', () => {
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
     expect(commitSpy).toHaveBeenCalledWith([
-      { row_number: 1, qml_line: 'hund [dog]' },
-      { row_number: 2, qml_line: 'ordered: stage one ; stage two' },
-      { row_number: 4, qml_line: 'mot [toward]' }
+      { start_line: 1, end_line: 1, entry_kind: 'plain', qml_text: 'hund [dog]' },
+      { start_line: 2, end_line: 2, entry_kind: 'plain', qml_text: 'ordered: stage one ; stage two' },
+      { start_line: 4, end_line: 4, entry_kind: 'plain', qml_text: 'mot [toward]' }
     ]);
 
     await view.rerender({
@@ -895,8 +995,8 @@ describe('ImportDrawer', () => {
         ...result,
         ready_to_commit: true,
         rows: [
-          { row_number: 1, qml_line: 'hund [dog]' },
-          { row_number: 2, qml_line: 'ordered: stage one ; stage two' }
+          { start_line: 1, end_line: 1, entry_kind: 'plain', qml_text: 'hund [dog]' },
+          { start_line: 2, end_line: 2, entry_kind: 'plain', qml_text: 'ordered: stage one ; stage two' }
         ],
         valid_row_count: 3,
         exact_duplicate_count: 1,
@@ -912,8 +1012,8 @@ describe('ImportDrawer', () => {
     expect(screen.queryByRole('button', { name: 'Remove row 2' })).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Save' }));
     expect(commitSpy).toHaveBeenCalledWith([
-      { row_number: 1, qml_line: 'hund [dog]' },
-      { row_number: 2, qml_line: 'ordered: stage one ; stage two' }
+      { start_line: 1, end_line: 1, entry_kind: 'plain', qml_text: 'hund [dog]' },
+      { start_line: 2, end_line: 2, entry_kind: 'plain', qml_text: 'ordered: stage one ; stage two' }
     ]);
 
     await view.rerender({
@@ -942,13 +1042,15 @@ describe('ImportDrawer', () => {
     });
     const result: QuestionImportResult = {
       ready_to_commit: true,
-      rows: [{ row_number: 3, qml_line: 'hund [dog | canine | pooch]' }],
+      rows: [{ start_line: 3, end_line: 3, entry_kind: 'plain', qml_text: 'hund [dog | canine | pooch]' }],
       valid_row_count: 1,
       exact_duplicate_count: 0,
       review_rows: [
         {
-          row_number: 3,
-          qml_line: 'hund [dog | canine | pooch]',
+          start_line: 3,
+          end_line: 3,
+          entry_kind: 'plain',
+          qml_text: 'hund [dog | canine | pooch]',
           target_module_full_slug: 'norwegian/vocabulary/target',
           status: 'relocation',
           status_text:
@@ -962,7 +1064,8 @@ describe('ImportDrawer', () => {
               question_id: 7,
               module_id: 4,
               module_full_slug: 'norwegian/vocabulary/source_a',
-              qml_line: 'hund [dog]',
+              entry_kind: 'plain',
+              qml_text: 'hund [dog]',
               answer_blocks: ['dog']
             }
           ]
@@ -997,7 +1100,9 @@ describe('ImportDrawer', () => {
 
     expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(false);
     await user.click(screen.getByRole('button', { name: 'Save' }));
-    expect(commitSpy).toHaveBeenCalledWith([{ row_number: 3, qml_line: 'hund [dog | canine]' }]);
+    expect(commitSpy).toHaveBeenCalledWith([
+      { start_line: 3, end_line: 3, entry_kind: 'plain', qml_text: 'hund [dog | canine]' }
+    ]);
   });
 
   it('shows an inline nothing-to-save message for exact-duplicate-only imports', async () => {
@@ -1012,7 +1117,7 @@ describe('ImportDrawer', () => {
     });
     const result: QuestionImportResult = {
       ready_to_commit: false,
-      rows: [{ row_number: 1, qml_line: 'år [year]' }],
+      rows: [{ start_line: 1, end_line: 1, entry_kind: 'plain', qml_text: 'år [year]' }],
       valid_row_count: 0,
       exact_duplicate_count: 1,
       review_rows: [],
@@ -1034,7 +1139,9 @@ describe('ImportDrawer', () => {
     });
 
     await user.click(screen.getByRole('button', { name: 'Save' }));
-    expect(commitSpy).toHaveBeenCalledWith([{ row_number: 1, qml_line: 'år [year]' }]);
+    expect(commitSpy).toHaveBeenCalledWith([
+      { start_line: 1, end_line: 1, entry_kind: 'plain', qml_text: 'år [year]' }
+    ]);
 
     await view.rerender({
       open: true,
@@ -1061,13 +1168,15 @@ describe('ImportDrawer', () => {
     });
     const result: QuestionImportResult = {
       ready_to_commit: true,
-      rows: [{ row_number: 4, qml_line: 'mot [toward]' }],
+      rows: [{ start_line: 4, end_line: 4, entry_kind: 'plain', qml_text: 'mot [toward]' }],
       valid_row_count: 1,
       exact_duplicate_count: 0,
       review_rows: [
         {
-          row_number: 4,
-          qml_line: 'mot [toward]',
+          start_line: 4,
+          end_line: 4,
+          entry_kind: 'plain',
+          qml_text: 'mot [toward]',
           status: 'duplicate',
           status_text: 'This prompt already exists in the target leaf.',
           editable: true,
@@ -1079,7 +1188,8 @@ describe('ImportDrawer', () => {
               question_id: 8,
               module_id: 31,
               module_full_slug: 'norwegian/vocabulary/target',
-              qml_line: 'mot [against]',
+              entry_kind: 'plain',
+              qml_text: 'mot [against]',
               answer_blocks: ['against']
             }
           ]
@@ -1097,7 +1207,7 @@ describe('ImportDrawer', () => {
         result,
         busy: false,
         draftText: 'mot [toward]',
-        draftRows: [{ row_number: 4, qml_line: 'mot [toward]' }],
+        draftRows: [{ start_line: 4, end_line: 4, entry_kind: 'plain', qml_text: 'mot [toward]' }],
         onClose: vi.fn(),
         onDraftChange: draftSpy,
         onStartImport: vi.fn(),
@@ -1106,7 +1216,9 @@ describe('ImportDrawer', () => {
     });
 
     await user.click(screen.getByRole('button', { name: 'Toggle current answer against in QML row 4' }));
-    expect(draftSpy).toHaveBeenLastCalledWith('mot [toward]', [{ row_number: 4, qml_line: 'mot [toward | against]' }]);
+    expect(draftSpy).toHaveBeenLastCalledWith('mot [toward]', [
+      { start_line: 4, end_line: 4, entry_kind: 'plain', qml_text: 'mot [toward | against]' }
+    ]);
 
     await user.click(screen.getByRole('button', { name: 'Remove row 4' }));
     expect(draftSpy).toHaveBeenLastCalledWith('mot [toward]', []);
@@ -1142,13 +1254,15 @@ describe('ImportDrawer', () => {
     });
     const result: QuestionImportResult = {
       ready_to_commit: true,
-      rows: [{ row_number: 4, qml_line: 'mot [toward]' }],
+      rows: [{ start_line: 4, end_line: 4, entry_kind: 'plain', qml_text: 'mot [toward]' }],
       valid_row_count: 1,
       exact_duplicate_count: 0,
       review_rows: [
         {
-          row_number: 4,
-          qml_line: 'mot [toward]',
+          start_line: 4,
+          end_line: 4,
+          entry_kind: 'plain',
+          qml_text: 'mot [toward]',
           status: 'duplicate',
           status_text: 'This prompt already exists in the target leaf.',
           editable: true,
@@ -1160,7 +1274,8 @@ describe('ImportDrawer', () => {
               question_id: 8,
               module_id: 32,
               module_full_slug: 'norwegian/vocabulary/target',
-              qml_line: 'mot [against]',
+              entry_kind: 'plain',
+              qml_text: 'mot [against]',
               answer_blocks: ['against']
             }
           ]
@@ -1171,7 +1286,7 @@ describe('ImportDrawer', () => {
       committed_count: 0
     };
 
-    let echoedRows = [{ row_number: 4, qml_line: 'mot [against]' }];
+    let echoedRows = [{ start_line: 4, end_line: 4, entry_kind: 'plain', qml_text: 'mot [against]' }];
     let view: ReturnType<typeof render> | null = null;
     const rerenderWithEcho = async (): Promise<void> => {
       if (!view) {
@@ -1190,7 +1305,7 @@ describe('ImportDrawer', () => {
         onCommit: vi.fn()
       });
     };
-    const handleDraftChange = (_qmlText: string, rows: { row_number: number; qml_line: string }[]): void => {
+    const handleDraftChange = (_qmlText: string, rows: { start_line: number; end_line: number; entry_kind: 'plain' | 'bundle'; qml_text: string }[]): void => {
       echoedRows = rows.map((row) => ({ ...row }));
       void rerenderWithEcho();
     };

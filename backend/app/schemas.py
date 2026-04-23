@@ -369,37 +369,11 @@ class QuestionImportRowIn(BaseModel):
     end_line: int = Field(ge=1)
     entry_kind: Literal["plain", "bundle"] = "plain"
     qml_text: str
-    row_number: int | None = Field(default=None, ge=1)
-    qml_line: str | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def normalize_legacy_shape(cls, data: Any) -> Any:
-        if not isinstance(data, dict):
-            return data
-        if "start_line" in data and "end_line" in data and "qml_text" in data:
-            return data
-        row_number = data.get("row_number")
-        qml_line = data.get("qml_line")
-        if row_number is None or qml_line is None:
-            return data
-        return {
-            "start_line": row_number,
-            "end_line": row_number,
-            "entry_kind": "plain",
-            "qml_text": qml_line,
-            "row_number": row_number,
-            "qml_line": qml_line,
-        }
 
     @model_validator(mode="after")
     def validate_range(self) -> "QuestionImportRowIn":
         if self.end_line < self.start_line:
             raise ValueError("end_line must be greater than or equal to start_line.")
-        if not self.row_number:
-            self.row_number = self.start_line
-        if self.qml_line is None:
-            self.qml_line = self.qml_text
         return self
 
 
@@ -408,8 +382,6 @@ class QuestionImportRowOut(BaseModel):
     end_line: int
     entry_kind: Literal["plain", "bundle"]
     qml_text: str
-    row_number: int
-    qml_line: str
 
 
 class ValidateQuestionImportIn(BaseModel):
@@ -439,14 +411,7 @@ class QuestionImportMatchedQuestionOut(BaseModel):
     entry_kind: Literal["plain", "bundle"] = "plain"
     start_line: int | None = None
     end_line: int | None = None
-    qml_line: str | None = None
     answer_blocks: list[str] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def fill_alias(self) -> "QuestionImportMatchedQuestionOut":
-        if self.qml_line is None:
-            self.qml_line = self.qml_text
-        return self
 
 
 class QuestionImportReviewRowOut(BaseModel):
@@ -454,8 +419,6 @@ class QuestionImportReviewRowOut(BaseModel):
     end_line: int
     entry_kind: Literal["plain", "bundle"]
     qml_text: str
-    row_number: int
-    qml_line: str
     status: QuestionImportReviewStatus
     status_text: str
     editable: bool = False
@@ -470,7 +433,7 @@ class QuestionImportResultOut(BaseModel):
     ready_to_commit: bool
     rows: list[QuestionImportRowOut] = Field(default_factory=list)
     valid_row_count: int
-    committable_row_numbers: list[int] = Field(default_factory=list)
+    committable_start_lines: list[int] = Field(default_factory=list)
     exact_duplicate_count: int = 0
     review_rows: list[QuestionImportReviewRowOut] = Field(default_factory=list)
     report_text: str

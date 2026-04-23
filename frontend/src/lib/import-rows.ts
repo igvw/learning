@@ -5,22 +5,20 @@ export function cloneImportRows(rows: QuestionImportRowPayload[]): QuestionImpor
     start_line: row.start_line,
     end_line: row.end_line,
     entry_kind: row.entry_kind,
-    qml_text: row.qml_text,
-    row_number: row.row_number,
-    qml_line: row.qml_line
+    qml_text: row.qml_text
   }));
 }
 
-export function reviewRowDraftQmlLine(row: QuestionImportReviewRow): string {
-  if ((row.status === 'duplicate' || row.status === 'relocation') && row.matched_questions.length > 0 && row.matched_questions[0]?.qml_line) {
-    return row.matched_questions[0].qml_line;
+export function reviewRowDraftQmlText(row: QuestionImportReviewRow): string {
+  if ((row.status === 'duplicate' || row.status === 'relocation') && row.matched_questions.length > 0 && row.matched_questions[0]?.qml_text) {
+    return row.matched_questions[0].qml_text;
   }
-  return row.qml_line;
+  return row.qml_text;
 }
 
 export function draftImportRowsFromResult(result: QuestionImportResult): QuestionImportRowPayload[] {
   const editableReviewRowLines = new Map(
-    result.review_rows.filter((row) => row.editable).map((row) => [row.row_number, reviewRowDraftQmlLine(row)])
+    result.review_rows.filter((row) => row.editable).map((row) => [row.start_line, reviewRowDraftQmlText(row)])
   );
 
   return cloneImportRows(
@@ -28,24 +26,28 @@ export function draftImportRowsFromResult(result: QuestionImportResult): Questio
       start_line: row.start_line,
       end_line: row.end_line,
       entry_kind: row.entry_kind,
-      qml_text: editableReviewRowLines.get(row.row_number) ?? row.qml_text,
-      row_number: row.row_number,
-      qml_line: editableReviewRowLines.get(row.row_number) ?? row.qml_line
+      qml_text: editableReviewRowLines.get(row.start_line) ?? row.qml_text
     }))
-  ).sort((left, right) => left.row_number - right.row_number);
+  ).sort((left, right) => left.start_line - right.start_line);
 }
 
 export function currentImportRowValue(
   rows: QuestionImportRowPayload[],
-  rowNumber: number,
+  startLine: number,
   fallback: string
 ): string {
-  return rows.find((row) => row.row_number === rowNumber)?.qml_line ?? fallback;
+  return rows.find((row) => row.start_line === startLine)?.qml_text ?? fallback;
 }
 
 export function sameImportRows(left: QuestionImportRowPayload[], right: QuestionImportRowPayload[]): boolean {
   if (left.length !== right.length) {
     return false;
   }
-  return left.every((row, index) => row.row_number === right[index].row_number && row.qml_line === right[index].qml_line);
+  return left.every(
+    (row, index) =>
+      row.start_line === right[index].start_line &&
+      row.end_line === right[index].end_line &&
+      row.entry_kind === right[index].entry_kind &&
+      row.qml_text === right[index].qml_text
+  );
 }

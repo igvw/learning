@@ -11,7 +11,6 @@ QML revised keeps the current plain one-line QML format for ordinary non-bundle 
 The key direction is:
 
 - plain one-line QML stays valid for `single_text`, `multi_text`, `ordered_multi`, and `inline_cloze`
-- `computed_text` is removed rather than preserved
 - bundles are first-class authoring/runtime units, not just import sugar
 - one bundle maps to one learning item with shared progress/history
 - each quiz serving resolves one concrete variant before the quiz item is persisted
@@ -30,7 +29,7 @@ But it is not the desired long-term authoring model for:
 
 - grouped variants that should stay logically tied together
 - structured regular-user creation flows
-- replacing math-style `computed_text` questions with something more intentional
+- explicit parameterized variants that stay bundled together
 
 The app is still alpha, so this document uses the label **QML revised** instead of pretending there is already a stable versioned format contract to preserve.
 
@@ -41,7 +40,6 @@ The app is still alpha, so this document uses the label **QML revised** instead 
 - bundles are **first-class runtime/storage concepts**
 - plain one-line QML remains valid alongside bundles
 - v1 bundle scope is intentionally **single-answer only**
-- `computed_text` is replaced, not retained as a co-equal long-term mode
 - ghost text and distractors are explicitly out of scope for this first bundle design
 
 ## File Model
@@ -51,7 +49,7 @@ A `questions.qml` file may contain:
 - plain current-style one-line questions
 - top-level `{ ... }` bundle blocks
 
-Plain lines remain valid only for the non-computed serving shapes. Revised QML does not include math-style `computed_text` syntax.
+Plain lines remain valid for `single_text`, `multi_text`, `ordered_multi`, and `inline_cloze`.
 
 Blank lines may appear between questions and between bundle rows for readability. Nested bundle blocks are not part of the design.
 
@@ -70,7 +68,6 @@ Recommended surface:
 
 - the first non-blank line inside a bundle is the template line
 - the template line must resolve to a single-answer question
-- `computed_text` is not allowed inside bundles
 - `{}` marks a prompt-value placeholder
 - `[]` marks the single answer slot
 - placeholders are positional and anonymous in v1
@@ -162,19 +159,6 @@ Prompt identity should follow the template skeleton, not a single resolved varia
 
 In practice, this means bundle identity should be keyed from the normalized template structure plus serving shape, not from one sampled prompt.
 
-## Breaking Change: Remove `computed_text`
-
-This is an alpha cleanup, not a backwards-compatibility project.
-
-The rollout should:
-
-- delete existing `computed_text` questions before bundle support lands
-- stop accepting new `computed_text` authoring
-- remove `computed_text` from the canonical `QuestionType` model
-- remove `computed_text` import, export, editor, and runtime paths instead of keeping compatibility glue
-
-The long-term replacement for computed questions is bundle-backed explicit variants, not a more elaborate inline expression language.
-
 ## Rollout Order
 
 ### Phase 1: Import, export, storage, runtime
@@ -184,7 +168,7 @@ The long-term replacement for computed questions is bundle-backed explicit varia
 - add first-class bundle storage
 - resolve bundle variants at quiz-session creation
 - persist the resolved prompt/type-config into `quiz_session_items`
-- remove `computed_text` import/runtime support
+- keep the supported authoring syntax focused on plain one-line questions plus bundle blocks
 
 This phase should not yet redesign the regular-user add flow.
 

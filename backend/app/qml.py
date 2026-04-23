@@ -462,10 +462,8 @@ def qml_lines_from_text(qml_text: str) -> list[dict[str, Any]]:
                 {
                     "start_line": start_line,
                     "end_line": start_line + len(entry_lines) - 1,
-                    "row_number": start_line,
                     "entry_kind": "bundle",
                     "qml_text": qml_entry,
-                    "qml_line": qml_entry,
                 }
             )
             continue
@@ -474,10 +472,8 @@ def qml_lines_from_text(qml_text: str) -> list[dict[str, Any]]:
             {
                 "start_line": start_line,
                 "end_line": start_line,
-                "row_number": start_line,
                 "entry_kind": "plain",
                 "qml_text": raw_line,
-                "qml_line": raw_line,
             }
         )
         index += 1

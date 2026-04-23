@@ -64,7 +64,7 @@ Result fields:
 - `ready_to_commit`
 - `rows`
 - `valid_row_count`
-- `committable_row_numbers`
+- `committable_start_lines`
 - `exact_duplicate_count`
 - `review_rows`
 - `report_text`
@@ -77,8 +77,6 @@ Each `review_row` includes:
 - `end_line`
 - `entry_kind`
 - `qml_text`
-- `row_number`
-- `qml_line`
 - `status`
 - `status_text`
 - `editable`

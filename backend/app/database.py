@@ -295,8 +295,6 @@ def initialize_database(database_url: str) -> None:
                 )
                 """
             )
-            connection.execute("DELETE FROM question_revision_proposals WHERE question_type = 'computed_text'")
-            connection.execute("DELETE FROM questions WHERE question_type = 'computed_text'")
         if current_version != 0:
             connection.executescript(SCHEMA_SQL)
         _set_schema_version(connection, CURRENT_SCHEMA_VERSION)

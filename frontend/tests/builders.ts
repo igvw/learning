@@ -172,16 +172,20 @@ export function buildStatsResponse(
 
 export function buildImportRow(overrides: Partial<QuestionImportRowPayload> = {}): QuestionImportRowPayload {
   return {
-    row_number: 1,
-    qml_line: 'mot [against]',
+    start_line: 1,
+    end_line: 1,
+    entry_kind: 'plain',
+    qml_text: 'mot [against]',
     ...overrides
   };
 }
 
 export function buildImportReviewRow(overrides: Partial<QuestionImportReviewRow> = {}): QuestionImportReviewRow {
   return {
-    row_number: 1,
-    qml_line: 'mot [against]',
+    start_line: 1,
+    end_line: 1,
+    entry_kind: 'plain',
+    qml_text: 'mot [against]',
     status: 'duplicate',
     status_text: 'This prompt already exists in the target leaf.',
     editable: true,
@@ -198,15 +202,15 @@ export function buildImportResult(
   overrides: Partial<QuestionImportResult> & {
     rows?: QuestionImportRowPayload[];
     review_rows?: QuestionImportReviewRow[];
-    committable_row_numbers?: number[];
+    committable_start_lines?: number[];
   } = {}
 ): QuestionImportResult {
-  const { rows, review_rows, committable_row_numbers, ...resultOverrides } = overrides;
+  const { rows, review_rows, committable_start_lines, ...resultOverrides } = overrides;
   return {
     ready_to_commit: false,
     rows: rows ?? [],
     valid_row_count: 0,
-    committable_row_numbers: committable_row_numbers ?? [],
+    committable_start_lines: committable_start_lines ?? [],
     exact_duplicate_count: 0,
     review_rows: review_rows ?? [],
     report_text: '',

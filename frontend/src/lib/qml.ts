@@ -8,6 +8,16 @@ export interface ParsedQmlQuestion {
   bundle_qml?: string | null;
 }
 
+export interface BundleVariant {
+  prompt_values: string[];
+  accepted_answers: string[];
+}
+
+export interface ParsedBundleEditor {
+  template: string;
+  variants: BundleVariant[];
+}
+
 export class QmlError extends Error {}
 
 function splitEscaped(text: string, separator: string): string[] {
@@ -372,48 +382,85 @@ function parseBundleVariantRow(line: string, promptValueCount: number): { prompt
   return { prompt_values, accepted_answers: parseAnswerGroup(answerCell) };
 }
 
-export function buildBundleQml(prompt: string, variants: Array<{ prompt_values: string[]; accepted_answers: string[] }>): string {
-  const lines = [`{${prompt.trim()}`];
+export function countBundlePromptValues(prompt: string): number {
+  return prompt.split('{}').length - 1;
+}
+
+export function buildBundleEditorText(prompt: string, variants: BundleVariant[]): string {
+  const lines = [prompt.trim()];
   for (const variant of variants) {
     const promptCells = variant.prompt_values.map((value) => `{${escapeQmlText(value)}}`).join(' ');
     const answerCell = `[${variant.accepted_answers.map(escapeQmlText).join(' | ')}]`;
-    lines.push(` ${[promptCells, answerCell].filter(Boolean).join(' ')}`);
+    lines.push(` ${[promptCells, answerCell].filter(Boolean).join(' ')}`.trimEnd());
   }
-  if (variants.length === 0) {
-    lines.push('}');
-    return lines.join('\n');
+  return lines.join('\n');
+}
+
+export function buildBundleQml(prompt: string, variants: BundleVariant[]): string {
+  const editorText = buildBundleEditorText(prompt, variants);
+  if (!editorText) {
+    return '';
   }
+  const lines = editorText.split('\n');
+  lines[0] = `{${lines[0]}`;
   lines[lines.length - 1] = `${lines[lines.length - 1]}}`;
   return lines.join('\n');
 }
 
-function parseBundleQml(qmlText: string): ParsedQmlQuestion {
-  const contentLines = stripBundleOuterWrapper(qmlText);
+export function wrapBundleQml(qmlText: string): string {
+  const trimmed = qmlText.trim();
+  if (!trimmed) {
+    return '';
+  }
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    return trimmed;
+  }
+  const lines = splitBundleLines(trimmed);
+  lines[0] = `{${lines[0].trimStart()}`;
+  lines[lines.length - 1] = `${lines[lines.length - 1].trimEnd()}}`;
+  return lines.join('\n');
+}
+
+export function unwrapBundleQml(qmlText: string): string {
+  return stripBundleOuterWrapper(qmlText).join('\n');
+}
+
+export function parseBundleEditorText(qmlText: string): ParsedBundleEditor {
+  const contentLines = stripBundleOuterWrapper(wrapBundleQml(qmlText));
   const templateLine = contentLines[0];
   const variantLines = contentLines.slice(1);
   const { segments, promptValues, answerValues } = parseBundleTemplateSignature(templateLine);
-  const prompt = bundleTemplateFromSegments(segments);
+  const template = bundleTemplateFromSegments(segments);
   const inlineFirstExample = promptValues.some((value) => value !== '') || answerValues.length > 0;
-
-  const bundleVariants: Array<{ prompt_values: string[]; accepted_answers: string[] }> = [];
+  const variants: BundleVariant[] = [];
   if (inlineFirstExample) {
-    bundleVariants.push({ prompt_values: promptValues, accepted_answers: answerValues });
+    variants.push({ prompt_values: promptValues, accepted_answers: answerValues });
   }
-  const promptValueCount = prompt.split('{}').length - 1;
+  const promptValueCount = countBundlePromptValues(template);
   for (const line of variantLines) {
-    bundleVariants.push(parseBundleVariantRow(line, promptValueCount));
+    variants.push(parseBundleVariantRow(line, promptValueCount));
   }
-  if (bundleVariants.length === 0) {
+  if (variants.length === 0) {
     throw new QmlError('Bundle must include at least one variant row.');
   }
 
+  return { template, variants };
+}
+
+function parseBundleQml(qmlText: string): ParsedQmlQuestion {
+  const { template, variants } = parseBundleEditorText(qmlText);
   return {
-    prompt,
+    prompt: template,
     question_type: 'bundle',
     accepted_answers: [],
     segments: [],
-    bundle_qml: buildBundleQml(prompt, bundleVariants)
+    bundle_qml: buildBundleQml(template, variants)
   };
+}
+
+export function canonicalizeBundleEditorText(qmlText: string): string {
+  const { template, variants } = parseBundleEditorText(qmlText);
+  return buildBundleEditorText(template, variants);
 }
 
 export function parseQmlLine(line: string): ParsedQmlQuestion {

@@ -10,13 +10,12 @@ Product identity:
 
 Key roadmap conclusion:
 
-- the immediate next product step is the authoring transition: explicit QML revised top-level bundle blocks, removing `computed_text`, and giving regular users a smooth non-QML add flow
+- the immediate next product step is the authoring transition: explicit QML revised top-level bundle blocks and a smooth non-QML add flow for regular users
 - the likely beta differentiator after that is still a more performant data model and database design that unlocks faster authoring, richer study modes, portability, and later experimentation
 
 ## Near-Term Focus
 
 - land QML revised as explicit top-level `{ ... }` bundle blocks while keeping plain one-line QML for non-bundle questions
-- remove `computed_text` instead of carrying it forward as a long-term authoring path
 - make the stats-page `Add` flow smooth for regular users now that QML is admin-only
 - keep admin QML tooling available while the structured regular-user authoring flow catches up
 
@@ -56,7 +55,6 @@ Key roadmap conclusion:
 
 - QML revised
   - use explicit top-level `{ ... }` bundle blocks alongside plain one-line QML
-  - remove `computed_text` and replace it with bundle-backed explicit variants
   - bundles should stay one learning item with shared history while each quiz serving resolves one concrete variant
   - first implementation priority is import/export, storage, and runtime before regular-user authoring UI
   - see [QML Revised](qml-revised.md) for the current design/planning direction

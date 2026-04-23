@@ -400,7 +400,7 @@ describe('App', () => {
     await user.clear(promptInput);
     await user.type(promptInput, 'cells refined');
 
-    const answersInput = screen.getByLabelText('Accepted answers, one per line');
+    const answersInput = screen.getByLabelText('Accepted answers');
     await user.clear(answersInput);
     await user.type(answersInput, 'cellular');
 

@@ -148,19 +148,21 @@ describe('import flow', () => {
     const modules = buildImportModules();
     const restoredResult = buildImportResult({
       ready_to_commit: true,
-      rows: [buildImportRow({ row_number: 35, qml_line: 'mot [against | toward]' })],
+      rows: [buildImportRow({ start_line: 35, end_line: 35, entry_kind: 'plain', qml_text: 'mot [against | toward]' })],
       valid_row_count: 1,
-      committable_row_numbers: [35],
+      committable_start_lines: [35],
       review_rows: [
         buildImportReviewRow({
-          row_number: 35,
-          qml_line: 'mot [against | toward]',
+          start_line: 35,
+          end_line: 35,
+          qml_text: 'mot [against | toward]',
           matched_questions: [
             {
               question_id: 8,
               module_id: 3,
               module_full_slug: 'norwegian/vocabulary/noun2en',
-              qml_line: 'mot [against]',
+              entry_kind: 'plain',
+              qml_text: 'mot [against]',
               answer_blocks: ['against']
             }
           ]
@@ -226,15 +228,17 @@ describe('import flow', () => {
     const modules = buildImportModules();
     const rows = Array.from({ length: 120 }, (_, index) =>
       buildImportRow({
-        row_number: index + 1,
-        qml_line: `ord ${index + 1} [answer ${index + 1}]`
+        start_line: index + 1,
+        end_line: index + 1,
+        entry_kind: 'plain',
+        qml_text: `ord ${index + 1} [answer ${index + 1}]`
       })
     );
     const importResult = buildImportResult({
       ready_to_commit: true,
       rows,
       valid_row_count: 120,
-      committable_row_numbers: rows.map((row) => row.row_number),
+      committable_start_lines: rows.map((row) => row.start_line),
       report_text: '120 ready to commit'
     });
 
@@ -252,7 +256,7 @@ describe('import flow', () => {
 
     render(App);
     await openImportDrawer(user);
-    await startImport(user, rows.map((row) => row.qml_line).join('\n'));
+    await startImport(user, rows.map((row) => row.qml_text).join('\n'));
 
     await waitFor(() => {
       expect(within(getImportDrawer()).getByRole('button', { name: 'Save' })).toBeTruthy();
@@ -292,19 +296,21 @@ describe('import flow', () => {
     const modules = buildImportModules();
     const sessionResult = buildImportResult({
       ready_to_commit: true,
-      rows: [buildImportRow({ row_number: 1, qml_line: 'mot [toward]' })],
+      rows: [buildImportRow({ start_line: 1, end_line: 1, entry_kind: 'plain', qml_text: 'mot [toward]' })],
       valid_row_count: 1,
-      committable_row_numbers: [1],
+      committable_start_lines: [1],
       review_rows: [
         buildImportReviewRow({
-          row_number: 1,
-          qml_line: 'mot [toward]',
+          start_line: 1,
+          end_line: 1,
+          qml_text: 'mot [toward]',
           matched_questions: [
             {
               question_id: 8,
               module_id: 3,
               module_full_slug: 'norwegian/vocabulary/noun2en',
-              qml_line: 'mot [against]',
+              entry_kind: 'plain',
+              qml_text: 'mot [against]',
               answer_blocks: ['against']
             }
           ]
@@ -313,7 +319,7 @@ describe('import flow', () => {
       report_text: '1 row ready'
     });
     const exactDuplicateResult = buildImportResult({
-      rows: [buildImportRow({ row_number: 1, qml_line: 'mot [against]' })],
+      rows: [buildImportRow({ start_line: 1, end_line: 1, entry_kind: 'plain', qml_text: 'mot [against]' })],
       exact_duplicate_count: 1,
       report_text: '1 exact duplicates omitted'
     });
@@ -349,26 +355,29 @@ describe('import flow', () => {
     const modules = buildImportModules();
     const rows = Array.from({ length: 55 }, (_, index) =>
       buildImportRow({
-        row_number: index + 1,
-        qml_line: `ord ${index + 1} [answer ${index + 1}]`
+        start_line: index + 1,
+        end_line: index + 1,
+        entry_kind: 'plain',
+        qml_text: `ord ${index + 1} [answer ${index + 1}]`
       })
     );
     const initialResult = buildImportResult({
       ready_to_commit: true,
       rows,
       valid_row_count: 55,
-      committable_row_numbers: rows.map((row) => row.row_number),
+      committable_start_lines: rows.map((row) => row.start_line),
       report_text: '55 ready to commit'
     });
     const remainingRows = rows.slice(50);
     const remainingResult = buildImportResult({
       rows: remainingRows,
       valid_row_count: 4,
-      committable_row_numbers: [51, 53, 54, 55],
+      committable_start_lines: [51, 53, 54, 55],
       review_rows: [
         buildImportReviewRow({
-          row_number: 52,
-          qml_line: 'broken row',
+          start_line: 52,
+          end_line: 52,
+          qml_text: 'broken row',
           status: 'invalid',
           status_text: 'Invalid QML: Question lines cannot be blank.',
           blocking: true,
@@ -392,7 +401,7 @@ describe('import flow', () => {
 
     render(App);
     await openImportDrawer(user);
-    await startImport(user, rows.map((row) => row.qml_line).join('\n'));
+    await startImport(user, rows.map((row) => row.qml_text).join('\n'));
 
     await waitFor(() => {
       expect(within(getImportDrawer()).getByRole('button', { name: 'Save' })).toBeTruthy();

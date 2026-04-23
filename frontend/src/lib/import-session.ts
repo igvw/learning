@@ -26,15 +26,15 @@ export function importCommitQueue(
   rows: QuestionImportRowPayload[],
   result: QuestionImportResult
 ): QuestionImportRowPayload[] {
-  const committableRows = new Set(result.committable_row_numbers ?? []);
-  return rows.filter((row) => committableRows.has(row.row_number));
+  const committableRows = new Set(result.committable_start_lines);
+  return rows.filter((row) => committableRows.has(row.start_line));
 }
 
 export function removeCommittedImportRows(
   rows: QuestionImportRowPayload[],
-  committedRowNumbers: Set<number>
+  committedStartLines: Set<number>
 ): QuestionImportRowPayload[] {
-  return rows.filter((row) => !committedRowNumbers.has(row.row_number));
+  return rows.filter((row) => !committedStartLines.has(row.start_line));
 }
 
 export function validationSaveStatus(result: QuestionImportResult): ImportSaveStatus | null {

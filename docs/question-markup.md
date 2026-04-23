@@ -327,5 +327,3 @@ Reason: `z` is unbound.
 This document describes the current QML/DSL format only.
 
 The future direction for explicit top-level `{ ... }` bundle blocks and continued plain one-line QML for non-bundle questions is tracked separately in [QML Revised](qml-revised.md).
-
-This document describes the legacy flat format. Bundle-backed authoring and review now live in the revised QML path instead of the old `computed_text` model.

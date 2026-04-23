@@ -56,18 +56,15 @@
     input.value = '';
   }
 
-  function updateQmlLine(rowNumber: number, value: string): void {
+  function updateQmlText(startLine: number, value: string): void {
     saveAttempted = false;
     pendingRows = pendingRows.map((row) => {
-      if (row.row_number !== rowNumber) {
+      if (row.start_line !== startLine) {
         return row;
       }
       return {
         ...row,
-        qml_line: value,
-        ...((row.entry_kind || row.start_line !== undefined || row.end_line !== undefined)
-          ? { qml_text: value }
-          : {})
+        qml_text: value
       };
     });
   }
@@ -78,9 +75,9 @@
     await onStartImport(qmlText);
   }
 
-  async function handleDiscardRow(rowNumber: number): Promise<void> {
+  async function handleDiscardRow(startLine: number): Promise<void> {
     saveAttempted = false;
-    pendingRows = pendingRows.filter((row) => row.row_number !== rowNumber);
+    pendingRows = pendingRows.filter((row) => row.start_line !== startLine);
   }
 
   async function handleSave(): Promise<void> {
@@ -94,42 +91,38 @@
 
   function serializeRows(rows: QuestionImportRowPayload[]): QuestionImportRowPayload[] {
     return rows.map((row) => ({
-      ...(row.start_line !== undefined ? { start_line: row.start_line } : {}),
-      ...(row.end_line !== undefined ? { end_line: row.end_line } : {}),
-      ...(row.entry_kind ? { entry_kind: row.entry_kind } : {}),
-      ...(row.entry_kind === 'bundle' || row.start_line !== undefined || row.end_line !== undefined
-        ? { qml_text: row.qml_text ?? row.qml_line }
-        : {}),
-      row_number: row.row_number,
-      qml_line: row.qml_line
+      start_line: row.start_line,
+      end_line: row.end_line,
+      entry_kind: row.entry_kind,
+      qml_text: row.qml_text
     }));
   }
 
   function answerSelected(row: QuestionImportReviewRow, choice: AnswerChoice): boolean {
-    return answerSelectedInQmlLine(currentRowValue(row.row_number, row.qml_line), choice.blockIndex, choice.text);
+    return answerSelectedInQmlLine(currentRowValue(row.start_line, row.qml_text), choice.blockIndex, choice.text);
   }
 
   function handleToggleAnswer(row: QuestionImportReviewRow, choice: AnswerChoice): void {
     if (!row.editable || busy) {
       return;
     }
-    updateQmlLine(
-      row.row_number,
-      toggleAnswerInQmlLine(currentRowValue(row.row_number, row.qml_line), choice.blockIndex, choice.text)
+    updateQmlText(
+      row.start_line,
+      toggleAnswerInQmlLine(currentRowValue(row.start_line, row.qml_text), choice.blockIndex, choice.text)
     );
   }
 
   $: marker =
     result
-      ? `${open}:${moduleNode?.id ?? 'none'}:${result.rows.map((row) => `${row.row_number}:${row.qml_line}`).join('|')}:${result.review_rows
-          .map((row) => `${row.row_number}:${row.status}:${row.qml_line}`)
+      ? `${open}:${moduleNode?.id ?? 'none'}:${result.rows.map((row) => `${row.start_line}:${row.qml_text}`).join('|')}:${result.review_rows
+          .map((row) => `${row.start_line}:${row.status}:${row.qml_text}`)
           .join('|')}:${result.valid_row_count}:${result.exact_duplicate_count}`
-      : `${open}:${moduleNode?.id ?? 'none'}:${draftText}:${draftRows.map((row) => `${row.row_number}:${row.qml_line}`).join('|')}`;
+      : `${open}:${moduleNode?.id ?? 'none'}:${draftText}:${draftRows.map((row) => `${row.start_line}:${row.qml_text}`).join('|')}`;
   $: if (marker !== localMarker && open) {
     localMarker = marker;
     if (!result) {
       qmlText = draftText;
-      pendingRows = cloneImportRows(draftRows).sort((left, right) => left.row_number - right.row_number);
+      pendingRows = cloneImportRows(draftRows).sort((left, right) => left.start_line - right.start_line);
       if (!draftText.trim() && draftRows.length === 0) {
         saveAttempted = false;
       }
@@ -137,7 +130,7 @@
       qmlText = draftText;
       pendingRows =
         draftRows.length > 0
-          ? cloneImportRows(draftRows).sort((left, right) => left.row_number - right.row_number)
+          ? cloneImportRows(draftRows).sort((left, right) => left.start_line - right.start_line)
           : effectiveImportRowsFromResult(result);
     }
   } else if (!open && localMarker) {
@@ -148,7 +141,7 @@
     saveAttempted = false;
   }
   $: displayReviewRows = reviewRowsForPendingRows(result, pendingRows);
-  $: draftStateMarker = `${open}:${qmlText}:${pendingRows.map((row) => `${row.row_number}:${row.qml_line}`).join('|')}`;
+  $: draftStateMarker = `${open}:${qmlText}:${pendingRows.map((row) => `${row.start_line}:${row.qml_text}`).join('|')}`;
   $: if (open && draftStateMarker !== publishMarker) {
     publishMarker = draftStateMarker;
     onDraftChange(qmlText, serializeRows(pendingRows));
@@ -280,8 +273,8 @@
                           </tr>
                         </thead>
                         <tbody>
-                          {#each plainReviewRows as row (row.row_number)}
-                            {@const blockChoicesList = answerChoicesByBlock(row, currentRowValue(row.row_number, row.qml_line))}
+                          {#each plainReviewRows as row (row.start_line)}
+                            {@const blockChoicesList = answerChoicesByBlock(row, currentRowValue(row.start_line, row.qml_text))}
                             <tr class:review-row-blocking={row.blocking}>
                               <td>
                                 <div
@@ -289,7 +282,7 @@
                                   title={row.status_text}
                                   aria-label={row.status_text}
                                 >
-                                  {row.row_number}
+                                  {row.start_line}
                                 </div>
                               </td>
                               <td>
@@ -299,20 +292,20 @@
                                       <input
                                         class="qml-line-input"
                                         type="text"
-                                        value={currentRowValue(row.row_number, row.qml_line)}
+                                        value={currentRowValue(row.start_line, row.qml_text)}
                                         disabled={busy}
-                                        on:input={(event) => updateQmlLine(row.row_number, (event.currentTarget as HTMLInputElement).value)}
+                                        on:input={(event) => updateQmlText(row.start_line, (event.currentTarget as HTMLInputElement).value)}
                                       />
                                     {:else}
-                                      <code class="qml-line-preview qml-line-preview-compact">{row.qml_line}</code>
+                                      <code class="qml-line-preview qml-line-preview-compact">{row.qml_text}</code>
                                     {/if}
                                   </div>
                                   <button
                                     class="import-remove-button"
                                     type="button"
                                     disabled={busy}
-                                    aria-label={`Remove row ${row.row_number}`}
-                                    on:click={() => void handleDiscardRow(row.row_number)}
+                                    aria-label={`Remove row ${row.start_line}`}
+                                    on:click={() => void handleDiscardRow(row.start_line)}
                                   >
                                     ×
                                   </button>
@@ -336,7 +329,7 @@
                                                   type="button"
                                                   disabled={!row.editable || busy}
                                                   title={answerChoiceSourceLabel(choice)}
-                                                  aria-label={`Toggle ${answerChoiceSourceLabel(choice).toLowerCase()} ${choice.text} in QML row ${row.row_number}`}
+                                                  aria-label={`Toggle ${answerChoiceSourceLabel(choice).toLowerCase()} ${choice.text} in QML row ${row.start_line}`}
                                                   on:click={() => handleToggleAnswer(row, choice)}
                                                 >
                                                   {choice.text}
@@ -367,7 +360,7 @@
                         <h3>Bundle entries</h3>
                         <p class="muted-copy">{bundleReviewRows.length} bundle entries need review.</p>
                       </div>
-                      {#each bundleReviewRows as row (row.row_number)}
+                      {#each bundleReviewRows as row (row.start_line)}
                         <div class={`dynamic-card compact-dynamic-card ${row.blocking ? 'review-row-blocking' : ''}`}>
                           <div class="subsection-header">
                             <div>
@@ -378,7 +371,7 @@
                               class="ghost-button"
                               type="button"
                               disabled={busy}
-                              on:click={() => void handleDiscardRow(row.row_number)}
+                              on:click={() => void handleDiscardRow(row.start_line)}
                             >
                               Remove
                             </button>
@@ -387,9 +380,9 @@
                             <textarea
                               class="qml-textarea"
                               rows="8"
-                              value={currentRowValue(row.row_number, row.qml_text)}
+                              value={currentRowValue(row.start_line, row.qml_text)}
                               disabled={busy}
-                              on:input={(event) => updateQmlLine(row.row_number, (event.currentTarget as HTMLTextAreaElement).value)}
+                              on:input={(event) => updateQmlText(row.start_line, (event.currentTarget as HTMLTextAreaElement).value)}
                             ></textarea>
                           {:else}
                             <pre class="qml-line-preview">{row.qml_text}</pre>

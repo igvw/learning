@@ -2,12 +2,21 @@ from backend.app.database import get_connection
 from test_support import PostgresBackendTestCase
 
 
+def plain_import_entry(start_line: int, qml_text: str) -> dict[str, object]:
+    return {
+        "start_line": start_line,
+        "end_line": start_line,
+        "entry_kind": "plain",
+        "qml_text": qml_text,
+    }
+
+
 class ImportApiTests(PostgresBackendTestCase):
     def test_import_routes_require_admin_authentication(self) -> None:
         norwegian = self.create_module_record("Norwegian")
         target = self.create_module_record("Target", norwegian["id"])
         validate_payload = {"module_id": target["id"], "qml_text": "hund [dog]"}
-        commit_payload = {"module_id": target["id"], "rows": [{"row_number": 1, "qml_line": "hund [dog]"}]}
+        commit_payload = {"module_id": target["id"], "rows": [plain_import_entry(1, "hund [dog]")]}
 
         validate_unauthenticated = self.client.post("/api/question-imports/validate", json=validate_payload)
         self.assertEqual(validate_unauthenticated.status_code, 401)
@@ -34,6 +43,24 @@ class ImportApiTests(PostgresBackendTestCase):
         self.assertEqual(commit_user.status_code, 403)
         self.assertEqual(commit_user.json()["detail"], "Admin access is required.")
 
+    def test_import_routes_reject_legacy_line_only_rows(self) -> None:
+        norwegian = self.create_module_record("Norwegian")
+        target = self.create_module_record("Target", norwegian["id"])
+
+        validate_response = self.client.post(
+            "/api/question-imports/validate",
+            json={"module_id": target["id"], "rows": [{"row_number": 1, "qml_line": "hund [dog]"}]},
+            headers=self.admin_headers,
+        )
+        self.assertEqual(validate_response.status_code, 422)
+
+        commit_response = self.client.post(
+            "/api/question-imports/commit",
+            json={"module_id": target["id"], "rows": [{"row_number": 1, "qml_line": "hund [dog]"}]},
+            headers=self.admin_headers,
+        )
+        self.assertEqual(commit_response.status_code, 422)
+
     def test_same_tree_reimport_moves_question_and_preserves_progress(self) -> None:
         module_ids = self.create_module_tree()
         self.create_question_record(module_ids["target"], "først", [["first"]], rank=1)
@@ -55,11 +82,11 @@ class ImportApiTests(PostgresBackendTestCase):
         validate_payload = self.validate_import_payload(module_ids["target"], qml_text="hund [dog]")
         self.assertEqual(validate_payload["review_rows"][0]["status"], "info")
         self.assertFalse(validate_payload["review_rows"][0]["blocking"])
-        self.assertEqual(validate_payload["committable_row_numbers"], [1])
+        self.assertEqual(validate_payload["committable_start_lines"], [1])
 
         commit_payload = self.commit_import_payload(
             module_ids["target"],
-            [{"row_number": 1, "qml_line": "hund [dog]"}],
+            [plain_import_entry(1, "hund [dog]")],
         )
         self.assertTrue(commit_payload["committed"])
 
@@ -101,8 +128,8 @@ class ImportApiTests(PostgresBackendTestCase):
         commit_payload = self.commit_import_payload(
             target["id"],
             [
-                {"row_number": 10, "qml_line": "gamma [gamma]"},
-                {"row_number": 20, "qml_line": "delta [delta]"},
+                plain_import_entry(10, "gamma [gamma]"),
+                plain_import_entry(20, "delta [delta]"),
             ],
         )
         self.assertTrue(commit_payload["committed"])
@@ -124,17 +151,17 @@ class ImportApiTests(PostgresBackendTestCase):
 
         validate_payload = self.validate_import_payload(target["id"], qml_text="år [year]")
         self.assertEqual(validate_payload["exact_duplicate_count"], 1)
-        self.assertEqual(validate_payload["committable_row_numbers"], [])
+        self.assertEqual(validate_payload["committable_start_lines"], [])
         self.assertEqual(validate_payload["review_rows"], [])
         self.assertFalse(validate_payload["ready_to_commit"])
 
         commit_payload = self.commit_import_payload(
             target["id"],
-            [{"row_number": 1, "qml_line": "år [year]"}],
+            [plain_import_entry(1, "år [year]")],
         )
         self.assertFalse(commit_payload["committed"])
         self.assertEqual(commit_payload["exact_duplicate_count"], 1)
-        self.assertEqual(commit_payload["committable_row_numbers"], [])
+        self.assertEqual(commit_payload["committable_start_lines"], [])
 
     def test_same_leaf_duplicate_with_changed_answers_revises_existing_question(self) -> None:
         norwegian = self.create_module_record("Norwegian")
@@ -154,7 +181,7 @@ class ImportApiTests(PostgresBackendTestCase):
 
         commit_payload = self.commit_import_payload(
             target["id"],
-            [{"row_number": 1, "qml_line": "mot [against | toward]"}],
+            [plain_import_entry(1, "mot [against | toward]")],
         )
         self.assertTrue(commit_payload["committed"])
 
@@ -219,7 +246,7 @@ class ImportApiTests(PostgresBackendTestCase):
 
         commit_payload = self.commit_import_payload(
             target["id"],
-            [{"row_number": 1, "qml_line": "mot [against]"}],
+            [plain_import_entry(1, "mot [against]")],
         )
         self.assertFalse(commit_payload["committed"])
         self.assertEqual(commit_payload["exact_duplicate_count"], 1)
@@ -239,8 +266,8 @@ class ImportApiTests(PostgresBackendTestCase):
         validate_payload = self.validate_import_payload(
             target["id"],
             rows=[
-                {"row_number": 1, "qml_line": "selv [self]"},
-                {"row_number": 2, "qml_line": "selv [self | even]"},
+                plain_import_entry(1, "selv [self]"),
+                plain_import_entry(2, "selv [self | even]"),
             ],
         )
         self.assertFalse(validate_payload["ready_to_commit"])
@@ -253,8 +280,8 @@ class ImportApiTests(PostgresBackendTestCase):
         commit_payload = self.commit_import_payload(
             target["id"],
             [
-                {"row_number": 1, "qml_line": "selv [self]"},
-                {"row_number": 2, "qml_line": "selv [self | even]"},
+                plain_import_entry(1, "selv [self]"),
+                plain_import_entry(2, "selv [self | even]"),
             ],
         )
         self.assertFalse(commit_payload["committed"])
@@ -287,7 +314,7 @@ class ImportApiTests(PostgresBackendTestCase):
 
         commit_payload = self.commit_import_payload(
             module_ids["target"],
-            [{"row_number": 1, "qml_line": "hund [dog | canine | pooch]"}],
+            [plain_import_entry(1, "hund [dog | canine | pooch]")],
         )
         self.assertFalse(commit_payload["committed"])
 

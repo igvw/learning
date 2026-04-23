@@ -77,8 +77,8 @@ export async function commitImportInChunks({
     committedRows += nextState.committed_count;
     onProgress?.({ completed: committedRows, total });
 
-    const committedRowNumbers = new Set(chunk.map((row) => row.row_number));
-    remainingRows = removeCommittedImportRows(remainingRows, committedRowNumbers);
+    const committedStartLines = new Set(chunk.map((row) => row.start_line));
+    remainingRows = removeCommittedImportRows(remainingRows, committedStartLines);
   }
 
   return {

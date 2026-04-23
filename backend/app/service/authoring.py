@@ -858,7 +858,9 @@ def sync_seed_content(connection: DatabaseConnection, content_root: Path) -> dic
         module_id = module_lookup[module_full_slug]
         existing_prompt_keys = _existing_prompt_keys(connection, module_id)
         for row in qml_lines_from_text(question_file.read_text()):
-            payload = QuestionDraftIn(**parse_qml_line(line=row["qml_line"], module_id=module_id, rank=row["row_number"]))
+            payload = QuestionDraftIn(
+                **parse_qml_line(line=row["qml_text"], module_id=module_id, rank=row["start_line"])
+            )
             type_config = serialize_type_config(payload)
             prompt_key = stored_prompt_key(payload.question_type, payload.prompt, type_config)
             if prompt_key in existing_prompt_keys:

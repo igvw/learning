@@ -1,17 +1,20 @@
 <script lang="ts">
-  import { buildQmlLine, QmlError } from '../lib/qml';
+  import { buildBundleEditorText, buildQmlLine, countBundlePromptValues, parseBundleEditorText, QmlError } from '../lib/qml';
   import {
     buildEditorState,
     buildQuestionPayload,
     buildStructuredDraft,
-    flattenModules,
-    inlineBlankPlaceholder,
-    inlineSegmentPlaceholder,
-    inlineTailPlaceholder,
+    bundleQmlPlaceholder,
+    defaultCreateModuleId,
+    findModuleById,
+    inlineQmlPlaceholder,
+    joinAnswerEditorText,
     multiSlotPlaceholder,
     parseEditorStateFromQml,
     promptPlaceholder,
     singleAnswerPlaceholder,
+    splitAnswerEditorText,
+    type BundleVariantDraft,
     type EditorState,
     type InlineBlank,
     type MultiSlot
@@ -23,6 +26,7 @@
     QuestionRow,
     QuestionType
   } from '../lib/types';
+  import EditorModulePicker from './EditorModulePicker.svelte';
 
   export let open = false;
   export let modules: ModuleNode[] = [];
@@ -43,17 +47,76 @@
   let prompt = '';
   let questionType: QuestionType = 'single_text';
   let rank = 1;
-  let moduleId: number | string = 0;
+  let moduleId = 0;
   let resetStats = true;
   let singleAnswersText = '';
   let multiSlots: MultiSlot[] = [];
   let inlineBlanks: InlineBlank[] = [];
   let inlineTail = '';
+  let bundleTemplate = '';
+  let bundleVariants: BundleVariantDraft[] = [];
   let bundleQml = '';
   let qmlText = '';
   let qmlError = '';
   let formError = '';
   let localMarker = '';
+
+  type AutoGrowParams = { maxMode?: 'compact' | 'wide' };
+
+  function autoGrow(node: HTMLTextAreaElement, params: AutoGrowParams = {}): { update: (next?: AutoGrowParams) => void; destroy: () => void } {
+    let options = params;
+    const mirror = document.createElement('div');
+    mirror.style.position = 'absolute';
+    mirror.style.visibility = 'hidden';
+    mirror.style.pointerEvents = 'none';
+    mirror.style.whiteSpace = 'pre';
+    mirror.style.left = '-9999px';
+    mirror.style.top = '0';
+    document.body.appendChild(mirror);
+
+    const resize = () => {
+      const style = window.getComputedStyle(node);
+      mirror.style.font = style.font;
+      mirror.style.fontKerning = style.fontKerning;
+      mirror.style.letterSpacing = style.letterSpacing;
+      mirror.style.textTransform = style.textTransform;
+
+      const panelWidth = node.closest('.drawer-panel')?.clientWidth ?? node.parentElement?.clientWidth ?? 720;
+      const maxWidth = options.maxMode === 'wide' ? Math.max(320, panelWidth - 96) : Math.max(240, Math.floor((panelWidth - 96) / 3));
+      const minWidth = Math.min(maxWidth, 240);
+      const content = node.value.split('\n').reduce((longest, line) => (line.length > longest.length ? line : longest), ' ');
+      mirror.textContent = content || ' ';
+      const measuredWidth = Math.max(minWidth, Math.min(maxWidth, Math.ceil(mirror.getBoundingClientRect().width) + 26));
+      node.style.width = `${measuredWidth}px`;
+      node.style.height = '0px';
+      const singleLineHeight =
+        (Number.parseFloat(style.lineHeight) || 22) +
+        (Number.parseFloat(style.paddingTop) || 0) +
+        (Number.parseFloat(style.paddingBottom) || 0) +
+        (Number.parseFloat(style.borderTopWidth) || 0) +
+        (Number.parseFloat(style.borderBottomWidth) || 0);
+      node.style.height = `${Math.max(singleLineHeight, node.scrollHeight)}px`;
+    };
+
+    const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(resize);
+    if (resizeObserver && node.parentElement) {
+      resizeObserver.observe(node.parentElement);
+    }
+    node.addEventListener('input', resize);
+    queueMicrotask(resize);
+
+    return {
+      update(next: AutoGrowParams = {}) {
+        options = next;
+        resize();
+      },
+      destroy() {
+        resizeObserver?.disconnect();
+        node.removeEventListener('input', resize);
+        mirror.remove();
+      }
+    };
+  }
 
   function currentState(): EditorState {
     return {
@@ -66,6 +129,8 @@
       multiSlots,
       inlineBlanks,
       inlineTail,
+      bundleTemplate,
+      bundleVariants,
       bundleQml,
       qmlText
     };
@@ -81,6 +146,8 @@
     multiSlots = nextState.multiSlots;
     inlineBlanks = nextState.inlineBlanks;
     inlineTail = nextState.inlineTail;
+    bundleTemplate = nextState.bundleTemplate;
+    bundleVariants = nextState.bundleVariants;
     bundleQml = nextState.bundleQml;
     qmlText = nextState.qmlText;
   }
@@ -93,19 +160,25 @@
 
   function setQuestionType(type: QuestionType): void {
     questionType = type;
+    qmlError = '';
     if (type === 'bundle') {
+      prompt = '';
       singleAnswersText = '';
       multiSlots = [];
       inlineBlanks = [];
       inlineTail = '';
+      bundleTemplate = bundleTemplate || '';
+      bundleVariants = bundleVariants.length ? bundleVariants : [];
       bundleQml ||= '';
       return;
     }
+    bundleTemplate = '';
+    bundleVariants = [];
+    bundleQml = '';
     if (type === 'single_text') {
       multiSlots = [];
       inlineBlanks = [];
       inlineTail = '';
-      bundleQml = '';
       singleAnswersText ||= '';
       return;
     }
@@ -114,14 +187,14 @@
       multiSlots = multiSlots.length ? multiSlots : [{ answersText: '' }, { answersText: '' }];
       inlineBlanks = [];
       inlineTail = '';
-      bundleQml = '';
       return;
     }
+    prompt = '';
     singleAnswersText = '';
     multiSlots = [];
-    inlineBlanks = inlineBlanks.length ? inlineBlanks : [{ segmentBefore: '', answersText: '' }];
-    inlineTail ||= '';
-    bundleQml = '';
+    inlineBlanks = [];
+    inlineTail = '';
+    qmlText = '';
   }
 
   function addMultiSlot(): void {
@@ -135,15 +208,145 @@
     multiSlots = multiSlots.filter((_, slotIndex) => slotIndex !== index);
   }
 
-  function addInlineBlank(): void {
-    inlineBlanks = [...inlineBlanks, { segmentBefore: '', answersText: '' }];
+  function updateSingleAnswers(value: string): void {
+    singleAnswersText = value;
+    qmlText = buildDerivedQmlText();
   }
 
-  function removeInlineBlank(index: number): void {
-    if (inlineBlanks.length <= 1) {
+  function updateMultiSlotAnswers(index: number, value: string): void {
+    multiSlots = multiSlots.map((slot, slotIndex) => (slotIndex === index ? { answersText: value } : slot));
+    qmlText = buildDerivedQmlText();
+  }
+
+  function updateInlineBlankAnswers(index: number, value: string): void {
+    inlineBlanks = inlineBlanks.map((blank, blankIndex) => (blankIndex === index ? { ...blank, answersText: value } : blank));
+    qmlText = buildDerivedQmlText();
+  }
+
+  function validatePlainQml(value: string): void {
+    const parsedState = parseEditorStateFromQml(value);
+    if (parsedState.questionType === 'inline_cloze' || parsedState.questionType === 'bundle') {
+      throw new QmlError('Use the inline cloze or bundle editor for that QML shape.');
+    }
+    prompt = parsedState.prompt;
+    questionType = parsedState.questionType;
+    singleAnswersText = parsedState.singleAnswersText;
+    multiSlots = parsedState.multiSlots;
+    inlineBlanks = [];
+    inlineTail = '';
+    bundleTemplate = '';
+    bundleVariants = [];
+    bundleQml = '';
+  }
+
+  function handlePlainQmlInput(value: string): void {
+    qmlText = value;
+    try {
+      validatePlainQml(value);
+      qmlError = '';
+    } catch (error) {
+      qmlError = error instanceof QmlError ? error.message : 'Invalid QML.';
+    }
+  }
+
+  function handleInlineQmlInput(value: string): void {
+    qmlText = value;
+    try {
+      const parsedState = parseEditorStateFromQml(value);
+      if (parsedState.questionType !== 'inline_cloze') {
+        throw new QmlError('Inline cloze QML needs one or more bracketed answer groups.');
+      }
+      prompt = parsedState.prompt;
+      questionType = 'inline_cloze';
+      inlineBlanks = parsedState.inlineBlanks;
+      inlineTail = parsedState.inlineTail;
+      qmlError = '';
+    } catch (error) {
+      qmlError = error instanceof QmlError ? error.message : 'Invalid inline cloze QML.';
+    }
+  }
+
+  function applyBundleStateFromQml(value: string): void {
+    const parsed = parseBundleEditorText(value);
+    bundleTemplate = parsed.template;
+    bundleVariants = parsed.variants.map((variant) => ({
+      promptValues: [...variant.prompt_values],
+      answersText: joinAnswerEditorText(variant.accepted_answers)
+    }));
+  }
+
+  function handleBundleQmlInput(value: string): void {
+    bundleQml = value;
+    try {
+      applyBundleStateFromQml(value);
+      qmlError = '';
+    } catch (error) {
+      bundleTemplate = '';
+      bundleVariants = [];
+      qmlError = error instanceof QmlError ? error.message : 'Invalid bundle QML.';
+    }
+  }
+
+  function syncBundleQmlFromStructured(nextVariants: BundleVariantDraft[]): void {
+    bundleVariants = nextVariants;
+    bundleQml = buildBundleEditorText(
+      bundleTemplate,
+      nextVariants.map((variant) => ({
+        prompt_values: variant.promptValues,
+        accepted_answers: splitAnswerEditorText(variant.answersText)
+      }))
+    );
+    try {
+      parseBundleEditorText(bundleQml);
+      qmlError = '';
+    } catch (error) {
+      qmlError = error instanceof QmlError ? error.message : 'Invalid bundle QML.';
+    }
+  }
+
+  function addBundleVariant(): void {
+    if (!bundleTemplate) {
       return;
     }
-    inlineBlanks = inlineBlanks.filter((_, blankIndex) => blankIndex !== index);
+    const duplicated = bundleVariants[bundleVariants.length - 1];
+    const nextVariant =
+      duplicated
+        ? { promptValues: [...duplicated.promptValues], answersText: duplicated.answersText }
+        : {
+            promptValues: Array.from({ length: countBundlePromptValues(bundleTemplate) }, () => ''),
+            answersText: 'answer'
+          };
+    syncBundleQmlFromStructured([...bundleVariants, nextVariant]);
+  }
+
+  function removeBundleVariant(index: number): void {
+    if (bundleVariants.length <= 1) {
+      return;
+    }
+    syncBundleQmlFromStructured(bundleVariants.filter((_, variantIndex) => variantIndex !== index));
+  }
+
+  function updateBundlePromptValue(variantIndex: number, promptIndex: number, value: string): void {
+    syncBundleQmlFromStructured(
+      bundleVariants.map((variant, currentVariantIndex) =>
+        currentVariantIndex === variantIndex
+          ? {
+              ...variant,
+              promptValues: variant.promptValues.map((promptValue, currentPromptIndex) =>
+                currentPromptIndex === promptIndex ? value : promptValue
+              )
+            }
+          : variant
+      )
+    );
+  }
+
+  function updateBundleAnswers(variantIndex: number, value: string): void {
+    syncBundleQmlFromStructured(
+      bundleVariants.map((variant, currentVariantIndex) =>
+        currentVariantIndex === variantIndex ? { ...variant, answersText: value } : variant
+      )
+    );
   }
 
   function buildPayload(): QuestionDraftPayload {
@@ -152,10 +355,37 @@
     });
   }
 
+  function buildDerivedQmlText(): string {
+    if (questionType === 'single_text') {
+      if (!prompt.trim() && !singleAnswersText.trim()) {
+        return '';
+      }
+    } else if (questionType === 'multi_text' || questionType === 'ordered_multi') {
+      if (!prompt.trim() && multiSlots.every((slot) => !slot.answersText.trim())) {
+        return '';
+      }
+    } else if (questionType === 'inline_cloze') {
+      if (inlineBlanks.length === 0 && !inlineTail.trim()) {
+        return '';
+      }
+    }
+    return buildQmlLine(
+      buildStructuredDraft({
+        prompt,
+        questionType,
+        singleAnswersText,
+        multiSlots,
+        inlineBlanks,
+        inlineTail,
+        bundleQml
+      })
+    );
+  }
+
   async function handleSave(): Promise<void> {
     formError = '';
     try {
-      if (!editingQuestion && qmlError) {
+      if (qmlError) {
         throw new Error('Fix the QML error before saving.');
       }
       await onSave(buildPayload(), resetStats);
@@ -187,26 +417,9 @@
     }
   }
 
-  function handleQmlInput(value: string): void {
-    qmlText = value;
-    try {
-      const parsedState = parseEditorStateFromQml(value);
-      prompt = parsedState.prompt;
-      questionType = parsedState.questionType;
-      singleAnswersText = parsedState.singleAnswersText;
-      multiSlots = parsedState.multiSlots;
-      inlineBlanks = parsedState.inlineBlanks;
-      inlineTail = parsedState.inlineTail;
-      bundleQml = parsedState.bundleQml;
-      qmlError = '';
-    } catch (error) {
-      qmlError = error instanceof QmlError ? error.message : 'Invalid QML.';
-    }
-  }
-
-  $: moduleOptions = flattenModules(modules);
-  $: selectedModuleOption = moduleOptions.find((option) => option.id === Number(moduleId)) ?? null;
-  $: selectedModuleIsLeaf = selectedModuleOption?.isLeaf ?? false;
+  $: selectedModuleNode = findModuleById(modules, Number(moduleId));
+  $: selectedModuleIsLeaf = selectedModuleNode?.children.length === 0;
+  $: selectedModuleLabel = selectedModuleNode ? `.../${selectedModuleNode.title}` : 'Select leaf module';
   $: editorBusy = saving || deleting;
   $: showDeleteAction = Boolean(editingQuestion) && mode !== 'moderation';
   $: isAdmin = currentActor?.role === 'admin';
@@ -228,26 +441,36 @@
     : isVerifiedNonAdminEdit
       ? 'Request Delete'
       : 'Delete Question';
-  $: marker = `${open}:${editingQuestion?.question_id ?? 'new'}:${defaultModuleId ?? 'none'}:${moduleOptions.map((option) => option.id).join(',')}`;
+  $: marker = `${open}:${editingQuestion?.question_id ?? 'new'}:${defaultModuleId ?? 'none'}:${modules.map((module) => module.id).join(',')}`;
   $: if (open && marker !== localMarker) {
     localMarker = marker;
     resetFromQuestion(editingQuestion);
   }
-  $: if (open && !editingQuestion) {
-    if (questionType === 'bundle') {
-      qmlText = bundleQml;
+  $: if (open && !editingQuestion && modules.length > 0) {
+    const currentModuleNode = findModuleById(modules, Number(moduleId));
+    if (currentModuleNode?.children.length !== 0) {
+      const fallbackModuleId = defaultCreateModuleId(modules, Number(moduleId) || defaultModuleId);
+      if (fallbackModuleId && fallbackModuleId !== Number(moduleId)) {
+        moduleId = fallbackModuleId;
+      }
+    }
+  }
+  $: if (open && questionType !== 'bundle') {
+    qmlText = buildDerivedQmlText();
+  }
+  $: if (open && questionType === 'inline_cloze') {
+    if (!qmlText.trim()) {
+      qmlError = '';
     } else {
-      qmlText = buildQmlLine(
-        buildStructuredDraft({
-          prompt,
-          questionType,
-          singleAnswersText,
-          multiSlots,
-          inlineBlanks,
-          inlineTail,
-          bundleQml
-        })
-      );
+      try {
+        const parsedState = parseEditorStateFromQml(qmlText);
+        if (parsedState.questionType !== 'inline_cloze') {
+          throw new QmlError('Inline cloze QML needs one or more bracketed answer groups.');
+        }
+        qmlError = '';
+      } catch (error) {
+        qmlError = error instanceof QmlError ? error.message : 'Invalid inline cloze QML.';
+      }
     }
   }
 </script>
@@ -258,7 +481,6 @@
       <aside class="drawer-panel" aria-label="Question editor">
         <div class="panel-header sticky">
           <div>
-            <p class="eyebrow">{mode === 'moderation' ? 'Moderation review' : editingQuestion ? 'Revision flow' : 'Create flow'}</p>
             <h2>{mode === 'moderation' ? 'Approve Revision' : editingQuestion ? 'Revise Question' : 'Create Question'}</h2>
           </div>
           <button type="button" class="ghost-button" on:click={onClose}>Close</button>
@@ -274,7 +496,7 @@
           <div class="banner info">This is a personal revision proposal. Module placement and order stay global until an admin approves it.</div>
         {/if}
 
-        {#if !editingQuestion && qmlError}
+        {#if qmlError && (questionType === 'bundle' || questionType === 'inline_cloze' || !editingQuestion)}
           <div class="banner error">{qmlError}</div>
         {/if}
 
@@ -282,12 +504,29 @@
           <div class="editor-form">
             <div class="editor-card">
               <div class="editor-card-grid">
-                <label class="field editor-field-wide">
-                  <span>Module</span>
-                  <select bind:value={moduleId} disabled={moduleSelectionLocked}>
-                    {#each moduleOptions as option (option.id)}
-                      <option value={option.id}>{option.label}</option>
-                    {/each}
+                <label class="field editor-field-compact">
+                  <span id="editor-module-label">Module</span>
+                  <EditorModulePicker
+                    bind:value={moduleId}
+                    modules={modules}
+                    disabled={moduleSelectionLocked}
+                    selectedLabel={selectedModuleLabel}
+                    labelId="editor-module-label"
+                  />
+                </label>
+
+                <label class="field editor-field-compact">
+                  <span>Question type</span>
+                  <select
+                    class="editor-compact-select"
+                    bind:value={questionType}
+                    on:change={(event) => setQuestionType((event.currentTarget as HTMLSelectElement).value as QuestionType)}
+                  >
+                    <option value="single_text">Single text</option>
+                    <option value="multi_text">Multi text (any order)</option>
+                    <option value="ordered_multi">Ordered multi</option>
+                    <option value="inline_cloze">Inline cloze</option>
+                    <option value="bundle">Bundle</option>
                   </select>
                 </label>
 
@@ -295,24 +534,16 @@
                   <p class="muted-copy editor-inline-note">Select a leaf module before saving this question.</p>
                 {/if}
 
-                <label class="field">
-                  <span>Question type</span>
-                  <select
-                    bind:value={questionType}
-                    on:change={(event) => setQuestionType((event.currentTarget as HTMLSelectElement).value as QuestionType)}
-                  >
-                    <option value="bundle">Bundle</option>
-                    <option value="single_text">Single text</option>
-                    <option value="multi_text">Multi text (any order)</option>
-                    <option value="ordered_multi">Ordered multi</option>
-                    <option value="inline_cloze">Inline cloze</option>
-                  </select>
-                </label>
-
-                {#if questionType !== 'bundle'}
-                  <label class="field editor-field-prompt editor-field-wide">
+                {#if questionType !== 'bundle' && questionType !== 'inline_cloze'}
+                  <label class="field editor-field-compact">
                     <span>Prompt</span>
-                    <textarea rows="3" bind:value={prompt} placeholder={promptPlaceholder(questionType, Boolean(editingQuestion))}></textarea>
+                    <textarea
+                      rows="1"
+                      class="editor-auto-field"
+                      use:autoGrow
+                      bind:value={prompt}
+                      placeholder={promptPlaceholder(questionType, Boolean(editingQuestion))}
+                    ></textarea>
                   </label>
                 {/if}
               </div>
@@ -328,70 +559,159 @@
                 <label class="field">
                   <span>Bundle QML</span>
                   <textarea
-                    rows="10"
+                    rows="1"
+                    class="editor-auto-field"
+                    use:autoGrow={{ maxMode: 'wide' }}
                     bind:value={bundleQml}
-                    placeholder={'{A patient needs {} mg of active ingredient. The medication has {} mg/ml of active ingredient. How much medication does the patient need? []\n {400} {20} [20]\n {500} {30} [16.7 | 16.67]}'}
+                    placeholder={bundleQmlPlaceholder(Boolean(editingQuestion))}
+                    on:input={(event) => handleBundleQmlInput((event.currentTarget as HTMLTextAreaElement).value)}
                   ></textarea>
                 </label>
-              {:else if questionType === 'single_text'}
-                <label class="field">
-                  <span>Accepted answers, one per line</span>
-                  <textarea rows="5" bind:value={singleAnswersText} placeholder={singleAnswerPlaceholder(questionType, Boolean(editingQuestion))}></textarea>
-                </label>
-              {:else if questionType === 'multi_text' || questionType === 'ordered_multi'}
-                <div class="dynamic-group compact-dynamic-group">
-                  <div class="subsection-header">
-                    <h3>Answer slots</h3>
-                    <button type="button" class="ghost-button" on:click={addMultiSlot}>Add slot</button>
-                  </div>
-                  {#each multiSlots as slot, index (index)}
-                    <div class="dynamic-card compact-dynamic-card">
-                      <div class="subsection-header">
-                        <strong>Slot {index + 1}</strong>
-                        <button type="button" class="ghost-button" on:click={() => removeMultiSlot(index)}>Remove</button>
-                      </div>
-                      <label class="field">
-                        <span>Accepted answers, one per line</span>
-                        <textarea rows="3" bind:value={slot.answersText} placeholder={multiSlotPlaceholder(questionType, index, Boolean(editingQuestion))}></textarea>
-                      </label>
+
+                {#if bundleTemplate && bundleVariants.length > 0}
+                  <div class="editor-answer-group">
+                    <div class="editor-row-toolbar">
+                      <h3>Bundle rows</h3>
+                      <button type="button" class="editor-icon-button add" aria-label="Add bundle row" on:click={addBundleVariant}>+</button>
                     </div>
-                  {/each}
+
+                    <div class="editor-inline-list">
+                      {#each bundleVariants as variant, variantIndex (variantIndex)}
+                        <div class="editor-answer-row bundle-row">
+                          <span class="editor-row-index">{variantIndex + 1}</span>
+                          {#each variant.promptValues as promptValue, promptIndex (promptIndex)}
+                            <textarea
+                              rows="1"
+                              class="editor-auto-field"
+                              aria-label={`Bundle row ${variantIndex + 1} parameter ${promptIndex + 1}`}
+                              use:autoGrow
+                              value={promptValue}
+                              on:input={(event) =>
+                                updateBundlePromptValue(
+                                  variantIndex,
+                                  promptIndex,
+                                  (event.currentTarget as HTMLTextAreaElement).value
+                                )}
+                            ></textarea>
+                          {/each}
+                          <textarea
+                            rows="1"
+                            class="editor-auto-field"
+                            aria-label={`Bundle row ${variantIndex + 1} accepted answers`}
+                            use:autoGrow
+                            value={variant.answersText}
+                            on:input={(event) => updateBundleAnswers(variantIndex, (event.currentTarget as HTMLTextAreaElement).value)}
+                          ></textarea>
+                          <button
+                            type="button"
+                            class="editor-icon-button remove"
+                            aria-label={`Remove bundle row ${variantIndex + 1}`}
+                            on:click={() => removeBundleVariant(variantIndex)}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      {/each}
+                    </div>
+                  </div>
+                {/if}
+              {:else if questionType === 'single_text'}
+                <div class="field editor-field-compact">
+                  <label class="field">
+                    <span>Accepted answers</span>
+                    <textarea
+                      rows="1"
+                      class="editor-auto-field"
+                      aria-describedby="single-answer-help"
+                      use:autoGrow
+                      bind:value={singleAnswersText}
+                      placeholder={singleAnswerPlaceholder(questionType, Boolean(editingQuestion))}
+                      on:input={(event) => updateSingleAnswers((event.currentTarget as HTMLTextAreaElement).value)}
+                    ></textarea>
+                  </label>
+                  <p class="editor-field-help" id="single-answer-help">Use <code>|</code> for alternatives. Answers are case-insensitive.</p>
+                </div>
+              {:else if questionType === 'multi_text' || questionType === 'ordered_multi'}
+                <div class="editor-answer-group">
+                  <div class="editor-row-toolbar">
+                    <h3>{questionType === 'multi_text' ? 'Answer slots' : 'Ordered slots'}</h3>
+                    <button type="button" class="editor-icon-button add" aria-label="Add answer slot" on:click={addMultiSlot}>+</button>
+                  </div>
+
+                  <div class="editor-inline-list">
+                    {#each multiSlots as slot, index (index)}
+                      <div class="editor-answer-row">
+                        <span class="editor-row-index">{index + 1}</span>
+                        <textarea
+                          rows="1"
+                          class="editor-auto-field"
+                          aria-label={`Slot ${index + 1} accepted answers`}
+                          use:autoGrow
+                          value={slot.answersText}
+                          placeholder={multiSlotPlaceholder(questionType, index, Boolean(editingQuestion))}
+                          on:input={(event) => updateMultiSlotAnswers(index, (event.currentTarget as HTMLTextAreaElement).value)}
+                        ></textarea>
+                        <button
+                          type="button"
+                          class="editor-icon-button remove"
+                          aria-label={`Remove slot ${index + 1}`}
+                          on:click={() => removeMultiSlot(index)}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    {/each}
+                  </div>
                 </div>
               {:else}
-                <div class="dynamic-group compact-dynamic-group">
-                  <div class="subsection-header">
-                    <h3>Inline blanks</h3>
-                    <button type="button" class="ghost-button" on:click={addInlineBlank}>Add blank</button>
-                  </div>
-                  {#each inlineBlanks as blank, index (index)}
-                    <div class="dynamic-card compact-dynamic-card">
-                      <div class="subsection-header">
-                        <strong>Blank {index + 1}</strong>
-                        <button type="button" class="ghost-button" on:click={() => removeInlineBlank(index)}>Remove</button>
-                      </div>
-                      <div class="editor-card-grid">
-                        <label class="field">
-                          <span>Text before blank {index + 1}</span>
-                          <input type="text" bind:value={blank.segmentBefore} placeholder={inlineSegmentPlaceholder(index, Boolean(editingQuestion))} />
-                        </label>
-                        <label class="field editor-field-wide">
-                          <span>Accepted answers, one per line</span>
-                          <textarea rows="3" bind:value={blank.answersText} placeholder={inlineBlankPlaceholder(index, Boolean(editingQuestion))}></textarea>
-                        </label>
-                      </div>
-                    </div>
-                  {/each}
-                  <label class="field">
-                    <span>Final trailing text</span>
-                    <input type="text" bind:value={inlineTail} placeholder={inlineTailPlaceholder(Boolean(editingQuestion))} />
-                  </label>
-                </div>
-              {/if}
-
-              {#if !editingQuestion && questionType !== 'bundle'}
                 <label class="field">
                   <span>QML</span>
-                  <textarea rows="4" bind:value={qmlText} on:input={(event) => handleQmlInput((event.currentTarget as HTMLTextAreaElement).value)}></textarea>
+                  <textarea
+                    rows="1"
+                    class="editor-auto-field"
+                    use:autoGrow={{ maxMode: 'wide' }}
+                    bind:value={qmlText}
+                    placeholder={inlineQmlPlaceholder(Boolean(editingQuestion))}
+                    on:input={(event) => handleInlineQmlInput((event.currentTarget as HTMLTextAreaElement).value)}
+                  ></textarea>
+                </label>
+
+                {#if inlineBlanks.length > 0}
+                  <div class="editor-answer-group">
+                    <div class="editor-row-toolbar">
+                      <h3>Answer groups</h3>
+                    </div>
+
+                    <div class="editor-inline-list">
+                      {#each inlineBlanks as blank, index (index)}
+                        <div class="editor-answer-row">
+                          <span class="editor-row-index">{index + 1}</span>
+                          <textarea
+                            rows="1"
+                            class="editor-auto-field"
+                            aria-label={`Blank ${index + 1} accepted answers`}
+                            use:autoGrow
+                            value={blank.answersText}
+                            placeholder={index === 0 ? 'heart' : index === 1 ? 'blood' : `answer ${index + 1}`}
+                            on:input={(event) => updateInlineBlankAnswers(index, (event.currentTarget as HTMLTextAreaElement).value)}
+                          ></textarea>
+                        </div>
+                      {/each}
+                    </div>
+                  </div>
+                {/if}
+              {/if}
+
+              {#if !editingQuestion && (questionType === 'single_text' || questionType === 'multi_text' || questionType === 'ordered_multi')}
+                <label class="field">
+                  <span>QML</span>
+                  <textarea
+                    rows="1"
+                    class="editor-auto-field"
+                    use:autoGrow={{ maxMode: 'wide' }}
+                    bind:value={qmlText}
+                    on:input={(event) => handlePlainQmlInput((event.currentTarget as HTMLTextAreaElement).value)}
+                  ></textarea>
                 </label>
               {/if}
             </div>
@@ -410,7 +730,7 @@
               <button
                 class="primary-button"
                 type="button"
-                disabled={editorBusy || (!editingQuestion && (!!qmlError || !selectedModuleIsLeaf))}
+                disabled={editorBusy || !!qmlError || !selectedModuleIsLeaf}
                 on:click={() => void handleSave()}
               >
                 {primaryActionLabel}

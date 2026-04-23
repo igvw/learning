@@ -36,9 +36,7 @@ export function parsePendingImportRows(value: string): QuestionImportRowPayload[
         start_line: startLine,
         end_line: startLine + entryLines.length - 1,
         entry_kind: 'bundle',
-        qml_text: entryLines.join('\n'),
-        row_number: startLine,
-        qml_line: entryLines.join('\n')
+        qml_text: entryLines.join('\n')
       });
       continue;
     }
@@ -47,9 +45,7 @@ export function parsePendingImportRows(value: string): QuestionImportRowPayload[
       start_line: startLine,
       end_line: startLine,
       entry_kind: 'plain',
-      qml_text: rawLine,
-      row_number: startLine,
-      qml_line: rawLine
+      qml_text: rawLine
     });
     index += 1;
   }
@@ -65,7 +61,7 @@ export function reviewRowsForPendingRows(
   result: QuestionImportResult | null,
   pendingRows: QuestionImportRowPayload[]
 ): QuestionImportReviewRow[] {
-  return result?.review_rows.filter((row) => pendingRows.some((pendingRow) => pendingRow.row_number === row.row_number)) ?? [];
+  return result?.review_rows.filter((row) => pendingRows.some((pendingRow) => pendingRow.start_line === row.start_line)) ?? [];
 }
 
 function referenceAnswerBlocks(row: QuestionImportReviewRow): string[] {
@@ -125,7 +121,7 @@ function qmlAnswerGroups(qmlLine: string): string[][] {
   return ranges.map((range) => splitAnswerAlternatives(range.content));
 }
 
-export function answerChoicesByBlock(row: QuestionImportReviewRow, qmlLine: string = row.qml_line): AnswerChoice[][] {
+export function answerChoicesByBlock(row: QuestionImportReviewRow, qmlLine: string = row.qml_text): AnswerChoice[][] {
   if (row.entry_kind === 'bundle') {
     return [];
   }
