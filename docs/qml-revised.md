@@ -1,46 +1,24 @@
 # QML Revised
 
-This document is the design home for the next authoring format direction.
-
-It does **not** describe the current format that ships today. For current behavior, see [Question Markup DSL](question-markup.md).
+This document describes the implemented bundle direction for QML revised. The plain-line syntax is still documented separately in [Question Markup DSL](question-markup.md).
 
 ## Summary
 
-QML revised keeps the current plain one-line QML format for ordinary non-bundle questions, while adding explicit top-level `{ ... }` blocks for grouped variants.
+QML revised keeps plain one-line QML for simple questions and adds top-level `{ ... }` bundle blocks for grouped single-answer variants.
 
-The key direction is:
+The current model is:
 
-- plain one-line QML stays valid for `single_text`, `multi_text`, `ordered_multi`, and `inline_cloze`
-- bundles are first-class authoring/runtime units, not just import sugar
-- one bundle maps to one learning item with shared progress/history
-- each quiz serving resolves one concrete variant before the quiz item is persisted
-- numeric acceptance stays explicit for now; built-in rounding/tolerance semantics are deferred
+- plain one-line QML remains valid for `single_text`, `multi_text`, `ordered_multi`, and `inline_cloze`
+- bundle blocks create `question_type = "bundle"` questions
+- one bundle is one learning item with shared progress, review flags, revisions, and scheduling
+- each quiz serving resolves one concrete bundle variant before the quiz item is persisted
+- accepted numeric forms are written explicitly as answer alternatives; built-in rounding/tolerance is not part of the format
 
 ## Why This Exists
 
-The current line-based QML format works well for:
+Plain QML works well for compact seed content, admin import, and lightweight LLM generation. Bundles cover a different need: several closely related variants that should be authored, reviewed, exported, and scheduled as one learning item instead of as unrelated rows.
 
-- simple text questions
-- admin import
-- diffable seed content
-- lightweight LLM generation
-
-But it is not the desired long-term authoring model for:
-
-- grouped variants that should stay logically tied together
-- structured regular-user creation flows
-- explicit parameterized variants that stay bundled together
-
-The app is still alpha, so this document uses the label **QML revised** instead of pretending there is already a stable versioned format contract to preserve.
-
-## Locked Decisions
-
-- the future format direction is called **QML revised**
-- bundles use **explicit block syntax**, not implicit continuation and not YAML
-- bundles are **first-class runtime/storage concepts**
-- plain one-line QML remains valid alongside bundles
-- v1 bundle scope is intentionally **single-answer only**
-- ghost text and distractors are explicitly out of scope for this first bundle design
+The app is still alpha, so **QML revised** is a direction label rather than a compatibility-version contract.
 
 ## File Model
 
@@ -49,13 +27,11 @@ A `questions.qml` file may contain:
 - plain current-style one-line questions
 - top-level `{ ... }` bundle blocks
 
-Plain lines remain valid for `single_text`, `multi_text`, `ordered_multi`, and `inline_cloze`.
-
-Blank lines may appear between questions and between bundle rows for readability. Nested bundle blocks are not part of the design.
+Blank lines may appear between entries. Nested bundle blocks are not supported.
 
 ## Bundle Syntax
 
-Recommended surface:
+Canonical bundle blocks use a template line followed by one variant row per line:
 
 ```text
 {A patient needs {} mg of active ingredient. The medication has {} mg/ml of active ingredient. How much medication does the patient need? []
@@ -64,151 +40,66 @@ Recommended surface:
  {500} {30} [16.7 | 16.67]}
 ```
 
+The closing `}` may appear on the same line as the final variant row.
+
 ## Template Rules
 
-- the first non-blank line inside a bundle is the template line
-- the template line must resolve to a single-answer question
+- the first non-blank line inside the block is the template line
 - `{}` marks a prompt-value placeholder
 - `[]` marks the single answer slot
-- placeholders are positional and anonymous in v1
-- the number of `{}` prompt placeholders defines how many prompt-value cells each variant row must provide
-
-### Placeholder Kinds
-
-There are two placeholder kinds:
-
-- prompt-text placeholder: contributes literal text into the rendered prompt
-- answer-group placeholder: contributes one accepted-answer group
-
-In v1, bundle templates support only one answer-group placeholder: the trailing `[]` slot.
-
-An answer-group placeholder stands for the entire slot, not part of a slot.
+- placeholders are positional and anonymous
+- v1 bundles support one answer slot
+- the number of `{}` placeholders determines how many prompt cells every variant row must provide
 
 ## Variant Row Rules
 
-- each variant row starts with `-`
-- each row supplies one cell for each distinct placeholder number, in numeric order
-- cell kinds are explicit:
-  - `{...}` = prompt-text cell
-  - `[...]` = accepted-answer-group cell
-- the template decides which kind each position expects
-- a variant row must match the template’s expected cell count and cell kinds exactly
-- answer alternatives inside `[...]` keep current `|` behavior
+- each variant row supplies prompt cells followed by one answer cell
+- `{...}` supplies one prompt substitution value
+- `[...]` supplies the accepted answers for the answer slot
+- row cell count and cell kinds must match the template exactly
+- answer alternatives inside `[...]` keep the normal `|` behavior
 
-Examples:
+For example, this template:
 
-- template `{{1}} ... {{2}} ... [{{3}}]` expects:
-  - `{...} {...} [...]`
-- template `The [{{1}}] pumps [{{2}}].` expects:
-  - `[...] [...]`
-- template `Name two rivers. { {{1}}, {{2}} }` expects:
-  - `[...] [...]`
+```text
+{} has a dose of {} mg. What is the total? []
+```
 
-Numeric acceptance such as `[16.7 | 16.67]` stays explicit in the row for now. QML revised does not add built-in rounding or tolerance rules in this first design.
+expects rows shaped like:
 
-## Runtime Meaning
+```text
+{Paracetamol} {500} [500 mg | 500]
+```
 
-A bundle is one learning item:
+## Storage And Runtime
 
-- one question identity
-- one scheduling/progress history
-- one review-flag target
-- one moderation/revision target
+Bundles are first-class question content, not import-only sugar:
 
-When a quiz item is created:
+- `questions` remains the stable learning-item table and progress key
+- `questions.question_type` is `"bundle"` for bundle-backed questions
+- `questions.prompt` stores the canonical template line
+- `questions.prompt_key` is based on the normalized template identity
+- `questions.type_config_json` stores lightweight bundle summary metadata
+- `question_bundles` stores one 1:1 row per bundle question
+- `question_bundles.variants_json` stores the ordered variant rows
 
-- the app picks one bundle variant uniformly at random
-- that variant resolves into the existing serving shape plus accepted answers
-- the resolved prompt and resolved answer config are persisted into `quiz_session_items`
+When a quiz session is created, the runtime picks one variant uniformly at random, substitutes prompt values into the template, and persists the resolved prompt plus accepted answers on the session item. Once answered, the durable attempt stores the same resolved single-answer shape for stats and scheduling.
 
-After that resolution step, quiz UI, answer checking, stats, and feedback should continue to operate on the existing resolved model.
+## Import, Export, And Review
 
-This keeps learner-facing APIs shape-based while still giving bundles shared identity underneath.
+- import parsing is entry-based: one entry is either a plain line or a bundle block
+- plain questions export as one line each
+- bundle questions export as canonical `{ ... }` blocks
+- import review, editor, moderation, and revision UI treat bundles as their own section rather than flattening variants into independent plain questions
+- bundle revision proposals store a full proposed bundle snapshot so admin review can compare the whole bundle
 
-## Storage And Identity
+## Deferred Ideas
 
-The storage direction should keep `questions` as the stable learner-facing identity.
-
-Recommended model:
-
-- `questions` remains the main learning-item table and scheduling/progress key
-- `questions.question_type` continues to store the resolved serving shape, not a new bundle-only type
-- bundle-backed questions get a 1:1 bundle record
-- each bundle stores an ordered list of variants as child rows
-- bundle metadata stores enough normalized structure to support:
-  - import validation
-  - export round-tripping
-  - duplicate detection
-  - revision/moderation diffing later
-
-The exact table and JSON field names can be chosen during implementation, but the architecture should not flatten bundles back into unrelated question rows.
-
-## Import, Export, And Prompt Identity
-
-Import/export should become bundle-aware:
-
-- plain non-bundle questions still round-trip as one line each
-- bundle-backed questions export back out as `bundle { ... }` blocks
-- variant order is preserved
-
-Prompt identity should follow the template skeleton, not a single resolved variant. That matters for:
-
-- duplicate detection
-- same-tree relocation logic
-- future revision matching
-
-In practice, this means bundle identity should be keyed from the normalized template structure plus serving shape, not from one sampled prompt.
-
-## Rollout Order
-
-### Phase 1: Import, export, storage, runtime
-
-- add bundle parsing and validation
-- add bundle export formatting
-- add first-class bundle storage
-- resolve bundle variants at quiz-session creation
-- persist the resolved prompt/type-config into `quiz_session_items`
-- keep the supported authoring syntax focused on plain one-line questions plus bundle blocks
-
-This phase should not yet redesign the regular-user add flow.
-
-### Phase 2: Admin authoring and review
-
-- make the admin editor bundle-aware
-- make import review bundle-aware
-- make moderation and revision review bundle-aware
-- allow admins to inspect bundle-backed questions without flattening them mentally into unrelated rows
-
-### Phase 3: Structured regular-user authoring
-
-- build the stats-page `Add` flow around the bundle model rather than raw QML
-- keep raw QML as the advanced/admin path
-- move regular-user question creation toward structured forms instead of line editing
-
-## Out Of Scope For This First Design
+These are intentionally outside the current bundle model:
 
 - built-in rounding or tolerance semantics
 - ghost text
 - distractors
 - weighted variant selection
-- final table/field names
-- the exact structured UI for regular-user creation
-
-## Open Details Still Intentionally Undecided
-
-- the exact normalized storage schema for bundle templates and cells
-- the exact prompt-key normalization algorithm for bundles
-- whether export preserves some original formatting or always canonicalizes bundle layout
-- whether plain one-line QML remains a permanent subset or becomes mostly admin shorthand later
-
-## Likely Future Impact Areas
-
-When implementation starts, this direction is likely to affect:
-
-- `question_type`
-- import parsing and validation
-- export generation
-- quiz-session creation
-- editor/add flows
-- moderation/revision review
-- runtime/storage representation
+- multi-answer or inline-cloze bundle variants
+- a normalized SQL table per variant

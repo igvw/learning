@@ -322,8 +322,8 @@ Patient needs $m=[1-10]*100$ mg. How much is needed? [$m/z$ ml]
 
 Reason: `z` is unbound.
 
-## Future Direction
+## Bundle Blocks
 
 This document describes the current QML/DSL format only.
 
-The future direction for explicit top-level `{ ... }` bundle blocks and continued plain one-line QML for non-bundle questions is tracked separately in [QML Revised](qml-revised.md).
+Top-level `{ ... }` bundle blocks are documented separately in [QML Revised](qml-revised.md).

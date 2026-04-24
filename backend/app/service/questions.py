@@ -2,7 +2,7 @@ import random
 from typing import Any
 
 from ..schemas import QuestionDraftIn
-from .bundles import bundle_summary, normalize_bundle_payload
+from .bundles import bundle_qml_from_row, bundle_qml_from_type_config, bundle_summary, normalize_bundle_payload
 from .text import normalize_text
 
 
@@ -54,6 +54,12 @@ def accepted_answer_groups(type_config: dict[str, Any]) -> list[list[str]]:
 
 def answer_blocks(type_config: dict[str, Any]) -> list[str]:
     return [" | ".join(group) for group in type_config.get("accepted_answers", [])]
+
+
+def answer_blocks_for_question(question_type: str, type_config: dict[str, Any]) -> list[str]:
+    if question_type == "bundle":
+        return []
+    return answer_blocks(type_config)
 
 
 def score_possible(type_config: dict[str, Any]) -> float:
@@ -111,6 +117,75 @@ def build_qml_line(question_type: str, prompt: str, type_config: dict[str, Any])
     if len(segments) > len(accepted_answers):
         line_parts.append(_escape_qml_text(segments[-1]))
     return "".join(line_parts)
+
+
+def bundle_qml_from_storage(question_type: str, prompt: str, variants_json: str | None) -> str | None:
+    if question_type != "bundle":
+        return None
+    return bundle_qml_from_row(prompt, variants_json)
+
+
+def bundle_qml_from_snapshot(question_type: str, prompt: str, type_config: dict[str, Any]) -> str | None:
+    if question_type != "bundle":
+        return None
+    return bundle_qml_from_type_config(prompt, type_config)
+
+
+def qml_text_from_storage(
+    question_type: str,
+    prompt: str,
+    type_config: dict[str, Any],
+    variants_json: str | None,
+) -> str:
+    bundle_qml = bundle_qml_from_storage(question_type, prompt, variants_json)
+    if bundle_qml is not None:
+        return bundle_qml
+    return build_qml_line(question_type, prompt, type_config)
+
+
+def draft_kwargs_from_storage(
+    *,
+    module_id: int,
+    prompt: str,
+    question_type: str,
+    rank: int,
+    type_config: dict[str, Any],
+    variants_json: str | None,
+) -> dict[str, Any]:
+    payload_kwargs: dict[str, Any] = {
+        "module_id": module_id,
+        "prompt": prompt,
+        "question_type": question_type,
+        "rank": rank,
+    }
+    if question_type == "bundle":
+        payload_kwargs["bundle_qml"] = qml_text_from_storage(question_type, prompt, type_config, variants_json)
+        return payload_kwargs
+    payload_kwargs["accepted_answers"] = type_config.get("accepted_answers", [])
+    payload_kwargs["segments"] = type_config.get("segments", [])
+    return payload_kwargs
+
+
+def draft_kwargs_from_snapshot(
+    *,
+    module_id: int,
+    prompt: str,
+    question_type: str,
+    rank: int,
+    type_config: dict[str, Any],
+) -> dict[str, Any]:
+    payload_kwargs: dict[str, Any] = {
+        "module_id": module_id,
+        "prompt": prompt,
+        "question_type": question_type,
+        "rank": rank,
+    }
+    if question_type == "bundle":
+        payload_kwargs["bundle_qml"] = bundle_qml_from_snapshot(question_type, prompt, type_config)
+        return payload_kwargs
+    payload_kwargs["accepted_answers"] = type_config.get("accepted_answers", [])
+    payload_kwargs["segments"] = type_config.get("segments", [])
+    return payload_kwargs
 
 
 def resolved_runtime(

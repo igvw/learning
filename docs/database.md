@@ -101,7 +101,7 @@ Each session keeps:
 - `created_at`
 - `completed_at`
 
-`quiz_session_items` stores one answered question inside a session.
+`quiz_session_items` stores one selected question inside an active or historical quiz session.
 
 Each item keeps:
 
@@ -113,9 +113,26 @@ Each item keeps:
 - `resolved_type_config_json`
 - `submitted_answer_json`
 
+`attempts` stores the durable answered-history row used by stats and scheduling.
+
+Each attempt keeps:
+
+- `session_id`
+- `user_id`
+- `question_id`
+- `legacy_question_id`
+- `module_id`
+- `score_earned`
+- `score_possible`
+- `resolved_prompt`
+- `resolved_type_config_json`
+- `submitted_answer_json`
+- `answered_at`
+
 Important choices:
 
-- progress is derived from quiz history, not cached on questions
+- `quiz_session_items` remains the active quiz-session item list and submission guard
+- progress is derived from `attempts`, not cached on questions
 - scheduling is derived from history, not stored in a dedicated schedule table
 - `submitted_answer_json` is kept because the revision drawer needs prior incorrect answers
 
@@ -153,5 +170,5 @@ Behavior:
 That split keeps the durable model relatively small:
 
 - shared content in `modules` and `questions`
-- user study history in `quiz_sessions` and `quiz_session_items`
+- user study history in `quiz_sessions` and `attempts`
 - user maintenance state in `user_review_flags`

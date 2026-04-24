@@ -1,18 +1,15 @@
 <script lang="ts">
   import { buildBundleEditorText, buildQmlLine, countBundlePromptValues, parseBundleEditorText, QmlError } from '../lib/qml';
+  import { autoGrow } from '../lib/editor-autogrow';
   import {
     buildEditorState,
     buildQuestionPayload,
     buildStructuredDraft,
-    bundleQmlPlaceholder,
     defaultCreateModuleId,
     findModuleById,
-    inlineQmlPlaceholder,
     joinAnswerEditorText,
-    multiSlotPlaceholder,
     parseEditorStateFromQml,
     promptPlaceholder,
-    singleAnswerPlaceholder,
     splitAnswerEditorText,
     type BundleVariantDraft,
     type EditorState,
@@ -26,6 +23,10 @@
     QuestionRow,
     QuestionType
   } from '../lib/types';
+  import BundleEditor from './editor/BundleEditor.svelte';
+  import InlineClozeEditor from './editor/InlineClozeEditor.svelte';
+  import MultiSlotEditor from './editor/MultiSlotEditor.svelte';
+  import SingleTextEditor from './editor/SingleTextEditor.svelte';
   import EditorModulePicker from './EditorModulePicker.svelte';
 
   export let open = false;
@@ -60,63 +61,6 @@
   let qmlError = '';
   let formError = '';
   let localMarker = '';
-
-  type AutoGrowParams = { maxMode?: 'compact' | 'wide'; value?: string };
-
-  function autoGrow(node: HTMLTextAreaElement, params: AutoGrowParams = {}): { update: (next?: AutoGrowParams) => void; destroy: () => void } {
-    let options = params;
-    const mirror = document.createElement('div');
-    mirror.style.position = 'absolute';
-    mirror.style.visibility = 'hidden';
-    mirror.style.pointerEvents = 'none';
-    mirror.style.whiteSpace = 'pre';
-    mirror.style.left = '-9999px';
-    mirror.style.top = '0';
-    document.body.appendChild(mirror);
-
-    const resize = () => {
-      const style = window.getComputedStyle(node);
-      mirror.style.font = style.font;
-      mirror.style.fontKerning = style.fontKerning;
-      mirror.style.letterSpacing = style.letterSpacing;
-      mirror.style.textTransform = style.textTransform;
-
-      const panelWidth = node.closest('.drawer-panel')?.clientWidth ?? node.parentElement?.clientWidth ?? 720;
-      const maxWidth = options.maxMode === 'wide' ? Math.max(320, panelWidth - 96) : Math.max(240, Math.floor((panelWidth - 96) / 3));
-      const minWidth = Math.min(maxWidth, 240);
-      const content = node.value.split('\n').reduce((longest, line) => (line.length > longest.length ? line : longest), ' ');
-      mirror.textContent = content || ' ';
-      const measuredWidth = Math.max(minWidth, Math.min(maxWidth, Math.ceil(mirror.getBoundingClientRect().width) + 26));
-      node.style.width = `${measuredWidth}px`;
-      node.style.height = '0px';
-      const singleLineHeight =
-        (Number.parseFloat(style.lineHeight) || 22) +
-        (Number.parseFloat(style.paddingTop) || 0) +
-        (Number.parseFloat(style.paddingBottom) || 0) +
-        (Number.parseFloat(style.borderTopWidth) || 0) +
-        (Number.parseFloat(style.borderBottomWidth) || 0);
-      node.style.height = `${Math.max(singleLineHeight, node.scrollHeight)}px`;
-    };
-
-    const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(resize);
-    if (resizeObserver && node.parentElement) {
-      resizeObserver.observe(node.parentElement);
-    }
-    node.addEventListener('input', resize);
-    queueMicrotask(resize);
-
-    return {
-      update(next: AutoGrowParams = {}) {
-        options = next;
-        resize();
-      },
-      destroy() {
-        resizeObserver?.disconnect();
-        node.removeEventListener('input', resize);
-        mirror.remove();
-      }
-    };
-  }
 
   function currentState(): EditorState {
     return {
@@ -556,150 +500,41 @@
               {/if}
 
               {#if questionType === 'bundle'}
-                <label class="field">
-                  <span>Bundle QML</span>
-                  <textarea
-                    rows="1"
-                    class="editor-auto-field"
-                    use:autoGrow={{ maxMode: 'wide', value: bundleQml }}
-                    bind:value={bundleQml}
-                    placeholder={bundleQmlPlaceholder(Boolean(editingQuestion))}
-                    on:input={(event) => handleBundleQmlInput((event.currentTarget as HTMLTextAreaElement).value)}
-                  ></textarea>
-                </label>
-
-                {#if bundleTemplate && bundleVariants.length > 0}
-                  <div class="editor-answer-group">
-                    <div class="editor-row-toolbar">
-                      <h3>Bundle rows</h3>
-                      <button type="button" class="editor-icon-button add" aria-label="Add bundle row" on:click={addBundleVariant}>+</button>
-                    </div>
-
-                    <div class="editor-inline-list">
-                      {#each bundleVariants as variant, variantIndex (variantIndex)}
-                        <div class="editor-answer-row bundle-row">
-                          <span class="editor-row-index">{variantIndex + 1}</span>
-                          {#each variant.promptValues as promptValue, promptIndex (promptIndex)}
-                            <textarea
-                              rows="1"
-                              class="editor-auto-field"
-                              aria-label={`Bundle row ${variantIndex + 1} parameter ${promptIndex + 1}`}
-                              use:autoGrow
-                              value={promptValue}
-                              on:input={(event) =>
-                                updateBundlePromptValue(
-                                  variantIndex,
-                                  promptIndex,
-                                  (event.currentTarget as HTMLTextAreaElement).value
-                                )}
-                            ></textarea>
-                          {/each}
-                          <textarea
-                            rows="1"
-                            class="editor-auto-field"
-                            aria-label={`Bundle row ${variantIndex + 1} accepted answers`}
-                            use:autoGrow
-                            value={variant.answersText}
-                            on:input={(event) => updateBundleAnswers(variantIndex, (event.currentTarget as HTMLTextAreaElement).value)}
-                          ></textarea>
-                          <button
-                            type="button"
-                            class="editor-icon-button remove"
-                            aria-label={`Remove bundle row ${variantIndex + 1}`}
-                            on:click={() => removeBundleVariant(variantIndex)}
-                          >
-                            ×
-                          </button>
-                        </div>
-                      {/each}
-                    </div>
-                  </div>
-                {/if}
+                <BundleEditor
+                  {bundleQml}
+                  {bundleTemplate}
+                  variants={bundleVariants}
+                  isEditing={Boolean(editingQuestion)}
+                  onQmlChange={handleBundleQmlInput}
+                  onAddVariant={addBundleVariant}
+                  onRemoveVariant={removeBundleVariant}
+                  onPromptValueChange={updateBundlePromptValue}
+                  onAnswersChange={updateBundleAnswers}
+                />
               {:else if questionType === 'single_text'}
-                <div class="field editor-field-compact">
-                  <label class="field">
-                    <span>Accepted answers</span>
-                    <textarea
-                      rows="1"
-                      class="editor-auto-field"
-                      aria-describedby="single-answer-help"
-                      use:autoGrow
-                      bind:value={singleAnswersText}
-                      placeholder={singleAnswerPlaceholder(questionType, Boolean(editingQuestion))}
-                      on:input={(event) => updateSingleAnswers((event.currentTarget as HTMLTextAreaElement).value)}
-                    ></textarea>
-                  </label>
-                  <p class="editor-field-help" id="single-answer-help">Use <code>|</code> for alternatives. Answers are case-insensitive.</p>
-                </div>
+                <SingleTextEditor
+                  {questionType}
+                  answersText={singleAnswersText}
+                  isEditing={Boolean(editingQuestion)}
+                  onAnswersChange={updateSingleAnswers}
+                />
               {:else if questionType === 'multi_text' || questionType === 'ordered_multi'}
-                <div class="editor-answer-group">
-                  <div class="editor-row-toolbar">
-                    <h3>{questionType === 'multi_text' ? 'Answer slots' : 'Ordered slots'}</h3>
-                    <button type="button" class="editor-icon-button add" aria-label="Add answer slot" on:click={addMultiSlot}>+</button>
-                  </div>
-
-                  <div class="editor-inline-list">
-                    {#each multiSlots as slot, index (index)}
-                      <div class="editor-answer-row">
-                        <span class="editor-row-index">{index + 1}</span>
-                        <textarea
-                          rows="1"
-                          class="editor-auto-field"
-                          aria-label={`Slot ${index + 1} accepted answers`}
-                          use:autoGrow
-                          value={slot.answersText}
-                          placeholder={multiSlotPlaceholder(questionType, index, Boolean(editingQuestion))}
-                          on:input={(event) => updateMultiSlotAnswers(index, (event.currentTarget as HTMLTextAreaElement).value)}
-                        ></textarea>
-                        <button
-                          type="button"
-                          class="editor-icon-button remove"
-                          aria-label={`Remove slot ${index + 1}`}
-                          on:click={() => removeMultiSlot(index)}
-                        >
-                          ×
-                        </button>
-                      </div>
-                    {/each}
-                  </div>
-                </div>
+                <MultiSlotEditor
+                  {questionType}
+                  slots={multiSlots}
+                  isEditing={Boolean(editingQuestion)}
+                  onAddSlot={addMultiSlot}
+                  onRemoveSlot={removeMultiSlot}
+                  onSlotChange={updateMultiSlotAnswers}
+                />
               {:else}
-                <label class="field">
-                  <span>QML</span>
-                  <textarea
-                    rows="1"
-                    class="editor-auto-field"
-                    use:autoGrow={{ maxMode: 'wide', value: qmlText }}
-                    bind:value={qmlText}
-                    placeholder={inlineQmlPlaceholder(Boolean(editingQuestion))}
-                    on:input={(event) => handleInlineQmlInput((event.currentTarget as HTMLTextAreaElement).value)}
-                  ></textarea>
-                </label>
-
-                {#if inlineBlanks.length > 0}
-                  <div class="editor-answer-group">
-                    <div class="editor-row-toolbar">
-                      <h3>Answer groups</h3>
-                    </div>
-
-                    <div class="editor-inline-list">
-                      {#each inlineBlanks as blank, index (index)}
-                        <div class="editor-answer-row">
-                          <span class="editor-row-index">{index + 1}</span>
-                          <textarea
-                            rows="1"
-                            class="editor-auto-field"
-                            aria-label={`Blank ${index + 1} accepted answers`}
-                            use:autoGrow
-                            value={blank.answersText}
-                            placeholder={index === 0 ? 'heart' : index === 1 ? 'blood' : `answer ${index + 1}`}
-                            on:input={(event) => updateInlineBlankAnswers(index, (event.currentTarget as HTMLTextAreaElement).value)}
-                          ></textarea>
-                        </div>
-                      {/each}
-                    </div>
-                  </div>
-                {/if}
+                <InlineClozeEditor
+                  {qmlText}
+                  blanks={inlineBlanks}
+                  isEditing={Boolean(editingQuestion)}
+                  onQmlChange={handleInlineQmlInput}
+                  onBlankChange={updateInlineBlankAnswers}
+                />
               {/if}
 
               {#if !editingQuestion && (questionType === 'single_text' || questionType === 'multi_text' || questionType === 'ordered_multi')}

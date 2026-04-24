@@ -6,9 +6,8 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from ..database import DatabaseConnection, execute_insert_returning_id, utc_now
 from .auth import Actor, create_user_account
-from .bundles import bundle_qml_from_row
 from .errors import NotFoundError, ValidationError
-from .questions import build_qml_line
+from .questions import qml_text_from_storage
 from .text import slugify_title, title_from_slug
 
 
@@ -351,13 +350,8 @@ def export_verified_content_archive(connection: DatabaseConnection) -> ContentEx
         ).fetchall()
         for row in question_rows:
             type_config = json.loads(row["type_config_json"])
-            if row["question_type"] == "bundle":
-                bundle_qml = bundle_qml_from_row(str(row["prompt"]), row["variants_json"])
-                if bundle_qml:
-                    questions_by_module[int(row["module_id"])].append(bundle_qml)
-                continue
             questions_by_module[int(row["module_id"])].append(
-                build_qml_line(str(row["question_type"]), str(row["prompt"]), type_config)
+                qml_text_from_storage(str(row["question_type"]), str(row["prompt"]), type_config, row["variants_json"])
             )
 
     archive_buffer = BytesIO()

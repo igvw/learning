@@ -248,8 +248,11 @@ def submit_answer(
             qsi.question_id,
             qsi.score_earned,
             qsi.score_possible,
+            qsi.resolved_prompt,
             qsi.resolved_type_config_json,
             q.question_type,
+            q.prompt,
+            q.module_id,
             q.type_config_json
         FROM quiz_session_items AS qsi
         JOIN quiz_sessions AS qs ON qs.id = qsi.session_id
@@ -276,6 +279,49 @@ def submit_answer(
         WHERE session_id = ? AND question_id = ?
         """,
         (earned_score, possible_score_value, json_dumps(answers), session_id, item_id),
+    )
+    connection.execute(
+        """
+        INSERT INTO attempts (
+            session_id,
+            user_id,
+            question_id,
+            legacy_question_id,
+            module_id,
+            score_earned,
+            score_possible,
+            resolved_prompt,
+            resolved_type_config_json,
+            submitted_answer_json,
+            answered_at,
+            created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (session_id, legacy_question_id) DO UPDATE
+        SET
+            question_id = EXCLUDED.question_id,
+            module_id = EXCLUDED.module_id,
+            score_earned = EXCLUDED.score_earned,
+            score_possible = EXCLUDED.score_possible,
+            resolved_prompt = EXCLUDED.resolved_prompt,
+            resolved_type_config_json = EXCLUDED.resolved_type_config_json,
+            submitted_answer_json = EXCLUDED.submitted_answer_json,
+            answered_at = EXCLUDED.answered_at
+        """,
+        (
+            session_id,
+            user_id,
+            row["question_id"],
+            row["question_id"],
+            row["module_id"],
+            earned_score,
+            possible_score_value,
+            row["resolved_prompt"] or row["prompt"],
+            row["resolved_type_config_json"] or row["type_config_json"],
+            json_dumps(answers),
+            answered_at,
+            answered_at,
+        ),
     )
 
     pending = connection.execute(

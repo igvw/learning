@@ -79,28 +79,6 @@ def delete_question_bundle(connection: DatabaseConnection, *, question_id: int) 
     connection.execute("DELETE FROM question_bundles WHERE question_id = ?", (question_id,))
 
 
-def question_bundle_variants_by_id(
-    connection: DatabaseConnection,
-    *,
-    question_ids: list[int],
-) -> dict[int, list[dict[str, Any]]]:
-    if not question_ids:
-        return {}
-    placeholders = ",".join("?" for _ in question_ids)
-    rows = connection.execute(
-        f"""
-        SELECT question_id, variants_json
-        FROM question_bundles
-        WHERE question_id IN ({placeholders})
-        """,
-        tuple(question_ids),
-    ).fetchall()
-    return {
-        int(row["question_id"]): bundle_variants_from_json(row["variants_json"])
-        for row in rows
-    }
-
-
 def bundle_qml_from_row(prompt: str, variants_json: str | None) -> str | None:
     if variants_json is None:
         return None

@@ -9,9 +9,9 @@ from .authoring import (
     delete_question_record,
     ensure_unique_question_prompt,
 )
-from .bundles import bundle_qml_from_row, bundle_qml_from_type_config
 from .catalog import ensure_unique_module_slug
 from .errors import NotFoundError, ValidationError
+from .questions import bundle_qml_from_snapshot, bundle_qml_from_storage, draft_kwargs_from_snapshot
 from .text import title_from_slug
 
 
@@ -139,7 +139,7 @@ def _module_payload(row: Any) -> dict[str, Any]:
 
 def _question_payload(row: Any) -> dict[str, Any]:
     type_config = json.loads(row["type_config_json"])
-    bundle_qml = bundle_qml_from_row(row["prompt"], row["variants_json"])
+    bundle_qml = bundle_qml_from_storage(row["question_type"], row["prompt"], row["variants_json"])
     return {
         "question_id": int(row["question_id"]),
         "module_id": int(row["module_id"]),
@@ -161,8 +161,16 @@ def _question_payload(row: Any) -> dict[str, Any]:
 def _proposal_payload(row: Any) -> dict[str, Any]:
     current_type_config = json.loads(row["current_type_config_json"])
     proposed_type_config = json.loads(row["proposed_type_config_json"])
-    current_bundle_qml = bundle_qml_from_row(row["current_prompt"], row["current_variants_json"])
-    proposed_bundle_qml = bundle_qml_from_type_config(row["proposed_prompt"], proposed_type_config)
+    current_bundle_qml = bundle_qml_from_storage(
+        row["current_question_type"],
+        row["current_prompt"],
+        row["current_variants_json"],
+    )
+    proposed_bundle_qml = bundle_qml_from_snapshot(
+        row["proposed_question_type"],
+        row["proposed_prompt"],
+        proposed_type_config,
+    )
     return {
         "proposal_id": int(row["proposal_id"]),
         "question_id": int(row["question_id"]),
@@ -533,17 +541,13 @@ def review_question_revision(
             delete_question_record(connection, int(row["question_id"]))
         else:
             proposed_type_config = json.loads(row["proposed_type_config_json"])
-            payload_kwargs = {
-                "module_id": int(row["module_id"]),
-                "prompt": row["proposed_prompt"],
-                "question_type": row["proposed_question_type"],
-                "rank": int(row["rank"]),
-            }
-            if row["proposed_question_type"] == "bundle":
-                payload_kwargs["bundle_qml"] = bundle_qml_from_type_config(row["proposed_prompt"], proposed_type_config)
-            else:
-                payload_kwargs["accepted_answers"] = proposed_type_config.get("accepted_answers", [])
-                payload_kwargs["segments"] = proposed_type_config.get("segments", [])
+            payload_kwargs = draft_kwargs_from_snapshot(
+                module_id=int(row["module_id"]),
+                prompt=row["proposed_prompt"],
+                question_type=row["proposed_question_type"],
+                rank=int(row["rank"]),
+                type_config=proposed_type_config,
+            )
             _apply_verified_question_revision(
                 connection,
                 question_id=int(row["question_id"]),

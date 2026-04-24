@@ -9,10 +9,10 @@ from .authoring import (
     create_question_append_only,
     relocate_question_for_import,
 )
-from .bundles import bundle_qml_from_row, normalize_bundle_payload
+from .bundles import normalize_bundle_payload
 from .catalog import ensure_leaf_module
 from .errors import ValidationError
-from .questions import answer_blocks, build_qml_line, serialize_type_config, stored_prompt_key
+from .questions import answer_blocks_for_question, qml_text_from_storage, serialize_type_config, stored_prompt_key
 
 
 def _top_level_root(full_slug: str) -> str:
@@ -132,11 +132,7 @@ def _existing_questions_for_prompt_keys(
     for row in rows:
         parsed_type_config = json.loads(row["type_config_json"])
         entry_kind = "bundle" if row["question_type"] == "bundle" else "plain"
-        qml_text = (
-            bundle_qml_from_row(str(row["prompt"]), row["variants_json"])
-            if row["question_type"] == "bundle"
-            else build_qml_line(row["question_type"], row["prompt"], parsed_type_config)
-        )
+        qml_text = qml_text_from_storage(row["question_type"], row["prompt"], parsed_type_config, row["variants_json"])
         existing_rows.append(
             {
                 "question_id": row["question_id"],
@@ -150,7 +146,7 @@ def _existing_questions_for_prompt_keys(
                 "entry_kind": entry_kind,
                 "qml_text": qml_text,
                 "bundle_qml": qml_text if entry_kind == "bundle" else None,
-                "answer_blocks": [] if entry_kind == "bundle" else answer_blocks(parsed_type_config),
+                "answer_blocks": answer_blocks_for_question(row["question_type"], parsed_type_config),
             }
         )
     return existing_rows
@@ -470,7 +466,7 @@ def _validate_question_import_rows(
             inferred_type = draft.question_type
             payload = draft.model_dump()
             type_config = serialize_type_config(draft)
-            imported_answer_blocks = [] if draft.question_type == "bundle" else answer_blocks(type_config)
+            imported_answer_blocks = answer_blocks_for_question(draft.question_type, type_config)
             prompt_key = stored_prompt_key(draft.question_type, draft.prompt, type_config)
         except (QMLError, ValueError) as error:
             issues.append(str(error))

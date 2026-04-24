@@ -10,7 +10,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 
-CURRENT_SCHEMA_VERSION = 9
+CURRENT_SCHEMA_VERSION = 10
 SCHEMA_VERSION_TABLE = "app_schema_version"
 SCHEMA_SQL = Path(__file__).with_name("schema.sql").read_text()
 
@@ -153,6 +153,86 @@ def _backfill_question_prompt_keys(connection: DatabaseConnection) -> None:
         )
 
 
+def _create_attempts_table(connection: DatabaseConnection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS attempts (
+            id BIGSERIAL PRIMARY KEY,
+            session_id BIGINT NOT NULL REFERENCES quiz_sessions(id) ON DELETE CASCADE,
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            question_id BIGINT REFERENCES questions(id) ON DELETE SET NULL,
+            legacy_question_id BIGINT NOT NULL,
+            module_id BIGINT REFERENCES modules(id) ON DELETE SET NULL,
+            score_earned REAL NOT NULL,
+            score_possible REAL NOT NULL DEFAULT 1,
+            resolved_prompt TEXT,
+            resolved_type_config_json TEXT,
+            submitted_answer_json TEXT,
+            answered_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(session_id, legacy_question_id)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_attempts_user_question_answered
+        ON attempts(user_id, legacy_question_id, answered_at)
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_attempts_user_session
+        ON attempts(user_id, session_id)
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_attempts_question_id
+        ON attempts(question_id)
+        """
+    )
+
+
+def _backfill_attempts_from_quiz_items(connection: DatabaseConnection) -> None:
+    connection.execute(
+        """
+        INSERT INTO attempts (
+            session_id,
+            user_id,
+            question_id,
+            legacy_question_id,
+            module_id,
+            score_earned,
+            score_possible,
+            resolved_prompt,
+            resolved_type_config_json,
+            submitted_answer_json,
+            answered_at,
+            created_at
+        )
+        SELECT
+            qs.id,
+            qs.user_id,
+            qsi.question_id,
+            qsi.question_id,
+            q.module_id,
+            qsi.score_earned,
+            COALESCE(NULLIF(qsi.score_possible, 0), 1),
+            qsi.resolved_prompt,
+            qsi.resolved_type_config_json,
+            qsi.submitted_answer_json,
+            COALESCE(qs.completed_at, qs.created_at),
+            COALESCE(qs.completed_at, qs.created_at)
+        FROM quiz_session_items AS qsi
+        JOIN quiz_sessions AS qs ON qs.id = qsi.session_id
+        LEFT JOIN questions AS q ON q.id = qsi.question_id
+        WHERE qsi.score_earned IS NOT NULL
+        ON CONFLICT (session_id, legacy_question_id) DO NOTHING
+        """
+    )
+
+
 def initialize_database(database_url: str) -> None:
     with connect(database_url) as connection:
         current_version = _schema_version(connection)
@@ -160,7 +240,7 @@ def initialize_database(database_url: str) -> None:
 
         if existing_tables and current_version == 0:
             raise RuntimeError("Existing PostgreSQL database has no schema version. Refusing to mutate it automatically.")
-        if current_version not in {0, 1, 2, 3, 4, 5, 6, 7, 8, CURRENT_SCHEMA_VERSION}:
+        if current_version not in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, CURRENT_SCHEMA_VERSION}:
             raise RuntimeError(f"Unsupported PostgreSQL schema version {current_version}.")
 
         if current_version == 0:
@@ -295,6 +375,9 @@ def initialize_database(database_url: str) -> None:
                 )
                 """
             )
+        if current_version in {1, 2, 3, 4, 5, 6, 7, 8, 9}:
+            _create_attempts_table(connection)
+            _backfill_attempts_from_quiz_items(connection)
         if current_version != 0:
             connection.executescript(SCHEMA_SQL)
         _set_schema_version(connection, CURRENT_SCHEMA_VERSION)

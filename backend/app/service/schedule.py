@@ -44,25 +44,24 @@ def _question_attempt_history(
     if question_ids is not None and not question_ids:
         return {}
 
-    where_sql = "WHERE qs.user_id = ? AND qsi.score_earned IS NOT NULL"
+    where_sql = "WHERE attempts.user_id = ?"
     params: list[Any] = [user_id]
     if question_ids is not None:
         placeholders = ",".join("?" for _ in question_ids)
-        where_sql += f" AND qsi.question_id IN ({placeholders})"
+        where_sql += f" AND attempts.legacy_question_id IN ({placeholders})"
         params.extend(question_ids)
 
     rows = connection.execute(
         f"""
         SELECT
-            qsi.question_id,
-            qsi.score_earned,
-            qsi.score_possible,
-            COALESCE(qs.completed_at, qs.created_at) AS answered_at,
-            qs.id AS session_id
-        FROM quiz_session_items AS qsi
-        JOIN quiz_sessions AS qs ON qs.id = qsi.session_id
+            attempts.legacy_question_id AS question_id,
+            attempts.score_earned,
+            attempts.score_possible,
+            attempts.answered_at,
+            attempts.session_id
+        FROM attempts
         {where_sql}
-        ORDER BY qsi.question_id ASC, answered_at ASC, session_id ASC
+        ORDER BY attempts.legacy_question_id ASC, attempts.answered_at ASC, attempts.session_id ASC
         """,
         tuple(params),
     ).fetchall()
@@ -83,12 +82,11 @@ def _question_attempt_history(
 def _latest_scored_session_id(connection: DatabaseConnection, *, user_id: int) -> int | None:
     row = connection.execute(
         """
-        SELECT qs.id
-        FROM quiz_sessions AS qs
-        JOIN quiz_session_items AS qsi ON qsi.session_id = qs.id
-        WHERE qs.user_id = ? AND qsi.score_earned IS NOT NULL
-        GROUP BY qs.id, COALESCE(qs.completed_at, qs.created_at)
-        ORDER BY COALESCE(qs.completed_at, qs.created_at) DESC, qs.id DESC
+        SELECT session_id AS id
+        FROM attempts
+        WHERE user_id = ?
+        GROUP BY session_id, answered_at
+        ORDER BY answered_at DESC, session_id DESC
         LIMIT 1
         """,
         (user_id,),
@@ -340,26 +338,25 @@ def _question_stats_by_question(
     if question_ids is not None and not question_ids:
         return {}
 
-    where_sql = "WHERE qs.user_id = ? AND qsi.score_earned IS NOT NULL"
+    where_sql = "WHERE attempts.user_id = ?"
     params: list[Any] = [user_id]
     if question_ids is not None:
         placeholders = ",".join("?" for _ in question_ids)
-        where_sql += f" AND qsi.question_id IN ({placeholders})"
+        where_sql += f" AND attempts.legacy_question_id IN ({placeholders})"
         params.extend(question_ids)
 
     rows = connection.execute(
         f"""
         SELECT
-            qsi.question_id,
+            attempts.legacy_question_id AS question_id,
             COUNT(*) AS attempts_count,
-            COALESCE(SUM(qsi.score_earned), 0) AS correct_count,
-            COALESCE(SUM(qsi.score_possible - qsi.score_earned), 0) AS incorrect_count,
-            MIN(COALESCE(qs.completed_at, qs.created_at)) AS first_asked_at,
-            MAX(COALESCE(qs.completed_at, qs.created_at)) AS last_asked_at
-        FROM quiz_session_items AS qsi
-        JOIN quiz_sessions AS qs ON qs.id = qsi.session_id
+            COALESCE(SUM(attempts.score_earned), 0) AS correct_count,
+            COALESCE(SUM(attempts.score_possible - attempts.score_earned), 0) AS incorrect_count,
+            MIN(attempts.answered_at) AS first_asked_at,
+            MAX(attempts.answered_at) AS last_asked_at
+        FROM attempts
         {where_sql}
-        GROUP BY qsi.question_id
+        GROUP BY attempts.legacy_question_id
         """,
         tuple(params),
     ).fetchall()
@@ -389,17 +386,15 @@ def _recent_incorrect_answers_by_question(
     rows = connection.execute(
         f"""
         SELECT
-            qsi.question_id,
-            qsi.submitted_answer_json,
-            COALESCE(qs.completed_at, qs.created_at) AS answered_at
-        FROM quiz_session_items AS qsi
-        JOIN quiz_sessions AS qs ON qs.id = qsi.session_id
-        WHERE qs.user_id = ?
-          AND qsi.question_id IN ({placeholders})
-          AND qsi.score_earned IS NOT NULL
-          AND qsi.score_earned + ? < qsi.score_possible
-          AND qsi.submitted_answer_json IS NOT NULL
-        ORDER BY answered_at DESC, qs.id DESC
+            attempts.legacy_question_id AS question_id,
+            attempts.submitted_answer_json,
+            attempts.answered_at
+        FROM attempts
+        WHERE attempts.user_id = ?
+          AND attempts.legacy_question_id IN ({placeholders})
+          AND attempts.score_earned + ? < attempts.score_possible
+          AND attempts.submitted_answer_json IS NOT NULL
+        ORDER BY attempts.answered_at DESC, attempts.session_id DESC
         """,
         (user_id, *question_ids, FULL_CREDIT_TOLERANCE),
     ).fetchall()

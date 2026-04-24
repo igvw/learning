@@ -1,3 +1,4 @@
+from backend.app.database import get_connection
 from test_support import PostgresBackendTestCase
 
 
@@ -19,6 +20,21 @@ class QuizApiTests(PostgresBackendTestCase):
         first_item = session["items"][0]
         submit_payload = self.submit_quiz_item(user["id"], session["id"], first_item["id"], ["nairobi"])
         self.assertEqual(submit_payload["score_possible"], 1.0)
+
+        with get_connection(self.database_url) as connection:
+            attempt = connection.execute(
+                """
+                SELECT user_id, legacy_question_id, score_earned, score_possible, submitted_answer_json
+                FROM attempts
+                WHERE session_id = ? AND legacy_question_id = ?
+                """,
+                (session["id"], first_item["question_id"]),
+            ).fetchone()
+        self.assertIsNotNone(attempt)
+        self.assertEqual(attempt["user_id"], user["id"])
+        self.assertEqual(attempt["score_earned"], submit_payload["score_earned"])
+        self.assertEqual(attempt["score_possible"], submit_payload["score_possible"])
+        self.assertEqual(attempt["submitted_answer_json"], '["nairobi"]')
 
         stats_payload = self.get_stats_payload(user["id"], 5)
         self.assertGreaterEqual(stats_payload["summary"]["total_attempts"], 1)

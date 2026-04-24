@@ -132,3 +132,29 @@ CREATE INDEX IF NOT EXISTS idx_quiz_session_items_session_id
 
 CREATE INDEX IF NOT EXISTS idx_quiz_session_items_question_id
     ON quiz_session_items(question_id);
+
+CREATE TABLE IF NOT EXISTS attempts (
+    id BIGSERIAL PRIMARY KEY,
+    session_id BIGINT NOT NULL REFERENCES quiz_sessions(id) ON DELETE CASCADE,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    question_id BIGINT REFERENCES questions(id) ON DELETE SET NULL,
+    legacy_question_id BIGINT NOT NULL,
+    module_id BIGINT REFERENCES modules(id) ON DELETE SET NULL,
+    score_earned REAL NOT NULL,
+    score_possible REAL NOT NULL DEFAULT 1,
+    resolved_prompt TEXT,
+    resolved_type_config_json TEXT,
+    submitted_answer_json TEXT,
+    answered_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(session_id, legacy_question_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_attempts_user_question_answered
+    ON attempts(user_id, legacy_question_id, answered_at);
+
+CREATE INDEX IF NOT EXISTS idx_attempts_user_session
+    ON attempts(user_id, session_id);
+
+CREATE INDEX IF NOT EXISTS idx_attempts_question_id
+    ON attempts(question_id);

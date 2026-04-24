@@ -12,7 +12,6 @@ from .bundles import (
     bundle_summary,
     delete_question_bundle,
     normalize_bundle_payload,
-    question_bundle_variants_by_id,
     upsert_question_bundle,
 )
 from .catalog import (
@@ -22,7 +21,7 @@ from .catalog import (
     ensure_user_exists,
 )
 from .errors import NotFoundError, ValidationError
-from .questions import serialize_type_config, stored_prompt_key
+from .questions import draft_kwargs_from_storage, serialize_type_config, stored_prompt_key
 from .text import json_dumps, normalize_text
 from .visibility import question_visible_to_actor
 
@@ -225,6 +224,7 @@ def _apply_verified_question_revision(
     )
     if reset_stats:
         connection.execute("DELETE FROM quiz_session_items WHERE question_id = ?", (question_id,))
+        connection.execute("DELETE FROM attempts WHERE legacy_question_id = ?", (question_id,))
         connection.execute("DELETE FROM user_review_flags WHERE question_id = ?", (question_id,))
 
     target_rank = int(current["rank"]) if int(current["module_id"]) == payload.module_id else _append_rank(connection, payload.module_id)
@@ -572,26 +572,16 @@ def delete_question(connection: DatabaseConnection, question_id: int, *, actor: 
         }
 
     current_type_config = json.loads(current["type_config_json"])
-    if current["question_type"] == "bundle":
-        proposal_payload = QuestionDraftIn(
-            module_id=int(current["module_id"]),
-            prompt=current["prompt"],
-            question_type="bundle",
-            rank=int(current["rank"]),
-            bundle_variants=question_bundle_variants_by_id(
-                connection,
-                question_ids=[int(question_id)],
-            ).get(int(question_id), []),
-        )
-    else:
-        proposal_payload = QuestionDraftIn(
+    proposal_payload = QuestionDraftIn(
+        **draft_kwargs_from_storage(
             module_id=int(current["module_id"]),
             prompt=current["prompt"],
             question_type=current["question_type"],
             rank=int(current["rank"]),
-            accepted_answers=current_type_config.get("accepted_answers", []),
-            segments=current_type_config.get("segments", []),
+            type_config=current_type_config,
+            variants_json=current["variants_json"],
         )
+    )
     proposal = _upsert_question_revision_proposal(
         connection,
         question_id=question_id,
@@ -656,6 +646,8 @@ def merge_question_progress(
     survivor_question_id: int,
     merged_question_ids: list[int],
 ) -> None:
+    survivor = _require_question_row(connection, survivor_question_id)
+    survivor_module_id = int(survivor["module_id"])
     for merged_question_id in merged_question_ids:
         session_rows = connection.execute(
             """
@@ -726,6 +718,85 @@ def merge_question_progress(
                 "DELETE FROM quiz_session_items WHERE session_id = ? AND question_id = ?",
                 (row["session_id"], merged_question_id),
             )
+        attempt_rows = connection.execute(
+            """
+            SELECT
+                id,
+                session_id,
+                legacy_question_id,
+                question_id,
+                module_id,
+                score_earned,
+                score_possible,
+                resolved_prompt,
+                resolved_type_config_json,
+                submitted_answer_json,
+                answered_at
+            FROM attempts
+            WHERE legacy_question_id = ?
+            ORDER BY session_id ASC, id ASC
+            """,
+            (merged_question_id,),
+        ).fetchall()
+        for row in attempt_rows:
+            existing = connection.execute(
+                """
+                SELECT
+                    id,
+                    session_id,
+                    legacy_question_id,
+                    question_id,
+                    module_id,
+                    score_earned,
+                    score_possible,
+                    resolved_prompt,
+                    resolved_type_config_json,
+                    submitted_answer_json,
+                    answered_at
+                FROM attempts
+                WHERE session_id = ? AND legacy_question_id = ?
+                """,
+                (row["session_id"], survivor_question_id),
+            ).fetchone()
+            if existing is None:
+                connection.execute(
+                    """
+                    UPDATE attempts
+                    SET legacy_question_id = ?, question_id = ?, module_id = ?
+                    WHERE id = ?
+                    """,
+                    (survivor_question_id, survivor_question_id, survivor_module_id, row["id"]),
+                )
+                continue
+
+            merged_attempt = _merge_session_item_rows(dict(existing), dict(row))
+            connection.execute(
+                """
+                UPDATE attempts
+                SET
+                    question_id = ?,
+                    module_id = ?,
+                    score_earned = ?,
+                    score_possible = ?,
+                    resolved_prompt = ?,
+                    resolved_type_config_json = ?,
+                    submitted_answer_json = ?,
+                    answered_at = ?
+                WHERE id = ?
+                """,
+                (
+                    survivor_question_id,
+                    survivor_module_id,
+                    merged_attempt["score_earned"],
+                    merged_attempt["score_possible"],
+                    merged_attempt["resolved_prompt"],
+                    merged_attempt["resolved_type_config_json"],
+                    merged_attempt["submitted_answer_json"],
+                    merged_attempt["answered_at"],
+                    existing["id"],
+                ),
+            )
+            connection.execute("DELETE FROM attempts WHERE id = ?", (row["id"],))
 
 
 def delete_question_record(connection: DatabaseConnection, question_id: int) -> None:
@@ -752,6 +823,13 @@ def backfill_session_scores(connection: DatabaseConnection) -> None:
     connection.execute(
         """
         UPDATE quiz_session_items
+        SET score_possible = 1
+        WHERE score_possible IS NULL OR score_possible = 0
+        """
+    )
+    connection.execute(
+        """
+        UPDATE attempts
         SET score_possible = 1
         WHERE score_possible IS NULL OR score_possible = 0
         """

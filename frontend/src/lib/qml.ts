@@ -539,8 +539,8 @@ export function buildQmlLine(question: ParsedQmlQuestion): string {
 
   return (
     question.accepted_answers.reduce((line, group, index) => {
-      const segment = question.segments[index] ?? '';
+      const segment = escapeQmlText(question.segments[index] ?? '');
       return `${line}${segment}[${group.map(escapeQmlText).join(' | ')}]`;
-    }, '') + (question.segments[question.segments.length - 1] ?? '')
+    }, '') + escapeQmlText(question.segments[question.segments.length - 1] ?? '')
   );
 }

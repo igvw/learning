@@ -3,7 +3,7 @@ from typing import Any
 
 from ..database import DatabaseConnection
 from .auth import Actor
-from .bundles import bundle_qml_from_row
+from .questions import bundle_qml_from_storage
 
 
 def question_visible_to_actor(row: Any, actor: Actor | None) -> bool:
@@ -106,7 +106,7 @@ def list_effective_question_rows(
         question_type = row["question_type"]
         prompt = row["prompt"]
         type_config = json.loads(row["type_config_json"])
-        bundle_qml = bundle_qml_from_row(prompt, row["variants_json"])
+        bundle_qml = bundle_qml_from_storage(question_type, prompt, row["variants_json"])
 
         effective_rows.append(
             {

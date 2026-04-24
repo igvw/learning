@@ -128,12 +128,12 @@ def get_stats(
             SELECT
                 qs.id AS session_id,
                 qs.created_at,
-                COUNT(qsi.question_id) AS answered_count,
-                COALESCE(SUM(qsi.score_earned), 0) AS correct_count,
-                COALESCE(SUM(qsi.score_possible), 0) AS score_possible
+                COUNT(attempts.id) AS answered_count,
+                COALESCE(SUM(attempts.score_earned), 0) AS correct_count,
+                COALESCE(SUM(attempts.score_possible), 0) AS score_possible
             FROM quiz_sessions AS qs
-            JOIN quiz_session_items AS qsi ON qsi.session_id = qs.id
-            WHERE {session_scope_filter} AND qsi.score_earned IS NOT NULL
+            JOIN attempts ON attempts.session_id = qs.id
+            WHERE {session_scope_filter}
             GROUP BY qs.id, qs.created_at
             ORDER BY qs.created_at DESC
             LIMIT 10

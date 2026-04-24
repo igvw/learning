@@ -37,6 +37,33 @@ class StatsApiTests(PostgresBackendTestCase):
                 """,
                 (first_session_id, answered_question_id, 1.0, 1.0),
             )
+            connection.execute(
+                """
+                INSERT INTO attempts (
+                    session_id,
+                    user_id,
+                    question_id,
+                    legacy_question_id,
+                    module_id,
+                    score_earned,
+                    score_possible,
+                    answered_at,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    first_session_id,
+                    user["id"],
+                    answered_question_id,
+                    answered_question_id,
+                    capitals["id"],
+                    1.0,
+                    1.0,
+                    "2026-04-01T09:15:00Z",
+                    "2026-04-01T09:15:00Z",
+                ),
+            )
 
             second_session_id = connection.execute(
                 """
@@ -52,6 +79,33 @@ class StatsApiTests(PostgresBackendTestCase):
                 VALUES (?, ?, ?, ?)
                 """,
                 (second_session_id, answered_question_id, 0.0, 1.0),
+            )
+            connection.execute(
+                """
+                INSERT INTO attempts (
+                    session_id,
+                    user_id,
+                    question_id,
+                    legacy_question_id,
+                    module_id,
+                    score_earned,
+                    score_possible,
+                    answered_at,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    second_session_id,
+                    user["id"],
+                    answered_question_id,
+                    answered_question_id,
+                    capitals["id"],
+                    0.0,
+                    1.0,
+                    "2026-04-03T10:20:00Z",
+                    "2026-04-03T10:20:00Z",
+                ),
             )
 
         stats_payload = self.get_stats_payload(user["id"], capitals["id"])

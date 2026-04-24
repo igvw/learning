@@ -75,6 +75,7 @@ def reset_test_database(database_url: str) -> None:
             TRUNCATE TABLE
                 question_revision_proposals,
                 auth_sessions,
+                attempts,
                 quiz_session_items,
                 quiz_sessions,
                 user_review_flags,
