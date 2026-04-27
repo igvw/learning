@@ -58,7 +58,10 @@ CREATE TABLE IF NOT EXISTS questions (
     moderation_status TEXT NOT NULL DEFAULT 'verified',
     admin_review_note TEXT NOT NULL DEFAULT '',
     reviewed_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
-    reviewed_at TEXT
+    reviewed_at TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    replaced_by_question_id BIGINT REFERENCES questions(id) ON DELETE SET NULL,
+    progress_from_question_id BIGINT REFERENCES questions(id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_questions_module_id ON questions(module_id);
@@ -66,11 +69,38 @@ CREATE INDEX IF NOT EXISTS idx_questions_module_prompt_key ON questions(module_i
 CREATE INDEX IF NOT EXISTS idx_questions_prompt_key ON questions(prompt_key);
 CREATE INDEX IF NOT EXISTS idx_questions_created_by_status
     ON questions(created_by_user_id, admin_verified, moderation_status);
+CREATE INDEX IF NOT EXISTS idx_questions_enabled_module
+    ON questions(module_id, enabled, moderation_status);
+CREATE INDEX IF NOT EXISTS idx_questions_replaced_by
+    ON questions(replaced_by_question_id);
+CREATE INDEX IF NOT EXISTS idx_questions_progress_from
+    ON questions(progress_from_question_id);
 
 CREATE TABLE IF NOT EXISTS question_bundles (
-    question_id BIGINT PRIMARY KEY REFERENCES questions(id) ON DELETE CASCADE,
-    variants_json TEXT NOT NULL
+    id BIGSERIAL PRIMARY KEY,
+    question_id BIGINT NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+    variant_index INTEGER NOT NULL,
+    prompt_values_json TEXT NOT NULL,
+    accepted_answers_json TEXT NOT NULL,
+    UNIQUE(question_id, variant_index),
+    UNIQUE(id, question_id)
 );
+
+CREATE INDEX IF NOT EXISTS idx_question_bundles_question_id
+    ON question_bundles(question_id, variant_index);
+
+CREATE OR REPLACE VIEW question_bundle_summaries AS
+SELECT
+    question_id,
+    json_agg(
+        json_build_object(
+            'prompt_values', prompt_values_json::json,
+            'accepted_answers', accepted_answers_json::json
+        )
+        ORDER BY variant_index ASC
+    )::text AS variants_json
+FROM question_bundles
+GROUP BY question_id;
 
 CREATE TABLE IF NOT EXISTS user_review_flags (
     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -119,12 +149,14 @@ CREATE INDEX IF NOT EXISTS idx_quiz_sessions_user_module_created
 CREATE TABLE IF NOT EXISTS quiz_session_items (
     session_id BIGINT NOT NULL REFERENCES quiz_sessions(id) ON DELETE CASCADE,
     question_id BIGINT NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+    bundle_variant_id BIGINT,
     score_earned REAL,
     score_possible REAL NOT NULL DEFAULT 1,
     resolved_prompt TEXT,
     resolved_type_config_json TEXT,
     submitted_answer_json TEXT,
-    PRIMARY KEY (session_id, question_id)
+    PRIMARY KEY (session_id, question_id),
+    FOREIGN KEY (bundle_variant_id, question_id) REFERENCES question_bundles(id, question_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_quiz_session_items_session_id
@@ -137,24 +169,25 @@ CREATE TABLE IF NOT EXISTS attempts (
     id BIGSERIAL PRIMARY KEY,
     session_id BIGINT NOT NULL REFERENCES quiz_sessions(id) ON DELETE CASCADE,
     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    question_id BIGINT REFERENCES questions(id) ON DELETE SET NULL,
-    legacy_question_id BIGINT NOT NULL,
+    question_id BIGINT NOT NULL REFERENCES questions(id) ON DELETE RESTRICT,
     module_id BIGINT REFERENCES modules(id) ON DELETE SET NULL,
+    bundle_variant_id BIGINT,
     score_earned REAL NOT NULL,
     score_possible REAL NOT NULL DEFAULT 1,
-    resolved_prompt TEXT,
-    resolved_type_config_json TEXT,
     submitted_answer_json TEXT,
     answered_at TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    UNIQUE(session_id, legacy_question_id)
+    UNIQUE(session_id, question_id),
+    FOREIGN KEY (bundle_variant_id, question_id) REFERENCES question_bundles(id, question_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_attempts_user_question_answered
-    ON attempts(user_id, legacy_question_id, answered_at);
+    ON attempts(user_id, question_id, answered_at);
 
 CREATE INDEX IF NOT EXISTS idx_attempts_user_session
     ON attempts(user_id, session_id);
 
 CREATE INDEX IF NOT EXISTS idx_attempts_question_id
     ON attempts(question_id);
+
+CREATE INDEX IF NOT EXISTS idx_attempts_bundle_variant_id
+    ON attempts(bundle_variant_id);

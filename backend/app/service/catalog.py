@@ -89,7 +89,7 @@ def ensure_leaf_module(connection: DatabaseConnection, module_id: int, *, actor:
 def ensure_module_can_accept_children(connection: DatabaseConnection, module_id: int, *, actor: Actor | None = None) -> Any:
     module = ensure_module_exists(connection, module_id, actor=actor)
     question_count = connection.execute(
-        "SELECT COUNT(*) AS question_count FROM questions WHERE module_id = ? AND moderation_status <> 'rejected'",
+        "SELECT COUNT(*) AS question_count FROM questions WHERE module_id = ? AND enabled = 1 AND moderation_status <> 'rejected'",
         (module_id,),
     ).fetchone()["question_count"]
     if question_count:
@@ -340,9 +340,10 @@ def export_verified_content_archive(connection: DatabaseConnection) -> ContentEx
             f"""
             SELECT module_id, question_type, prompt, type_config_json, bundles.variants_json
             FROM questions
-            LEFT JOIN question_bundles AS bundles ON bundles.question_id = questions.id
+            LEFT JOIN question_bundle_summaries AS bundles ON bundles.question_id = questions.id
             WHERE module_id IN ({placeholders})
               AND admin_verified = 1
+              AND enabled = 1
               AND moderation_status = 'verified'
             ORDER BY module_id ASC, rank ASC, id ASC
             """,

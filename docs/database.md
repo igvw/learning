@@ -56,16 +56,37 @@ Each question keeps:
 - `created_by_user_id`
 - `admin_verified`
 - `moderation_status`
+- `enabled`
+- `replaced_by_question_id`
+- `progress_from_question_id`
 
 Important choices:
 
 - new uploaded questions are first-class pending rows until admin verification
 - verified question content is shared, but regular-user revisions and delete requests live in proposals
+- answered or verified questions are versioned immutably: revisions create a new enabled question and disable the old row
+- `replaced_by_question_id` links a disabled row to the replacement that superseded it
+- `progress_from_question_id` lets a replacement include prior attempts when stats are intentionally not reset
 - `prompt_key` stores the normalized duplicate-matching identity used for indexed question lookups
 - ordinary create/revise duplicate checks happen per leaf module through indexed `prompt_key` lookups
 - import review can also match same-prompt questions elsewhere in the same top-level module tree through `prompt_key` lookups
 - question order is append-only within a leaf; `rank` is the exposed storage field, and sparse gaps are allowed
 - import-created and import-relocated questions append at the end of the target leaf
+
+`question_bundles` stores bundle variants for `question_type = "bundle"` questions.
+
+Each bundle variant keeps:
+
+- `question_id`
+- `variant_index`
+- `prompt_values_json`
+- `accepted_answers_json`
+
+Important choices:
+
+- one `questions` row is still the learning item identity for a bundle
+- each bundle variant is a row so quiz items and attempts can point to the exact served variant
+- export rebuilds canonical bundle QML from ordered variant rows
 
 ## Users, Sessions, And Review Flags
 
@@ -107,6 +128,7 @@ Each item keeps:
 
 - `session_id`
 - `question_id`
+- `bundle_variant_id`
 - `score_earned`
 - `score_possible`
 - `resolved_prompt`
@@ -120,19 +142,20 @@ Each attempt keeps:
 - `session_id`
 - `user_id`
 - `question_id`
-- `legacy_question_id`
 - `module_id`
+- `bundle_variant_id`
 - `score_earned`
 - `score_possible`
-- `resolved_prompt`
-- `resolved_type_config_json`
 - `submitted_answer_json`
 - `answered_at`
 
 Important choices:
 
 - `quiz_session_items` remains the active quiz-session item list and submission guard
+- bundle quiz items and attempts store `bundle_variant_id` when a concrete variant was served
+- attempts point to the exact question version that was answered
 - progress is derived from `attempts`, not cached on questions
+- replacement questions can include prior-version attempts by following `progress_from_question_id`
 - scheduling is derived from history, not stored in a dedicated schedule table
 - `submitted_answer_json` is kept because the revision drawer needs prior incorrect answers
 

@@ -53,7 +53,7 @@ def _module_rows(
 
 
 def _pending_question_rows(connection: DatabaseConnection, *, creator_user_id: int | None = None) -> list[Any]:
-    where_sql = "WHERE questions.admin_verified = 0"
+    where_sql = "WHERE questions.admin_verified = 0 AND questions.enabled = 1"
     params: tuple[Any, ...] = ()
     if creator_user_id is not None:
         where_sql += " AND questions.created_by_user_id = ?"
@@ -76,7 +76,7 @@ def _pending_question_rows(connection: DatabaseConnection, *, creator_user_id: i
             creators.display_name AS creator_display_name
         FROM questions
         JOIN modules ON modules.id = questions.module_id
-        LEFT JOIN question_bundles AS bundles ON bundles.question_id = questions.id
+        LEFT JOIN question_bundle_summaries AS bundles ON bundles.question_id = questions.id
         LEFT JOIN users AS creators ON creators.id = questions.created_by_user_id
         {where_sql}
         ORDER BY modules.full_slug ASC, questions.rank ASC, questions.id ASC
@@ -113,7 +113,7 @@ def _proposal_rows(connection: DatabaseConnection, *, proposer_user_id: int | No
         FROM question_revision_proposals AS proposals
         JOIN questions ON questions.id = proposals.question_id
         JOIN modules ON modules.id = questions.module_id
-        LEFT JOIN question_bundles AS bundles ON bundles.question_id = questions.id
+        LEFT JOIN question_bundle_summaries AS bundles ON bundles.question_id = questions.id
         LEFT JOIN users AS proposers ON proposers.id = proposals.proposer_user_id
         {where_sql}
         ORDER BY proposals.updated_at DESC, proposals.id DESC
@@ -392,7 +392,7 @@ def review_question_submission(
                 creators.display_name AS creator_display_name
             FROM questions
             JOIN modules ON modules.id = questions.module_id
-            LEFT JOIN question_bundles AS bundles ON bundles.question_id = questions.id
+            LEFT JOIN question_bundle_summaries AS bundles ON bundles.question_id = questions.id
             LEFT JOIN users AS creators ON creators.id = questions.created_by_user_id
         ) AS question_rows
         WHERE question_id = ?
@@ -460,7 +460,7 @@ def review_question_submission(
             creators.display_name AS creator_display_name
         FROM questions
         JOIN modules ON modules.id = questions.module_id
-        LEFT JOIN question_bundles AS bundles ON bundles.question_id = questions.id
+        LEFT JOIN question_bundle_summaries AS bundles ON bundles.question_id = questions.id
         LEFT JOIN users AS creators ON creators.id = questions.created_by_user_id
         WHERE questions.id = ?
         """,
@@ -502,7 +502,7 @@ def review_question_revision(
         FROM question_revision_proposals AS proposals
         JOIN questions ON questions.id = proposals.question_id
         JOIN modules ON modules.id = questions.module_id
-        LEFT JOIN question_bundles AS bundles ON bundles.question_id = questions.id
+        LEFT JOIN question_bundle_summaries AS bundles ON bundles.question_id = questions.id
         LEFT JOIN users AS proposers ON proposers.id = proposals.proposer_user_id
         WHERE proposals.id = ?
         """,
@@ -602,7 +602,7 @@ def review_question_revision(
         FROM question_revision_proposals AS proposals
         JOIN questions ON questions.id = proposals.question_id
         JOIN modules ON modules.id = questions.module_id
-        LEFT JOIN question_bundles AS bundles ON bundles.question_id = questions.id
+        LEFT JOIN question_bundle_summaries AS bundles ON bundles.question_id = questions.id
         LEFT JOIN users AS proposers ON proposers.id = proposals.proposer_user_id
         WHERE proposals.id = ?
         """,

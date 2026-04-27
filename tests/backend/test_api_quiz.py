@@ -24,14 +24,16 @@ class QuizApiTests(PostgresBackendTestCase):
         with get_connection(self.database_url) as connection:
             attempt = connection.execute(
                 """
-                SELECT user_id, legacy_question_id, score_earned, score_possible, submitted_answer_json
+                SELECT user_id, question_id, bundle_variant_id, score_earned, score_possible, submitted_answer_json
                 FROM attempts
-                WHERE session_id = ? AND legacy_question_id = ?
+                WHERE session_id = ? AND question_id = ?
                 """,
                 (session["id"], first_item["question_id"]),
             ).fetchone()
         self.assertIsNotNone(attempt)
         self.assertEqual(attempt["user_id"], user["id"])
+        self.assertEqual(attempt["question_id"], first_item["question_id"])
+        self.assertIsNone(attempt["bundle_variant_id"])
         self.assertEqual(attempt["score_earned"], submit_payload["score_earned"])
         self.assertEqual(attempt["score_possible"], submit_payload["score_possible"])
         self.assertEqual(attempt["submitted_answer_json"], '["nairobi"]')
@@ -131,6 +133,25 @@ class QuizApiTests(PostgresBackendTestCase):
         answer = "20 ml" if "600 mg" in item["prompt"] else "12.5 ml"
         submit_payload = self.submit_quiz_item(user["id"], session["id"], item["id"], [answer])
         self.assertIn(submit_payload["default_answers"][0], {"12.5 ml", "20 ml"})
+        with get_connection(self.database_url) as connection:
+            served = connection.execute(
+                """
+                SELECT bundle_variant_id
+                FROM quiz_session_items
+                WHERE session_id = ? AND question_id = ?
+                """,
+                (session["id"], question_id),
+            ).fetchone()
+            attempt = connection.execute(
+                """
+                SELECT bundle_variant_id
+                FROM attempts
+                WHERE session_id = ? AND question_id = ?
+                """,
+                (session["id"], question_id),
+            ).fetchone()
+        self.assertIsNotNone(served["bundle_variant_id"])
+        self.assertEqual(attempt["bundle_variant_id"], served["bundle_variant_id"])
 
     def test_quiz_submission_returns_default_and_alternative_feedback(self) -> None:
         norwegian = self.create_module_record("Norwegian")

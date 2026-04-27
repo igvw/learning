@@ -120,8 +120,10 @@ def _existing_questions_for_prompt_keys(
             bundles.variants_json
         FROM questions AS q
         JOIN modules AS m ON m.id = q.module_id
-        LEFT JOIN question_bundles AS bundles ON bundles.question_id = q.id
+        LEFT JOIN question_bundle_summaries AS bundles ON bundles.question_id = q.id
         WHERE q.prompt_key IN ({placeholders})
+          AND q.enabled = 1
+          AND q.moderation_status <> 'rejected'
           AND (q.module_id = ? OR m.full_slug = ? OR m.full_slug LIKE ?)
         ORDER BY q.id ASC
         """,

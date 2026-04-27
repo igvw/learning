@@ -43,24 +43,20 @@ class StatsApiTests(PostgresBackendTestCase):
                     session_id,
                     user_id,
                     question_id,
-                    legacy_question_id,
                     module_id,
                     score_earned,
                     score_possible,
-                    answered_at,
-                    created_at
+                    answered_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     first_session_id,
                     user["id"],
                     answered_question_id,
-                    answered_question_id,
                     capitals["id"],
                     1.0,
                     1.0,
-                    "2026-04-01T09:15:00Z",
                     "2026-04-01T09:15:00Z",
                 ),
             )
@@ -86,24 +82,20 @@ class StatsApiTests(PostgresBackendTestCase):
                     session_id,
                     user_id,
                     question_id,
-                    legacy_question_id,
                     module_id,
                     score_earned,
                     score_possible,
-                    answered_at,
-                    created_at
+                    answered_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     second_session_id,
                     user["id"],
                     answered_question_id,
-                    answered_question_id,
                     capitals["id"],
                     0.0,
                     1.0,
-                    "2026-04-03T10:20:00Z",
                     "2026-04-03T10:20:00Z",
                 ),
             )

@@ -2,7 +2,7 @@ import json
 from typing import Any
 
 from ..database import DatabaseConnection
-from ..qml import build_bundle_qml, bundle_variants_from_json, parse_qml_line, resolved_bundle_runtime
+from ..qml import build_bundle_qml, bundle_variants_from_json, parse_qml_line, resolved_bundle_variant_runtime
 from ..schemas import QuestionDraftIn
 from .errors import ValidationError
 from .text import json_dumps
@@ -65,14 +65,25 @@ def normalize_bundle_payload(payload: QuestionDraftIn) -> tuple[str, list[dict[s
 
 
 def upsert_question_bundle(connection: DatabaseConnection, *, question_id: int, variants: list[dict[str, Any]]) -> None:
-    connection.execute(
-        """
-        INSERT INTO question_bundles (question_id, variants_json)
-        VALUES (?, ?)
-        ON CONFLICT (question_id) DO UPDATE SET variants_json = excluded.variants_json
-        """,
-        (question_id, json_dumps(variants)),
-    )
+    connection.execute("DELETE FROM question_bundles WHERE question_id = ?", (question_id,))
+    for index, variant in enumerate(variants):
+        connection.execute(
+            """
+            INSERT INTO question_bundles (
+                question_id,
+                variant_index,
+                prompt_values_json,
+                accepted_answers_json
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                question_id,
+                index,
+                json_dumps(variant.get("prompt_values", [])),
+                json_dumps(variant.get("accepted_answers", [])),
+            ),
+        )
 
 
 def delete_question_bundle(connection: DatabaseConnection, *, question_id: int) -> None:
@@ -93,16 +104,58 @@ def bundle_qml_from_type_config(prompt: str, type_config: dict[str, Any]) -> str
     return build_bundle_qml(prompt, variants)
 
 
+def bundle_variants_for_question(connection: DatabaseConnection, *, question_id: int) -> list[dict[str, Any]]:
+    rows = connection.execute(
+        """
+        SELECT id, variant_index, prompt_values_json, accepted_answers_json
+        FROM question_bundles
+        WHERE question_id = ?
+        ORDER BY variant_index ASC
+        """,
+        (question_id,),
+    ).fetchall()
+    return [
+        {
+            "id": int(row["id"]),
+            "variant_index": int(row["variant_index"]),
+            "prompt_values": _stored_json_list(row["prompt_values_json"]),
+            "accepted_answers": _stored_json_list(row["accepted_answers_json"]),
+        }
+        for row in rows
+    ]
+
+
+def _stored_json_list(value: str) -> list[str]:
+    parsed = json.loads(value)
+    if not isinstance(parsed, list):
+        return []
+    return [str(item) for item in parsed]
+
+
 def resolved_bundle_question_runtime(
     *,
+    connection: DatabaseConnection,
+    question_id: int,
     prompt: str,
-    variants_json: str | None,
     rng: Any,
-) -> tuple[str, dict[str, Any]]:
-    if not variants_json:
+) -> tuple[int, str, dict[str, Any]]:
+    rows = connection.execute(
+        """
+        SELECT id, prompt_values_json, accepted_answers_json
+        FROM question_bundles
+        WHERE question_id = ?
+        ORDER BY variant_index ASC
+        """,
+        (question_id,),
+    ).fetchall()
+    if not rows:
         raise ValidationError("Bundle-backed questions need a stored bundle definition.")
-    return resolved_bundle_runtime(
+    row = rng.choice(rows)
+    resolved_prompt, type_config = resolved_bundle_variant_runtime(
         prompt=prompt,
-        bundle_variants=bundle_variants_from_json(variants_json),
-        rng=rng,
+        variant={
+            "prompt_values": _stored_json_list(row["prompt_values_json"]),
+            "accepted_answers": _stored_json_list(row["accepted_answers_json"]),
+        },
     )
+    return int(row["id"]), resolved_prompt, type_config

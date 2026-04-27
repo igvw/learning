@@ -187,11 +187,19 @@ class ImportApiTests(PostgresBackendTestCase):
 
         target_stats = self.get_stats_payload(user["id"], target["id"])
         self.assertEqual(len(target_stats["questions"]), 1)
-        self.assertEqual(target_stats["questions"][0]["question_id"], question_id)
+        replacement_id = target_stats["questions"][0]["question_id"]
+        self.assertNotEqual(replacement_id, question_id)
         self.assertEqual(target_stats["questions"][0]["attempts"], 1)
         self.assertFalse(target_stats["questions"][0]["review_flag"])
         self.assertEqual(target_stats["questions"][0]["accepted_answers"], [["against", "toward"]])
         self.assertEqual(target_stats["questions"][0]["rank"], 1)
+        with get_connection(self.database_url) as connection:
+            old_row = connection.execute(
+                "SELECT enabled, replaced_by_question_id FROM questions WHERE id = ?",
+                (question_id,),
+            ).fetchone()
+        self.assertFalse(bool(old_row["enabled"]))
+        self.assertEqual(old_row["replaced_by_question_id"], replacement_id)
 
     def test_bundle_import_validates_and_commits_as_one_question(self) -> None:
         norwegian = self.create_module_record("Norwegian")
@@ -222,16 +230,17 @@ class ImportApiTests(PostgresBackendTestCase):
         with get_connection(self.database_url) as connection:
             row = connection.execute(
                 """
-                SELECT q.question_type, q.prompt, bundles.variants_json
+                SELECT q.question_type, q.prompt, COUNT(bundles.id) AS variant_count
                 FROM questions AS q
                 LEFT JOIN question_bundles AS bundles ON bundles.question_id = q.id
                 WHERE q.module_id = ?
+                GROUP BY q.id, q.question_type, q.prompt
                 """,
                 (target["id"],),
             ).fetchone()
         self.assertEqual(row["question_type"], "bundle")
         self.assertIn("A patient needs {} mg.", row["prompt"])
-        self.assertIsNotNone(row["variants_json"])
+        self.assertEqual(row["variant_count"], 2)
 
     def test_same_leaf_exact_noop_duplicate_has_no_side_effects(self) -> None:
         norwegian = self.create_module_record("Norwegian")

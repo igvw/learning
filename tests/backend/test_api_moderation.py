@@ -444,9 +444,13 @@ class ModerationApiTests(PostgresBackendTestCase):
         approved_question = next(
             question
             for question in bob_stats_after_revision_approval["questions"]
-            if question["question_id"] == verified_question["question_id"]
+            if question["prompt"] == "hunden"
         )
-        self.assertEqual(approved_question["prompt"], "hunden")
+        self.assertNotEqual(approved_question["question_id"], verified_question["question_id"])
+        self.assertEqual(
+            {question["prompt"] for question in bob_stats_after_revision_approval["questions"]},
+            {"hunden", "katt"},
+        )
 
     def test_admin_can_approve_revision_with_edited_override(self) -> None:
         norwegian = self.create_module_record("Norwegian")
@@ -491,11 +495,9 @@ class ModerationApiTests(PostgresBackendTestCase):
         self.assertEqual(approve_response.json()["status"], "approved")
 
         stats_after = self.get_stats_payload(int(alice["id"]), words["id"])
-        revised_question = next(
-            question
-            for question in stats_after["questions"]
-            if question["question_id"] == verified_question["question_id"]
-        )
+        self.assertEqual(len(stats_after["questions"]), 1)
+        revised_question = stats_after["questions"][0]
+        self.assertNotEqual(revised_question["question_id"], verified_question["question_id"])
         self.assertEqual(revised_question["prompt"], "hunden min")
         self.assertEqual(revised_question["accepted_answers"], [["my dog"]])
 
@@ -540,21 +542,17 @@ class ModerationApiTests(PostgresBackendTestCase):
         self.assertEqual(approve_response.json()["status"], "approved")
 
         alice_stats = self.get_stats_payload(int(alice["id"]), words["id"])
-        alice_question = next(
-            question
-            for question in alice_stats["questions"]
-            if question["question_id"] == verified_question["question_id"]
-        )
+        self.assertEqual(len(alice_stats["questions"]), 1)
+        alice_question = alice_stats["questions"][0]
+        self.assertNotEqual(alice_question["question_id"], verified_question["question_id"])
         self.assertEqual(alice_question["prompt"], "hunden")
         self.assertEqual(alice_question["attempts"], 0)
         self.assertEqual(alice_question["schedule"]["logical_bucket"], "unseen")
 
         bob_stats = self.get_stats_payload(int(bob["id"]), words["id"])
-        bob_question = next(
-            question
-            for question in bob_stats["questions"]
-            if question["question_id"] == verified_question["question_id"]
-        )
+        self.assertEqual(len(bob_stats["questions"]), 1)
+        bob_question = bob_stats["questions"][0]
+        self.assertEqual(bob_question["question_id"], alice_question["question_id"])
         self.assertEqual(bob_question["prompt"], "hunden")
         self.assertEqual(bob_question["attempts"], 0)
         self.assertEqual(bob_question["schedule"]["logical_bucket"], "unseen")

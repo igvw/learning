@@ -80,10 +80,11 @@ Bundles are first-class question content, not import-only sugar:
 - `questions.prompt` stores the canonical template line
 - `questions.prompt_key` is based on the normalized template identity
 - `questions.type_config_json` stores lightweight bundle summary metadata
-- `question_bundles` stores one 1:1 row per bundle question
-- `question_bundles.variants_json` stores the ordered variant rows
+- `question_bundles` stores one row per bundle variant
+- `question_bundles.variant_index` preserves authoring/export order
+- each variant row stores `prompt_values_json` and `accepted_answers_json`
 
-When a quiz session is created, the runtime picks one variant uniformly at random, substitutes prompt values into the template, and persists the resolved prompt plus accepted answers on the session item. Once answered, the durable attempt stores the same resolved single-answer shape for stats and scheduling.
+When a quiz session is created, the runtime picks one variant uniformly at random, stores that variant id on the session item, substitutes prompt values into the template, and persists the resolved prompt plus accepted answers for the active quiz UI. Once answered, the durable attempt points to the exact question version and bundle variant that was served.
 
 ## Import, Export, And Review
 
@@ -102,4 +103,4 @@ These are intentionally outside the current bundle model:
 - distractors
 - weighted variant selection
 - multi-answer or inline-cloze bundle variants
-- a normalized SQL table per variant
+- a more normalized SQL model for individual answer cells

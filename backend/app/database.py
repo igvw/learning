@@ -10,7 +10,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 
-CURRENT_SCHEMA_VERSION = 10
+CURRENT_SCHEMA_VERSION = 11
 SCHEMA_VERSION_TABLE = "app_schema_version"
 SCHEMA_SQL = Path(__file__).with_name("schema.sql").read_text()
 
@@ -136,6 +136,33 @@ def _set_schema_version(connection: DatabaseConnection, version: int) -> None:
     )
 
 
+def _table_columns(connection: DatabaseConnection, table_name: str) -> set[str]:
+    rows = connection.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = ?
+        """,
+        (table_name,),
+    ).fetchall()
+    return {row["column_name"] for row in rows}
+
+
+def _constraint_exists(connection: DatabaseConnection, table_name: str, constraint_name: str) -> bool:
+    row = connection.execute(
+        """
+        SELECT 1
+        FROM information_schema.table_constraints
+        WHERE table_schema = 'public'
+          AND table_name = ?
+          AND constraint_name = ?
+        """,
+        (table_name, constraint_name),
+    ).fetchone()
+    return row is not None
+
+
 def _backfill_question_prompt_keys(connection: DatabaseConnection) -> None:
     from .service.questions import question_prompt_key
 
@@ -153,6 +180,130 @@ def _backfill_question_prompt_keys(connection: DatabaseConnection) -> None:
         )
 
 
+def _ensure_question_version_columns(connection: DatabaseConnection) -> None:
+    connection.execute("ALTER TABLE questions ADD COLUMN IF NOT EXISTS enabled INTEGER NOT NULL DEFAULT 1")
+    connection.execute(
+        "ALTER TABLE questions ADD COLUMN IF NOT EXISTS replaced_by_question_id BIGINT REFERENCES questions(id) ON DELETE SET NULL"
+    )
+    connection.execute(
+        "ALTER TABLE questions ADD COLUMN IF NOT EXISTS progress_from_question_id BIGINT REFERENCES questions(id) ON DELETE SET NULL"
+    )
+    connection.execute("UPDATE questions SET enabled = COALESCE(enabled, 1)")
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_questions_enabled_module ON questions(module_id, enabled, moderation_status)"
+    )
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_questions_replaced_by ON questions(replaced_by_question_id)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_questions_progress_from ON questions(progress_from_question_id)")
+
+
+def _create_question_bundles_table(connection: DatabaseConnection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS question_bundles (
+            id BIGSERIAL PRIMARY KEY,
+            question_id BIGINT NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+            variant_index INTEGER NOT NULL,
+            prompt_values_json TEXT NOT NULL,
+            accepted_answers_json TEXT NOT NULL,
+            UNIQUE(question_id, variant_index),
+            UNIQUE(id, question_id)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_question_bundles_question_id
+        ON question_bundles(question_id, variant_index)
+        """
+    )
+
+
+def _create_question_bundle_summaries_view(connection: DatabaseConnection) -> None:
+    connection.execute(
+        """
+        CREATE OR REPLACE VIEW question_bundle_summaries AS
+        SELECT
+            question_id,
+            json_agg(
+                json_build_object(
+                    'prompt_values', prompt_values_json::json,
+                    'accepted_answers', accepted_answers_json::json
+                )
+                ORDER BY variant_index ASC
+            )::text AS variants_json
+        FROM question_bundles
+        GROUP BY question_id
+        """
+    )
+
+
+def _normalize_legacy_bundle_variant(variant: Any) -> dict[str, list[str]]:
+    if not isinstance(variant, dict):
+        return {"prompt_values": [], "accepted_answers": []}
+    prompt_values = variant.get("prompt_values", [])
+    accepted_answers = variant.get("accepted_answers", [])
+    if not isinstance(prompt_values, list):
+        prompt_values = []
+    if not isinstance(accepted_answers, list):
+        accepted_answers = []
+    return {
+        "prompt_values": [str(value) for value in prompt_values],
+        "accepted_answers": [str(value) for value in accepted_answers],
+    }
+
+
+def _migrate_question_bundles_to_rows(connection: DatabaseConnection) -> None:
+    existing_tables = _existing_table_names(connection)
+    if "question_bundles" not in existing_tables:
+        _create_question_bundles_table(connection)
+        _create_question_bundle_summaries_view(connection)
+        return
+
+    columns = _table_columns(connection, "question_bundles")
+    if "variants_json" not in columns:
+        _create_question_bundles_table(connection)
+        _create_question_bundle_summaries_view(connection)
+        return
+
+    connection.execute("DROP VIEW IF EXISTS question_bundle_summaries")
+    connection.execute("DROP TABLE IF EXISTS question_bundles_legacy_v10")
+    connection.execute("ALTER TABLE question_bundles RENAME TO question_bundles_legacy_v10")
+    _create_question_bundles_table(connection)
+
+    rows = connection.execute(
+        """
+        SELECT question_id, variants_json
+        FROM question_bundles_legacy_v10
+        ORDER BY question_id ASC
+        """
+    ).fetchall()
+    for row in rows:
+        variants = json.loads(row["variants_json"])
+        if not isinstance(variants, list):
+            variants = []
+        for index, variant in enumerate(variants):
+            normalized = _normalize_legacy_bundle_variant(variant)
+            connection.execute(
+                """
+                INSERT INTO question_bundles (
+                    question_id,
+                    variant_index,
+                    prompt_values_json,
+                    accepted_answers_json
+                )
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    row["question_id"],
+                    index,
+                    json.dumps(normalized["prompt_values"], separators=(",", ":"), sort_keys=True),
+                    json.dumps(normalized["accepted_answers"], separators=(",", ":"), sort_keys=True),
+                ),
+            )
+    connection.execute("DROP TABLE question_bundles_legacy_v10")
+    _create_question_bundle_summaries_view(connection)
+
+
 def _create_attempts_table(connection: DatabaseConnection) -> None:
     connection.execute(
         """
@@ -160,24 +311,24 @@ def _create_attempts_table(connection: DatabaseConnection) -> None:
             id BIGSERIAL PRIMARY KEY,
             session_id BIGINT NOT NULL REFERENCES quiz_sessions(id) ON DELETE CASCADE,
             user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            question_id BIGINT REFERENCES questions(id) ON DELETE SET NULL,
-            legacy_question_id BIGINT NOT NULL,
+            question_id BIGINT NOT NULL REFERENCES questions(id) ON DELETE RESTRICT,
             module_id BIGINT REFERENCES modules(id) ON DELETE SET NULL,
+            bundle_variant_id BIGINT,
             score_earned REAL NOT NULL,
             score_possible REAL NOT NULL DEFAULT 1,
-            resolved_prompt TEXT,
-            resolved_type_config_json TEXT,
             submitted_answer_json TEXT,
             answered_at TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            UNIQUE(session_id, legacy_question_id)
+            UNIQUE(session_id, question_id),
+            CONSTRAINT fk_attempts_bundle_variant_question
+                FOREIGN KEY (bundle_variant_id, question_id)
+                REFERENCES question_bundles(id, question_id)
         )
         """
     )
     connection.execute(
         """
         CREATE INDEX IF NOT EXISTS idx_attempts_user_question_answered
-        ON attempts(user_id, legacy_question_id, answered_at)
+        ON attempts(user_id, question_id, answered_at)
         """
     )
     connection.execute(
@@ -192,45 +343,218 @@ def _create_attempts_table(connection: DatabaseConnection) -> None:
         ON attempts(question_id)
         """
     )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_attempts_bundle_variant_id
+        ON attempts(bundle_variant_id)
+        """
+    )
+
+
+def _render_bundle_variant_prompt(prompt: str, prompt_values: list[str]) -> str:
+    segments = prompt.split("{}")
+    if len(segments) - 1 != len(prompt_values):
+        return ""
+    prompt_parts: list[str] = []
+    for index, segment in enumerate(segments[:-1]):
+        prompt_parts.append(segment)
+        prompt_parts.append(prompt_values[index])
+    prompt_parts.append(segments[-1].rsplit("[]", 1)[0])
+    return "".join(prompt_parts).strip()
+
+
+def _bundle_variant_id_for_resolved(
+    connection: DatabaseConnection,
+    *,
+    question_id: int,
+    resolved_prompt: str | None,
+    resolved_type_config_json: str | None,
+) -> int | None:
+    if not resolved_prompt and not resolved_type_config_json:
+        return None
+    question = connection.execute(
+        """
+        SELECT question_type, prompt
+        FROM questions
+        WHERE id = ?
+        """,
+        (question_id,),
+    ).fetchone()
+    if question is None or question["question_type"] != "bundle":
+        return None
+
+    expected_answers: list[str] | None = None
+    if resolved_type_config_json:
+        try:
+            type_config = json.loads(resolved_type_config_json)
+        except json.JSONDecodeError:
+            type_config = {}
+        accepted_answers = type_config.get("accepted_answers", [])
+        if isinstance(accepted_answers, list) and accepted_answers and isinstance(accepted_answers[0], list):
+            expected_answers = [str(value) for value in accepted_answers[0]]
+
+    rows = connection.execute(
+        """
+        SELECT id, prompt_values_json, accepted_answers_json
+        FROM question_bundles
+        WHERE question_id = ?
+        ORDER BY variant_index ASC
+        """,
+        (question_id,),
+    ).fetchall()
+    for row in rows:
+        prompt_values = [str(value) for value in json.loads(row["prompt_values_json"])]
+        accepted_answers = [str(value) for value in json.loads(row["accepted_answers_json"])]
+        if resolved_prompt and _render_bundle_variant_prompt(question["prompt"], prompt_values) != resolved_prompt:
+            continue
+        if expected_answers is not None and accepted_answers != expected_answers:
+            continue
+        return int(row["id"])
+    return None
 
 
 def _backfill_attempts_from_quiz_items(connection: DatabaseConnection) -> None:
-    connection.execute(
+    rows = connection.execute(
         """
-        INSERT INTO attempts (
-            session_id,
-            user_id,
-            question_id,
-            legacy_question_id,
-            module_id,
-            score_earned,
-            score_possible,
-            resolved_prompt,
-            resolved_type_config_json,
-            submitted_answer_json,
-            answered_at,
-            created_at
-        )
         SELECT
-            qs.id,
+            qs.id AS session_id,
             qs.user_id,
             qsi.question_id,
-            qsi.question_id,
+            qsi.bundle_variant_id,
             q.module_id,
             qsi.score_earned,
-            COALESCE(NULLIF(qsi.score_possible, 0), 1),
+            COALESCE(NULLIF(qsi.score_possible, 0), 1) AS score_possible,
             qsi.resolved_prompt,
             qsi.resolved_type_config_json,
             qsi.submitted_answer_json,
-            COALESCE(qs.completed_at, qs.created_at),
-            COALESCE(qs.completed_at, qs.created_at)
+            COALESCE(qs.completed_at, qs.created_at) AS answered_at
         FROM quiz_session_items AS qsi
         JOIN quiz_sessions AS qs ON qs.id = qsi.session_id
         LEFT JOIN questions AS q ON q.id = qsi.question_id
         WHERE qsi.score_earned IS NOT NULL
-        ON CONFLICT (session_id, legacy_question_id) DO NOTHING
+        ORDER BY qs.id ASC, qsi.question_id ASC
         """
-    )
+    ).fetchall()
+    for row in rows:
+        bundle_variant_id = row["bundle_variant_id"] or _bundle_variant_id_for_resolved(
+            connection,
+            question_id=int(row["question_id"]),
+            resolved_prompt=row["resolved_prompt"],
+            resolved_type_config_json=row["resolved_type_config_json"],
+        )
+        connection.execute(
+            """
+            INSERT INTO attempts (
+                session_id,
+                user_id,
+                question_id,
+                module_id,
+                bundle_variant_id,
+                score_earned,
+                score_possible,
+                submitted_answer_json,
+                answered_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (session_id, question_id) DO NOTHING
+            """,
+            (
+                row["session_id"],
+                row["user_id"],
+                row["question_id"],
+                row["module_id"],
+                bundle_variant_id,
+                row["score_earned"],
+                row["score_possible"],
+                row["submitted_answer_json"],
+                row["answered_at"],
+            ),
+        )
+
+
+def _migrate_attempts_to_slim_rows(connection: DatabaseConnection) -> None:
+    existing_tables = _existing_table_names(connection)
+    if "attempts" not in existing_tables:
+        _create_attempts_table(connection)
+        _backfill_attempts_from_quiz_items(connection)
+        return
+
+    columns = _table_columns(connection, "attempts")
+    if "legacy_question_id" not in columns and "resolved_prompt" not in columns and "created_at" not in columns:
+        _create_attempts_table(connection)
+        return
+
+    connection.execute("DROP TABLE IF EXISTS attempts_legacy_v10")
+    connection.execute("ALTER TABLE attempts RENAME TO attempts_legacy_v10")
+    _create_attempts_table(connection)
+
+    rows = connection.execute(
+        """
+        SELECT
+            session_id,
+            user_id,
+            questions.id AS question_id,
+            attempts_legacy_v10.module_id,
+            score_earned,
+            COALESCE(NULLIF(score_possible, 0), 1) AS score_possible,
+            resolved_prompt,
+            resolved_type_config_json,
+            submitted_answer_json,
+            answered_at
+        FROM attempts_legacy_v10
+        JOIN questions ON questions.id = COALESCE(attempts_legacy_v10.question_id, attempts_legacy_v10.legacy_question_id)
+        ORDER BY session_id ASC, questions.id ASC
+        """
+    ).fetchall()
+    for row in rows:
+        bundle_variant_id = _bundle_variant_id_for_resolved(
+            connection,
+            question_id=int(row["question_id"]),
+            resolved_prompt=row["resolved_prompt"],
+            resolved_type_config_json=row["resolved_type_config_json"],
+        )
+        connection.execute(
+            """
+            INSERT INTO attempts (
+                session_id,
+                user_id,
+                question_id,
+                module_id,
+                bundle_variant_id,
+                score_earned,
+                score_possible,
+                submitted_answer_json,
+                answered_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (session_id, question_id) DO NOTHING
+            """,
+            (
+                row["session_id"],
+                row["user_id"],
+                row["question_id"],
+                row["module_id"],
+                bundle_variant_id,
+                row["score_earned"],
+                row["score_possible"],
+                row["submitted_answer_json"],
+                row["answered_at"],
+            ),
+        )
+    connection.execute("DROP TABLE attempts_legacy_v10")
+
+
+def _ensure_quiz_session_item_variant_column(connection: DatabaseConnection) -> None:
+    connection.execute("ALTER TABLE quiz_session_items ADD COLUMN IF NOT EXISTS bundle_variant_id BIGINT")
+    if not _constraint_exists(connection, "quiz_session_items", "fk_quiz_session_items_bundle_variant_question"):
+        connection.execute(
+            """
+            ALTER TABLE quiz_session_items
+            ADD CONSTRAINT fk_quiz_session_items_bundle_variant_question
+            FOREIGN KEY (bundle_variant_id, question_id)
+            REFERENCES question_bundles(id, question_id)
+            """
+        )
 
 
 def initialize_database(database_url: str) -> None:
@@ -240,7 +564,7 @@ def initialize_database(database_url: str) -> None:
 
         if existing_tables and current_version == 0:
             raise RuntimeError("Existing PostgreSQL database has no schema version. Refusing to mutate it automatically.")
-        if current_version not in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, CURRENT_SCHEMA_VERSION}:
+        if current_version not in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, CURRENT_SCHEMA_VERSION}:
             raise RuntimeError(f"Unsupported PostgreSQL schema version {current_version}.")
 
         if current_version == 0:
@@ -375,9 +699,11 @@ def initialize_database(database_url: str) -> None:
                 )
                 """
             )
-        if current_version in {1, 2, 3, 4, 5, 6, 7, 8, 9}:
-            _create_attempts_table(connection)
-            _backfill_attempts_from_quiz_items(connection)
+        if current_version in {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}:
+            _ensure_question_version_columns(connection)
+            _migrate_question_bundles_to_rows(connection)
+            _ensure_quiz_session_item_variant_column(connection)
+            _migrate_attempts_to_slim_rows(connection)
         if current_version != 0:
             connection.executescript(SCHEMA_SQL)
         _set_schema_version(connection, CURRENT_SCHEMA_VERSION)

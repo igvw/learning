@@ -7,6 +7,8 @@ from .questions import bundle_qml_from_storage
 
 
 def question_visible_to_actor(row: Any, actor: Actor | None) -> bool:
+    if "enabled" in row and not bool(row["enabled"]):
+        return False
     if actor is None or actor.role == "admin":
         return row["moderation_status"] != "rejected"
     if bool(row["admin_verified"]):
@@ -81,9 +83,10 @@ def list_effective_question_rows(
             creators.display_name AS creator_display_name
         FROM questions AS q
         JOIN modules AS m ON m.id = q.module_id
-        LEFT JOIN question_bundles AS bundles ON bundles.question_id = q.id
+        LEFT JOIN question_bundle_summaries AS bundles ON bundles.question_id = q.id
         LEFT JOIN users AS creators ON creators.id = q.created_by_user_id
         WHERE q.module_id IN ({placeholders})
+          AND q.enabled = 1
           AND q.moderation_status <> 'rejected'
         ORDER BY q.id ASC
         """,

@@ -492,6 +492,14 @@ def resolved_bundle_runtime(
     if not bundle_variants:
         raise QMLError("Bundle needs at least one variant.")
     variant = rng.choice(bundle_variants)
+    return resolved_bundle_variant_runtime(prompt=prompt, variant=variant)
+
+
+def resolved_bundle_variant_runtime(
+    *,
+    prompt: str,
+    variant: dict[str, Any],
+) -> tuple[str, dict[str, Any]]:
     segments = prompt.split("{}")
     if len(segments) - 1 != len(variant.get("prompt_values", [])):
         raise QMLError("Bundle prompt placeholder count does not match variant prompt values.")

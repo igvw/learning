@@ -28,7 +28,7 @@ from .visibility import question_visible_to_actor
 
 def _append_rank(connection: DatabaseConnection, module_id: int) -> int:
     row = connection.execute(
-        "SELECT COALESCE(MAX(rank), 0) AS max_rank FROM questions WHERE module_id = ?",
+        "SELECT COALESCE(MAX(rank), 0) AS max_rank FROM questions WHERE module_id = ? AND enabled = 1",
         (module_id,),
     ).fetchone()
     return int(row["max_rank"]) + 1
@@ -74,10 +74,11 @@ def ensure_unique_question_prompt(
     candidate_key = stored_prompt_key(question_type, prompt, type_config)
     rows = connection.execute(
         """
-        SELECT id, created_by_user_id, admin_verified, moderation_status
+        SELECT id, created_by_user_id, admin_verified, moderation_status, enabled
         FROM questions
         WHERE module_id = ?
           AND prompt_key = ?
+          AND enabled = 1
         """,
         (module_id, candidate_key),
     ).fetchall()
@@ -94,10 +95,16 @@ def _insert_question_record(
     payload: QuestionDraftIn,
     rank: int,
     actor: Actor | None,
+    created_by_user_id: int | None = None,
+    admin_verified: bool | None = None,
+    moderation_status: str | None = None,
+    progress_from_question_id: int | None = None,
 ) -> dict[str, Any]:
-    user_id = actor.user_id if actor and actor.user_id is not None else None
-    is_verified = actor is None or actor.role == "admin"
-    moderation_status = "verified" if is_verified else "pending"
+    user_id = created_by_user_id
+    if user_id is None and actor and actor.user_id is not None:
+        user_id = actor.user_id
+    is_verified = (actor is None or actor.role == "admin") if admin_verified is None else admin_verified
+    resolved_moderation_status = moderation_status or ("verified" if is_verified else "pending")
     prompt, type_config, bundle_variants = _normalized_question_storage(payload)
     question_id = execute_insert_returning_id(
         connection,
@@ -111,9 +118,10 @@ def _insert_question_record(
             type_config_json,
             created_by_user_id,
             admin_verified,
-            moderation_status
+            moderation_status,
+            progress_from_question_id
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             payload.module_id,
@@ -124,7 +132,8 @@ def _insert_question_record(
             json_dumps(type_config),
             user_id,
             1 if is_verified else 0,
-            moderation_status,
+            resolved_moderation_status,
+            progress_from_question_id,
         ),
     )
     _store_bundle_definition(
@@ -136,7 +145,7 @@ def _insert_question_record(
     return {
         "question_id": question_id,
         "admin_verified": is_verified,
-        "moderation_status": moderation_status,
+        "moderation_status": resolved_moderation_status,
         "delete_requested": False,
         "proposal_id": None,
     }
@@ -188,9 +197,12 @@ def _question_row(connection: DatabaseConnection, question_id: int) -> Any:
             bundles.variants_json,
             created_by_user_id,
             admin_verified,
-            moderation_status
+            moderation_status,
+            enabled,
+            replaced_by_question_id,
+            progress_from_question_id
         FROM questions
-        LEFT JOIN question_bundles AS bundles ON bundles.question_id = questions.id
+        LEFT JOIN question_bundle_summaries AS bundles ON bundles.question_id = questions.id
         WHERE id = ?
         """,
         (question_id,),
@@ -199,9 +211,87 @@ def _question_row(connection: DatabaseConnection, question_id: int) -> Any:
 
 def _require_question_row(connection: DatabaseConnection, question_id: int) -> Any:
     row = _question_row(connection, question_id)
-    if row is None:
+    if row is None or not bool(row["enabled"]):
         raise NotFoundError(f"Question {question_id} was not found.")
     return row
+
+
+def _question_has_attempts(connection: DatabaseConnection, question_id: int) -> bool:
+    row = connection.execute(
+        "SELECT 1 FROM attempts WHERE question_id = ? LIMIT 1",
+        (question_id,),
+    ).fetchone()
+    return row is not None
+
+
+def _question_has_quiz_session_items(connection: DatabaseConnection, question_id: int) -> bool:
+    row = connection.execute(
+        "SELECT 1 FROM quiz_session_items WHERE question_id = ? LIMIT 1",
+        (question_id,),
+    ).fetchone()
+    return row is not None
+
+
+def _question_has_study_rows(connection: DatabaseConnection, question_id: int) -> bool:
+    return _question_has_attempts(connection, question_id) or _question_has_quiz_session_items(connection, question_id)
+
+
+def _payload_matches_question_row(payload: QuestionDraftIn, row: Any) -> bool:
+    prompt, type_config, _ = _normalized_question_storage(payload)
+    if payload.question_type == "bundle":
+        _, _, payload_qml = normalize_bundle_payload(payload)
+        current_qml = draft_kwargs_from_storage(
+            module_id=int(row["module_id"]),
+            prompt=row["prompt"],
+            question_type=row["question_type"],
+            rank=int(row["rank"]),
+            type_config=json.loads(row["type_config_json"]),
+            variants_json=row["variants_json"],
+        ).get("bundle_qml")
+        return payload.question_type == row["question_type"] and payload_qml == current_qml
+    return (
+        payload.question_type == row["question_type"]
+        and prompt == row["prompt"]
+        and type_config == json.loads(row["type_config_json"])
+    )
+
+
+def _insert_replacement_question(
+    connection: DatabaseConnection,
+    *,
+    current: Any,
+    payload: QuestionDraftIn,
+    reset_stats: bool,
+    admin_verified: bool,
+    moderation_status: str,
+) -> int:
+    target_rank = int(current["rank"]) if int(current["module_id"]) == payload.module_id else _append_rank(connection, payload.module_id)
+    result = _insert_question_record(
+        connection,
+        payload=payload,
+        rank=target_rank,
+        actor=None,
+        created_by_user_id=current["created_by_user_id"],
+        admin_verified=admin_verified,
+        moderation_status=moderation_status,
+        progress_from_question_id=None if reset_stats else int(current["id"]),
+    )
+    replacement_id = int(result["question_id"])
+    connection.execute(
+        """
+        UPDATE questions
+        SET
+            enabled = 0,
+            replaced_by_question_id = ?,
+            admin_review_note = '',
+            reviewed_by_user_id = NULL,
+            reviewed_at = NULL
+        WHERE id = ?
+        """,
+        (replacement_id, current["id"]),
+    )
+    connection.execute("DELETE FROM user_review_flags WHERE question_id = ?", (current["id"],))
+    return replacement_id
 
 
 def _apply_verified_question_revision(
@@ -210,7 +300,30 @@ def _apply_verified_question_revision(
     question_id: int,
     payload: QuestionDraftIn,
     reset_stats: bool,
-) -> None:
+) -> int:
+    current = _require_question_row(connection, question_id)
+    ensure_leaf_module(connection, payload.module_id)
+    prompt, type_config, bundle_variants = _normalized_question_storage(payload)
+    _ = bundle_variants
+    ensure_unique_question_prompt(
+        connection,
+        module_id=payload.module_id,
+        question_type=payload.question_type,
+        prompt=prompt,
+        type_config=type_config,
+        exclude_question_id=question_id,
+    )
+    return _insert_replacement_question(
+        connection,
+        current=current,
+        payload=payload,
+        reset_stats=reset_stats,
+        admin_verified=True,
+        moderation_status="verified",
+    )
+
+
+def apply_import_revision(connection: DatabaseConnection, *, question_id: int, payload: QuestionDraftIn) -> int:
     current = _require_question_row(connection, question_id)
     ensure_leaf_module(connection, payload.module_id)
     prompt, type_config, bundle_variants = _normalized_question_storage(payload)
@@ -222,59 +335,16 @@ def _apply_verified_question_revision(
         type_config=type_config,
         exclude_question_id=question_id,
     )
-    if reset_stats:
-        connection.execute("DELETE FROM quiz_session_items WHERE question_id = ?", (question_id,))
-        connection.execute("DELETE FROM attempts WHERE legacy_question_id = ?", (question_id,))
-        connection.execute("DELETE FROM user_review_flags WHERE question_id = ?", (question_id,))
+    if bool(current["admin_verified"]) or _question_has_study_rows(connection, question_id):
+        return _insert_replacement_question(
+            connection,
+            current=current,
+            payload=payload,
+            reset_stats=False,
+            admin_verified=bool(current["admin_verified"]),
+            moderation_status=current["moderation_status"],
+        )
 
-    target_rank = int(current["rank"]) if int(current["module_id"]) == payload.module_id else _append_rank(connection, payload.module_id)
-
-    connection.execute(
-        """
-        UPDATE questions
-        SET
-            module_id = ?,
-            question_type = ?,
-            prompt = ?,
-            prompt_key = ?,
-            rank = ?,
-            type_config_json = ?,
-            admin_review_note = '',
-            reviewed_by_user_id = NULL,
-            reviewed_at = NULL
-        WHERE id = ?
-        """,
-        (
-            payload.module_id,
-            payload.question_type,
-            prompt,
-            stored_prompt_key(payload.question_type, prompt, type_config),
-            target_rank,
-            json_dumps(type_config),
-            question_id,
-        ),
-    )
-    _store_bundle_definition(
-        connection,
-        question_id=question_id,
-        question_type=payload.question_type,
-        bundle_variants=bundle_variants,
-    )
-    connection.execute("DELETE FROM user_review_flags WHERE question_id = ?", (question_id,))
-
-
-def apply_import_revision(connection: DatabaseConnection, *, question_id: int, payload: QuestionDraftIn) -> None:
-    _require_question_row(connection, question_id)
-    ensure_leaf_module(connection, payload.module_id)
-    prompt, type_config, bundle_variants = _normalized_question_storage(payload)
-    ensure_unique_question_prompt(
-        connection,
-        module_id=payload.module_id,
-        question_type=payload.question_type,
-        prompt=prompt,
-        type_config=type_config,
-        exclude_question_id=question_id,
-    )
     connection.execute(
         """
         UPDATE questions
@@ -303,6 +373,7 @@ def apply_import_revision(connection: DatabaseConnection, *, question_id: int, p
         bundle_variants=bundle_variants,
     )
     connection.execute("DELETE FROM user_review_flags WHERE question_id = ?", (question_id,))
+    return question_id
 
 
 def relocate_question_for_import(
@@ -322,6 +393,18 @@ def relocate_question_for_import(
         type_config=type_config,
         exclude_question_id=question_id,
     )
+    content_matches = _payload_matches_question_row(payload, current)
+    if (bool(current["admin_verified"]) or _question_has_study_rows(connection, question_id)) and not content_matches:
+        _insert_replacement_question(
+            connection,
+            current=current,
+            payload=payload,
+            reset_stats=False,
+            admin_verified=bool(current["admin_verified"]),
+            moderation_status=current["moderation_status"],
+        )
+        return int(current["module_id"])
+
     target_rank = _append_rank(connection, payload.module_id)
     connection.execute(
         """
@@ -462,9 +545,14 @@ def revise_question(
 ) -> dict[str, Any]:
     current = _require_question_row(connection, question_id)
     if actor is None or actor.role == "admin":
-        _apply_verified_question_revision(connection, question_id=question_id, payload=payload, reset_stats=reset_stats)
+        replacement_id = _apply_verified_question_revision(
+            connection,
+            question_id=question_id,
+            payload=payload,
+            reset_stats=reset_stats,
+        )
         return {
-            "question_id": question_id,
+            "question_id": replacement_id,
             "proposal_id": None,
             "admin_verified": True,
             "moderation_status": "verified",
@@ -505,6 +593,23 @@ def revise_question(
         actor=actor,
         exclude_question_id=question_id,
     )
+    if _question_has_study_rows(connection, question_id):
+        replacement_id = _insert_replacement_question(
+            connection,
+            current=current,
+            payload=payload,
+            reset_stats=reset_stats,
+            admin_verified=False,
+            moderation_status="pending",
+        )
+        return {
+            "question_id": replacement_id,
+            "proposal_id": None,
+            "admin_verified": False,
+            "moderation_status": "pending",
+            "delete_requested": False,
+        }
+
     target_rank = int(current["rank"]) if int(current["module_id"]) == payload.module_id else _append_rank(connection, payload.module_id)
     connection.execute(
         """
@@ -618,190 +723,22 @@ def set_question_review_flag(
         (user_id, question_id, int(review_flag), utc_now()),
     )
     return {"question_id": question_id, "review_flag": review_flag}
-def _session_item_merge_priority(row: dict[str, Any]) -> tuple[int, float, int]:
-    answered = row["score_earned"] is not None and row["score_possible"] is not None
-    if answered and row["score_possible"]:
-        accuracy = float(row["score_earned"]) / float(row["score_possible"])
-    else:
-        accuracy = 1.0
-    return (
-        0 if answered else 1,
-        accuracy,
-        0 if row.get("submitted_answer_json") else 1,
-    )
-
-
-def _merge_session_item_rows(existing_row: dict[str, Any], incoming_row: dict[str, Any]) -> dict[str, Any]:
-    preferred = min((existing_row, incoming_row), key=_session_item_merge_priority)
-    merged = dict(preferred)
-    for key in ("resolved_prompt", "resolved_type_config_json", "submitted_answer_json"):
-        if not merged.get(key):
-            merged[key] = existing_row.get(key) or incoming_row.get(key)
-    return merged
-
-
-def merge_question_progress(
-    connection: DatabaseConnection,
-    *,
-    survivor_question_id: int,
-    merged_question_ids: list[int],
-) -> None:
-    survivor = _require_question_row(connection, survivor_question_id)
-    survivor_module_id = int(survivor["module_id"])
-    for merged_question_id in merged_question_ids:
-        session_rows = connection.execute(
-            """
-            SELECT
-                session_id,
-                question_id,
-                score_earned,
-                score_possible,
-                resolved_prompt,
-                resolved_type_config_json,
-                submitted_answer_json
-            FROM quiz_session_items
-            WHERE question_id = ?
-            ORDER BY session_id ASC
-            """,
-            (merged_question_id,),
-        ).fetchall()
-        for row in session_rows:
-            existing = connection.execute(
-                """
-                SELECT
-                    session_id,
-                    question_id,
-                    score_earned,
-                    score_possible,
-                    resolved_prompt,
-                    resolved_type_config_json,
-                    submitted_answer_json
-                FROM quiz_session_items
-                WHERE session_id = ? AND question_id = ?
-                """,
-                (row["session_id"], survivor_question_id),
-            ).fetchone()
-            if existing is None:
-                connection.execute(
-                    """
-                    UPDATE quiz_session_items
-                    SET question_id = ?
-                    WHERE session_id = ? AND question_id = ?
-                    """,
-                    (survivor_question_id, row["session_id"], merged_question_id),
-                )
-                continue
-
-            merged_item = _merge_session_item_rows(dict(existing), dict(row))
-            connection.execute(
-                """
-                UPDATE quiz_session_items
-                SET
-                    score_earned = ?,
-                    score_possible = ?,
-                    resolved_prompt = ?,
-                    resolved_type_config_json = ?,
-                    submitted_answer_json = ?
-                WHERE session_id = ? AND question_id = ?
-                """,
-                (
-                    merged_item["score_earned"],
-                    merged_item["score_possible"],
-                    merged_item["resolved_prompt"],
-                    merged_item["resolved_type_config_json"],
-                    merged_item["submitted_answer_json"],
-                    row["session_id"],
-                    survivor_question_id,
-                ),
-            )
-            connection.execute(
-                "DELETE FROM quiz_session_items WHERE session_id = ? AND question_id = ?",
-                (row["session_id"], merged_question_id),
-            )
-        attempt_rows = connection.execute(
-            """
-            SELECT
-                id,
-                session_id,
-                legacy_question_id,
-                question_id,
-                module_id,
-                score_earned,
-                score_possible,
-                resolved_prompt,
-                resolved_type_config_json,
-                submitted_answer_json,
-                answered_at
-            FROM attempts
-            WHERE legacy_question_id = ?
-            ORDER BY session_id ASC, id ASC
-            """,
-            (merged_question_id,),
-        ).fetchall()
-        for row in attempt_rows:
-            existing = connection.execute(
-                """
-                SELECT
-                    id,
-                    session_id,
-                    legacy_question_id,
-                    question_id,
-                    module_id,
-                    score_earned,
-                    score_possible,
-                    resolved_prompt,
-                    resolved_type_config_json,
-                    submitted_answer_json,
-                    answered_at
-                FROM attempts
-                WHERE session_id = ? AND legacy_question_id = ?
-                """,
-                (row["session_id"], survivor_question_id),
-            ).fetchone()
-            if existing is None:
-                connection.execute(
-                    """
-                    UPDATE attempts
-                    SET legacy_question_id = ?, question_id = ?, module_id = ?
-                    WHERE id = ?
-                    """,
-                    (survivor_question_id, survivor_question_id, survivor_module_id, row["id"]),
-                )
-                continue
-
-            merged_attempt = _merge_session_item_rows(dict(existing), dict(row))
-            connection.execute(
-                """
-                UPDATE attempts
-                SET
-                    question_id = ?,
-                    module_id = ?,
-                    score_earned = ?,
-                    score_possible = ?,
-                    resolved_prompt = ?,
-                    resolved_type_config_json = ?,
-                    submitted_answer_json = ?,
-                    answered_at = ?
-                WHERE id = ?
-                """,
-                (
-                    survivor_question_id,
-                    survivor_module_id,
-                    merged_attempt["score_earned"],
-                    merged_attempt["score_possible"],
-                    merged_attempt["resolved_prompt"],
-                    merged_attempt["resolved_type_config_json"],
-                    merged_attempt["submitted_answer_json"],
-                    merged_attempt["answered_at"],
-                    existing["id"],
-                ),
-            )
-            connection.execute("DELETE FROM attempts WHERE id = ?", (row["id"],))
 
 
 def delete_question_record(connection: DatabaseConnection, question_id: int) -> None:
     row = _question_row(connection, question_id)
     if row is None:
+        return
+    if bool(row["admin_verified"]) or _question_has_study_rows(connection, question_id):
+        connection.execute(
+            """
+            UPDATE questions
+            SET enabled = 0, replaced_by_question_id = NULL
+            WHERE id = ?
+            """,
+            (question_id,),
+        )
+        connection.execute("DELETE FROM user_review_flags WHERE question_id = ?", (question_id,))
         return
     connection.execute("DELETE FROM questions WHERE id = ?", (question_id,))
 
@@ -812,6 +749,7 @@ def _existing_prompt_keys(connection: DatabaseConnection, module_id: int) -> set
         SELECT prompt_key
         FROM questions
         WHERE module_id = ?
+          AND enabled = 1
           AND moderation_status <> 'rejected'
         """,
         (module_id,),

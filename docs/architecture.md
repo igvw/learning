@@ -67,8 +67,8 @@ Docs and tests:
 - frontend shared types: `frontend/src/lib/types.ts`
 - import/QML runtime logic: `backend/app/qml.py`, `backend/app/service/imports.py`, `backend/app/service/bundles.py`, `frontend/src/lib/import-*.ts`
 - QML parser contracts: `tests/fixtures/qml-contracts.json`
-- bundle storage/runtime: `questions.question_type = "bundle"` plus `question_bundles`, materialized through `backend/app/service/bundles.py` and `backend/app/service/questions.py`
-- answered study history: `attempts`, read by `backend/app/service/schedule.py` and `backend/app/service/stats.py`
+- bundle storage/runtime: `questions.question_type = "bundle"` plus row-based `question_bundles`, materialized through `backend/app/service/bundles.py` and `backend/app/service/questions.py`
+- answered study history: slim `attempts`, read by `backend/app/service/schedule.py` and `backend/app/service/stats.py`
 - stats graph shaping: `frontend/src/lib/stats/*`
 - external QML prompt snippets: `docs/question-markup-prompts/`
 

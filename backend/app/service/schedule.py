@@ -44,27 +44,48 @@ def _question_attempt_history(
     if question_ids is not None and not question_ids:
         return {}
 
-    where_sql = "WHERE attempts.user_id = ?"
-    params: list[Any] = [user_id]
     if question_ids is not None:
         placeholders = ",".join("?" for _ in question_ids)
-        where_sql += f" AND attempts.legacy_question_id IN ({placeholders})"
-        params.extend(question_ids)
-
-    rows = connection.execute(
-        f"""
-        SELECT
-            attempts.legacy_question_id AS question_id,
-            attempts.score_earned,
-            attempts.score_possible,
-            attempts.answered_at,
-            attempts.session_id
-        FROM attempts
-        {where_sql}
-        ORDER BY attempts.legacy_question_id ASC, attempts.answered_at ASC, attempts.session_id ASC
-        """,
-        tuple(params),
-    ).fetchall()
+        rows = connection.execute(
+            f"""
+            WITH RECURSIVE progress_chain(question_id, attempt_question_id) AS (
+                SELECT id, id
+                FROM questions
+                WHERE id IN ({placeholders})
+                UNION ALL
+                SELECT progress_chain.question_id, questions.progress_from_question_id
+                FROM progress_chain
+                JOIN questions ON questions.id = progress_chain.attempt_question_id
+                WHERE questions.progress_from_question_id IS NOT NULL
+            )
+            SELECT
+                progress_chain.question_id,
+                attempts.score_earned,
+                attempts.score_possible,
+                attempts.answered_at,
+                attempts.session_id
+            FROM progress_chain
+            JOIN attempts ON attempts.question_id = progress_chain.attempt_question_id
+            WHERE attempts.user_id = ?
+            ORDER BY progress_chain.question_id ASC, attempts.answered_at ASC, attempts.session_id ASC
+            """,
+            (*question_ids, user_id),
+        ).fetchall()
+    else:
+        rows = connection.execute(
+            """
+            SELECT
+                attempts.question_id,
+                attempts.score_earned,
+                attempts.score_possible,
+                attempts.answered_at,
+                attempts.session_id
+            FROM attempts
+            WHERE attempts.user_id = ?
+            ORDER BY attempts.question_id ASC, attempts.answered_at ASC, attempts.session_id ASC
+            """,
+            (user_id,),
+        ).fetchall()
 
     history: dict[int, list[dict[str, Any]]] = {}
     for row in rows:
@@ -338,28 +359,50 @@ def _question_stats_by_question(
     if question_ids is not None and not question_ids:
         return {}
 
-    where_sql = "WHERE attempts.user_id = ?"
-    params: list[Any] = [user_id]
     if question_ids is not None:
         placeholders = ",".join("?" for _ in question_ids)
-        where_sql += f" AND attempts.legacy_question_id IN ({placeholders})"
-        params.extend(question_ids)
-
-    rows = connection.execute(
-        f"""
-        SELECT
-            attempts.legacy_question_id AS question_id,
-            COUNT(*) AS attempts_count,
-            COALESCE(SUM(attempts.score_earned), 0) AS correct_count,
-            COALESCE(SUM(attempts.score_possible - attempts.score_earned), 0) AS incorrect_count,
-            MIN(attempts.answered_at) AS first_asked_at,
-            MAX(attempts.answered_at) AS last_asked_at
-        FROM attempts
-        {where_sql}
-        GROUP BY attempts.legacy_question_id
-        """,
-        tuple(params),
-    ).fetchall()
+        rows = connection.execute(
+            f"""
+            WITH RECURSIVE progress_chain(question_id, attempt_question_id) AS (
+                SELECT id, id
+                FROM questions
+                WHERE id IN ({placeholders})
+                UNION ALL
+                SELECT progress_chain.question_id, questions.progress_from_question_id
+                FROM progress_chain
+                JOIN questions ON questions.id = progress_chain.attempt_question_id
+                WHERE questions.progress_from_question_id IS NOT NULL
+            )
+            SELECT
+                progress_chain.question_id,
+                COUNT(*) AS attempts_count,
+                COALESCE(SUM(attempts.score_earned), 0) AS correct_count,
+                COALESCE(SUM(attempts.score_possible - attempts.score_earned), 0) AS incorrect_count,
+                MIN(attempts.answered_at) AS first_asked_at,
+                MAX(attempts.answered_at) AS last_asked_at
+            FROM progress_chain
+            JOIN attempts ON attempts.question_id = progress_chain.attempt_question_id
+            WHERE attempts.user_id = ?
+            GROUP BY progress_chain.question_id
+            """,
+            (*question_ids, user_id),
+        ).fetchall()
+    else:
+        rows = connection.execute(
+            """
+            SELECT
+                attempts.question_id,
+                COUNT(*) AS attempts_count,
+                COALESCE(SUM(attempts.score_earned), 0) AS correct_count,
+                COALESCE(SUM(attempts.score_possible - attempts.score_earned), 0) AS incorrect_count,
+                MIN(attempts.answered_at) AS first_asked_at,
+                MAX(attempts.answered_at) AS last_asked_at
+            FROM attempts
+            WHERE attempts.user_id = ?
+            GROUP BY attempts.question_id
+            """,
+            (user_id,),
+        ).fetchall()
     return {
         row["question_id"]: {
             "attempts_count": row["attempts_count"],
@@ -385,18 +428,28 @@ def _recent_incorrect_answers_by_question(
     placeholders = ",".join("?" for _ in question_ids)
     rows = connection.execute(
         f"""
+        WITH RECURSIVE progress_chain(question_id, attempt_question_id) AS (
+            SELECT id, id
+            FROM questions
+            WHERE id IN ({placeholders})
+            UNION ALL
+            SELECT progress_chain.question_id, questions.progress_from_question_id
+            FROM progress_chain
+            JOIN questions ON questions.id = progress_chain.attempt_question_id
+            WHERE questions.progress_from_question_id IS NOT NULL
+        )
         SELECT
-            attempts.legacy_question_id AS question_id,
+            progress_chain.question_id,
             attempts.submitted_answer_json,
             attempts.answered_at
-        FROM attempts
+        FROM progress_chain
+        JOIN attempts ON attempts.question_id = progress_chain.attempt_question_id
         WHERE attempts.user_id = ?
-          AND attempts.legacy_question_id IN ({placeholders})
           AND attempts.score_earned + ? < attempts.score_possible
           AND attempts.submitted_answer_json IS NOT NULL
         ORDER BY attempts.answered_at DESC, attempts.session_id DESC
         """,
-        (user_id, *question_ids, FULL_CREDIT_TOLERANCE),
+        (*question_ids, user_id, FULL_CREDIT_TOLERANCE),
     ).fetchall()
 
     grouped: dict[int, dict[str, dict[str, Any]]] = {}

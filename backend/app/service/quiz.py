@@ -84,10 +84,12 @@ def create_quiz_session(
     items: list[dict[str, Any]] = []
     for index, row in enumerate(chosen_rows, start=1):
         runtime_question_type = row["question_type"]
+        bundle_variant_id = None
         if row["question_type"] == "bundle":
-            resolved_prompt, resolved_type_config = resolved_bundle_question_runtime(
+            bundle_variant_id, resolved_prompt, resolved_type_config = resolved_bundle_question_runtime(
+                connection=connection,
+                question_id=row["question_id"],
                 prompt=row["prompt"],
-                variants_json=row.get("bundle_variants_json"),
                 rng=rng or random.Random(),
             )
             runtime_question_type = "single_text"
@@ -103,16 +105,18 @@ def create_quiz_session(
             INSERT INTO quiz_session_items (
                 session_id,
                 question_id,
+                bundle_variant_id,
                 score_earned,
                 score_possible,
                 resolved_prompt,
                 resolved_type_config_json
             )
-            VALUES (?, ?, NULL, ?, ?, ?)
+            VALUES (?, ?, ?, NULL, ?, ?, ?)
             """,
             (
                 session_id,
                 row["question_id"],
+                bundle_variant_id,
                 score_possible(resolved_type_config),
                 resolved_prompt,
                 json_dumps({**resolved_type_config, "__question_type__": runtime_question_type}),
@@ -246,6 +250,7 @@ def submit_answer(
         """
         SELECT
             qsi.question_id,
+            qsi.bundle_variant_id,
             qsi.score_earned,
             qsi.score_possible,
             qsi.resolved_prompt,
@@ -286,25 +291,20 @@ def submit_answer(
             session_id,
             user_id,
             question_id,
-            legacy_question_id,
             module_id,
+            bundle_variant_id,
             score_earned,
             score_possible,
-            resolved_prompt,
-            resolved_type_config_json,
             submitted_answer_json,
-            answered_at,
-            created_at
+            answered_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT (session_id, legacy_question_id) DO UPDATE
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (session_id, question_id) DO UPDATE
         SET
-            question_id = EXCLUDED.question_id,
             module_id = EXCLUDED.module_id,
+            bundle_variant_id = EXCLUDED.bundle_variant_id,
             score_earned = EXCLUDED.score_earned,
             score_possible = EXCLUDED.score_possible,
-            resolved_prompt = EXCLUDED.resolved_prompt,
-            resolved_type_config_json = EXCLUDED.resolved_type_config_json,
             submitted_answer_json = EXCLUDED.submitted_answer_json,
             answered_at = EXCLUDED.answered_at
         """,
@@ -312,14 +312,11 @@ def submit_answer(
             session_id,
             user_id,
             row["question_id"],
-            row["question_id"],
             row["module_id"],
+            row["bundle_variant_id"],
             earned_score,
             possible_score_value,
-            row["resolved_prompt"] or row["prompt"],
-            row["resolved_type_config_json"] or row["type_config_json"],
             json_dumps(answers),
-            answered_at,
             answered_at,
         ),
     )
