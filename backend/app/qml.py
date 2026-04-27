@@ -1,18 +1,9 @@
-from __future__ import annotations
-
-import ast
-import random
-import re
-from typing import Any, Optional
+import json
+from typing import Any
 
 
 class QMLError(ValueError):
     pass
-
-
-_ASSIGNMENT_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=(.+)\s*$")
-_RANGE_RE = re.compile(r"\[(\d+)-(\d+)\]")
-_TOKEN_RE = re.compile(r"\$([^$]+)\$")
 
 
 def split_escaped(text: str, separator: str) -> list[str]:
@@ -38,14 +29,16 @@ def split_escaped(text: str, separator: str) -> list[str]:
     return parts
 
 
-def contains_variable_binding(text: str) -> bool:
-    return any(_ASSIGNMENT_RE.match(match.group(1).strip()) for match in _TOKEN_RE.finditer(text))
-
-
-def format_numeric(value: float) -> str:
-    if float(value).is_integer():
-        return str(int(value))
-    return f"{value:.10f}".rstrip("0").rstrip(".")
+def _escape_qml_text(text: str) -> str:
+    return (
+        text.replace("\\", "\\\\")
+        .replace("[", "\\[")
+        .replace("]", "\\]")
+        .replace("{", "\\{")
+        .replace("}", "\\}")
+        .replace("|", "\\|")
+        .replace(",", "\\,")
+    )
 
 
 def _split_answer_group(text: str) -> list[str]:
@@ -55,7 +48,7 @@ def _split_answer_group(text: str) -> list[str]:
     return answers
 
 
-def _find_trailing_box(line: str) -> Optional[tuple[int, int, str, str]]:
+def _find_trailing_box(line: str) -> tuple[int, int, str, str] | None:
     stripped = line.rstrip()
     if not stripped:
         return None
@@ -65,7 +58,7 @@ def _find_trailing_box(line: str) -> Optional[tuple[int, int, str, str]]:
     opening = "[" if closing == "]" else "{"
     depth = 0
     escape = False
-    start_index: Optional[int] = None
+    start_index: int | None = None
     for index, char in enumerate(stripped):
         if escape:
             escape = False
@@ -86,11 +79,11 @@ def _find_trailing_box(line: str) -> Optional[tuple[int, int, str, str]]:
     return None
 
 
-def _parse_inline_cloze(line: str) -> tuple[str, list[list[str]], list[str]]:
+def _parse_inline_collapse_groups(line: str) -> tuple[str, list[list[str]], list[str]]:
     segments: list[str] = []
     accepted_answers: list[list[str]] = []
     current_segment: list[str] = []
-    current_group: Optional[list[str]] = None
+    current_group: list[str] | None = None
     escape = False
     saw_group = False
 
@@ -128,7 +121,7 @@ def _parse_inline_cloze(line: str) -> tuple[str, list[list[str]], list[str]]:
     return rendered_prompt, accepted_answers, segments
 
 
-def parse_qml_line(*, line: str, module_id: int, rank: int) -> dict[str, Any]:
+def _parse_plain_qml_line(*, line: str, module_id: int, rank: int) -> dict[str, Any]:
     source = line.strip()
     if not source:
         raise QMLError("Question lines cannot be blank.")
@@ -150,6 +143,7 @@ def parse_qml_line(*, line: str, module_id: int, rank: int) -> dict[str, Any]:
                 "rank": rank,
                 "accepted_answers": accepted_answers,
                 "segments": [],
+                "bundle_qml": None,
             }
 
         ordered_slots = [value.strip() for value in split_escaped(content, ",") if value.strip()]
@@ -161,18 +155,20 @@ def parse_qml_line(*, line: str, module_id: int, rank: int) -> dict[str, Any]:
                 "rank": rank,
                 "accepted_answers": [_split_answer_group(value) for value in ordered_slots],
                 "segments": [],
+                "bundle_qml": None,
             }
 
         return {
             "module_id": module_id,
             "prompt": prompt,
-            "question_type": "computed_text" if contains_variable_binding(prompt) else "single_text",
+            "question_type": "single_text",
             "rank": rank,
             "accepted_answers": [_split_answer_group(content.strip())],
             "segments": [],
+            "bundle_qml": None,
         }
 
-    prompt, accepted_answers, segments = _parse_inline_cloze(source)
+    prompt, accepted_answers, segments = _parse_inline_collapse_groups(source)
     return {
         "module_id": module_id,
         "prompt": prompt,
@@ -180,99 +176,360 @@ def parse_qml_line(*, line: str, module_id: int, rank: int) -> dict[str, Any]:
         "rank": rank,
         "accepted_answers": accepted_answers,
         "segments": segments,
+        "bundle_qml": None,
     }
 
 
-def qml_lines_from_text(qml_text: str) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for row_number, raw_line in enumerate(qml_text.splitlines(), start=1):
-        if not raw_line.strip():
+def _split_bundle_lines(qml_text: str) -> list[str]:
+    lines = [line.rstrip() for line in qml_text.splitlines() if line.strip()]
+    if not lines:
+        raise QMLError("Bundle must include at least one template line.")
+    return lines
+
+
+def _strip_bundle_outer_wrapper(qml_text: str) -> list[str]:
+    lines = _split_bundle_lines(qml_text)
+    first = lines[0].lstrip()
+    if not first.startswith("{"):
+        raise QMLError("Bundle must start with {.")
+    first_line = first[1:]
+    last_line = lines[-1].rstrip()
+    if not last_line.endswith("}"):
+        raise QMLError("Bundle must end with }.")
+    lines[0] = first_line
+    lines[-1] = lines[-1].rstrip()
+    lines[-1] = lines[-1][: lines[-1].rfind("}")]
+    cleaned = [line.strip() for line in lines if line.strip()]
+    if not cleaned:
+        raise QMLError("Bundle must include a template and at least one row.")
+    return cleaned
+
+
+def _parse_bundle_template_signature(content: str) -> tuple[list[str], list[str], list[str]]:
+    stripped = content.strip()
+    if not stripped:
+        raise QMLError("Bundle template is required.")
+
+    segments: list[str] = []
+    prompt_values: list[str] = []
+    current_segment: list[str] = []
+    escape = False
+    index = 0
+    answer_values: list[str] | None = None
+
+    while index < len(stripped):
+        char = stripped[index]
+        if escape:
+            current_segment.append(char)
+            escape = False
+            index += 1
             continue
-        rows.append({"row_number": row_number, "qml_line": raw_line})
-    if not rows:
-        raise QMLError("QML must include at least one question line.")
-    return rows
+        if char == "\\":
+            escape = True
+            index += 1
+            continue
+        if char == "{":
+            end = index + 1
+            cell_chars: list[str] = []
+            cell_escape = False
+            while end < len(stripped):
+                inner = stripped[end]
+                if cell_escape:
+                    cell_chars.append(inner)
+                    cell_escape = False
+                    end += 1
+                    continue
+                if inner == "\\":
+                    cell_escape = True
+                    end += 1
+                    continue
+                if inner == "}":
+                    break
+                cell_chars.append(inner)
+                end += 1
+            if end >= len(stripped) or stripped[end] != "}":
+                raise QMLError("Malformed bundle prompt cell.")
+            segments.append("".join(current_segment))
+            current_segment = []
+            prompt_values.append("".join(cell_chars).strip())
+            index = end + 1
+            continue
+        if char == "[":
+            end = index + 1
+            cell_chars: list[str] = []
+            cell_escape = False
+            while end < len(stripped):
+                inner = stripped[end]
+                if cell_escape:
+                    cell_chars.append(inner)
+                    cell_escape = False
+                    end += 1
+                    continue
+                if inner == "\\":
+                    cell_escape = True
+                    end += 1
+                    continue
+                if inner == "]":
+                    break
+                cell_chars.append(inner)
+                end += 1
+            if end >= len(stripped) or stripped[end] != "]":
+                raise QMLError("Malformed bundle answer slot.")
+            answer_values = _split_answer_group("".join(cell_chars)) if "".join(cell_chars).strip() else []
+            segments.append("".join(current_segment))
+            if stripped[end + 1 :].strip():
+                raise QMLError("Bundle answer slot must be the final element in the template.")
+            current_segment = []
+            index = len(stripped)
+            break
+        current_segment.append(char)
+        index += 1
+
+    if escape:
+        raise QMLError("Dangling escape sequence.")
+    if answer_values is None:
+        raise QMLError("Bundle template must end with one answer slot [].")
+    if not prompt_values and not segments[0].strip():
+        raise QMLError("Bundle template needs a real prompt.")
+    return segments, prompt_values, answer_values
 
 
-def _replace_ranges(expression: str, *, rng: random.Random) -> str:
-    def replacer(match: re.Match[str]) -> str:
-        start = int(match.group(1))
-        end = int(match.group(2))
-        if end < start:
-            raise QMLError("Variable ranges must run from low to high.")
-        return str(rng.randint(start, end))
-
-    return _RANGE_RE.sub(replacer, expression)
+def _bundle_template_from_segments(segments: list[str]) -> str:
+    prompt_parts: list[str] = []
+    for index, segment in enumerate(segments[:-1]):
+        prompt_parts.append(segment)
+        prompt_parts.append("{}")
+    prompt_parts.append(segments[-1])
+    return "".join(prompt_parts).strip() + " []"
 
 
-def _safe_eval(expression: str, env: dict[str, float]) -> float:
-    try:
-        tree = ast.parse(expression, mode="eval")
-    except SyntaxError as error:
-        raise QMLError(f"Invalid expression: {expression}") from error
+def _parse_bundle_variant_row(line: str, *, prompt_value_count: int) -> dict[str, Any]:
+    stripped = line.strip()
+    if not stripped:
+        raise QMLError("Bundle rows cannot be blank.")
 
-    def evaluate(node: ast.AST) -> float:
-        if isinstance(node, ast.Expression):
-            return evaluate(node.body)
-        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
-            return float(node.value)
-        if isinstance(node, ast.Name):
-            if node.id not in env:
-                raise QMLError(f"Unknown variable: {node.id}")
-            return float(env[node.id])
-        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
-            operand = evaluate(node.operand)
-            return operand if isinstance(node.op, ast.UAdd) else -operand
-        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div)):
-            left = evaluate(node.left)
-            right = evaluate(node.right)
-            if isinstance(node.op, ast.Add):
-                return left + right
-            if isinstance(node.op, ast.Sub):
-                return left - right
-            if isinstance(node.op, ast.Mult):
-                return left * right
-            if right == 0:
-                raise QMLError("Division by zero is not allowed.")
-            return left / right
-        raise QMLError("Expressions only support numbers, variables, +, -, *, /, and parentheses.")
+    index = 0
+    prompt_values: list[str] = []
+    accepted_answers: list[str] | None = None
+    for _ in range(prompt_value_count):
+        while index < len(stripped) and stripped[index].isspace():
+            index += 1
+        if index >= len(stripped) or stripped[index] != "{":
+            raise QMLError("Bundle row is missing a prompt-value cell.")
+        end = index + 1
+        cell_chars: list[str] = []
+        escape = False
+        while end < len(stripped):
+            char = stripped[end]
+            if escape:
+                cell_chars.append(char)
+                escape = False
+                end += 1
+                continue
+            if char == "\\":
+                escape = True
+                end += 1
+                continue
+            if char == "}":
+                break
+            cell_chars.append(char)
+            end += 1
+        if end >= len(stripped) or stripped[end] != "}":
+            raise QMLError("Malformed bundle prompt-value cell.")
+        prompt_values.append("".join(cell_chars).strip())
+        index = end + 1
 
-    return evaluate(tree)
+    while index < len(stripped) and stripped[index].isspace():
+        index += 1
+    if index >= len(stripped) or stripped[index] != "[":
+        raise QMLError("Bundle row must end with an answer cell.")
+    end = index + 1
+    answer_chars: list[str] = []
+    escape = False
+    while end < len(stripped):
+        char = stripped[end]
+        if escape:
+            answer_chars.append(char)
+            escape = False
+            end += 1
+            continue
+        if char == "\\":
+            escape = True
+            end += 1
+            continue
+        if char == "]":
+            break
+        answer_chars.append(char)
+        end += 1
+    if end >= len(stripped) or stripped[end] != "]":
+        raise QMLError("Malformed bundle answer cell.")
+    accepted_answers = _split_answer_group("".join(answer_chars))
+    if stripped[end + 1 :].strip():
+        raise QMLError("Bundle rows may only contain prompt values followed by one answer cell.")
+    return {
+        "prompt_values": prompt_values,
+        "accepted_answers": accepted_answers,
+    }
 
 
-def _evaluate_expression(expression: str, *, env: dict[str, float], rng: random.Random) -> float:
-    return _safe_eval(_replace_ranges(expression, rng=rng), env)
+def build_bundle_qml(prompt: str, bundle_variants: list[dict[str, Any]]) -> str:
+    lines = ["{" + prompt.strip()]
+    for variant in bundle_variants:
+        prompt_cells = " ".join(f"{{{_escape_qml_text(value)}}}" for value in variant.get("prompt_values", []))
+        answer_cell = f"[{' | '.join(_escape_qml_text(value) for value in variant.get('accepted_answers', []))}]"
+        row = " ".join(part for part in (prompt_cells, answer_cell) if part)
+        lines.append(f" {row}")
+    if not bundle_variants:
+        lines.append("}")
+        return "\n".join(lines)
+    lines[-1] = lines[-1] + "}"
+    return "\n".join(lines)
 
 
-def render_prompt_and_answers(
+def _parse_bundle_qml(*, qml_text: str, module_id: int, rank: int) -> dict[str, Any]:
+    content_lines = _strip_bundle_outer_wrapper(qml_text)
+    template_line = content_lines[0]
+    variant_lines = content_lines[1:]
+    if not variant_lines:
+        raise QMLError("Bundle must include at least one variant row.")
+
+    segments, prompt_values, answer_values = _parse_bundle_template_signature(template_line)
+    inline_first_example = any(value != "" for value in prompt_values) or bool(answer_values)
+    prompt = _bundle_template_from_segments(segments)
+    bundle_variants: list[dict[str, Any]] = []
+    if inline_first_example:
+        bundle_variants.append(
+            {
+                "prompt_values": prompt_values,
+                "accepted_answers": answer_values,
+            }
+        )
+    else:
+        if answer_values:
+            raise QMLError("Canonical bundle template answer slot must be empty [].")
+
+    prompt_value_count = len(prompt_values)
+    if not inline_first_example:
+        prompt_value_count = prompt.count("{}")
+    for line in variant_lines:
+        bundle_variants.append(_parse_bundle_variant_row(line, prompt_value_count=prompt_value_count))
+
+    canonical_qml = build_bundle_qml(prompt, bundle_variants)
+    return {
+        "module_id": module_id,
+        "prompt": prompt,
+        "question_type": "bundle",
+        "rank": rank,
+        "accepted_answers": [],
+        "segments": [],
+        "bundle_qml": canonical_qml,
+        "bundle_variants": bundle_variants,
+    }
+
+
+def parse_qml_line(*, line: str, module_id: int, rank: int) -> dict[str, Any]:
+    source = line.strip()
+    if not source:
+        raise QMLError("Question lines cannot be blank.")
+    if source.startswith("{"):
+        return _parse_bundle_qml(qml_text=line, module_id=module_id, rank=rank)
+    return _parse_plain_qml_line(line=line, module_id=module_id, rank=rank)
+
+
+def qml_lines_from_text(qml_text: str) -> list[dict[str, Any]]:
+    lines = qml_text.splitlines()
+    entries: list[dict[str, Any]] = []
+    index = 0
+    while index < len(lines):
+        raw_line = lines[index]
+        if not raw_line.strip():
+            index += 1
+            continue
+        start_line = index + 1
+        if raw_line.lstrip().startswith("{"):
+            entry_lines = [raw_line]
+            index += 1
+            while index < len(lines):
+                entry_lines.append(lines[index])
+                if lines[index].strip().endswith("}"):
+                    index += 1
+                    break
+                index += 1
+            else:
+                raise QMLError("Bundle must end with }.")
+            qml_entry = "\n".join(entry_lines)
+            entries.append(
+                {
+                    "start_line": start_line,
+                    "end_line": start_line + len(entry_lines) - 1,
+                    "entry_kind": "bundle",
+                    "qml_text": qml_entry,
+                }
+            )
+            continue
+
+        entries.append(
+            {
+                "start_line": start_line,
+                "end_line": start_line,
+                "entry_kind": "plain",
+                "qml_text": raw_line,
+            }
+        )
+        index += 1
+
+    if not entries:
+        raise QMLError("QML must include at least one question entry.")
+    return entries
+
+
+def resolved_bundle_runtime(
     *,
     prompt: str,
-    accepted_answers: list[list[str]],
-    rng: Optional[random.Random] = None,
-) -> tuple[str, list[list[str]]]:
-    generator = rng or random.Random()
-    env: dict[str, float] = {}
+    bundle_variants: list[dict[str, Any]],
+    rng: Any,
+) -> tuple[str, dict[str, Any]]:
+    if not bundle_variants:
+        raise QMLError("Bundle needs at least one variant.")
+    variant = rng.choice(bundle_variants)
+    return resolved_bundle_variant_runtime(prompt=prompt, variant=variant)
 
-    def prompt_replacer(match: re.Match[str]) -> str:
-        content = match.group(1).strip()
-        assignment = _ASSIGNMENT_RE.match(content)
-        if assignment:
-            value = _evaluate_expression(assignment.group(2).strip(), env=env, rng=generator)
-            env[assignment.group(1)] = value
-            return format_numeric(value)
-        try:
-            return format_numeric(_evaluate_expression(content, env=env, rng=generator))
-        except QMLError:
-            return content
 
-    rendered_prompt = _TOKEN_RE.sub(prompt_replacer, prompt)
+def resolved_bundle_variant_runtime(
+    *,
+    prompt: str,
+    variant: dict[str, Any],
+) -> tuple[str, dict[str, Any]]:
+    segments = prompt.split("{}")
+    if len(segments) - 1 != len(variant.get("prompt_values", [])):
+        raise QMLError("Bundle prompt placeholder count does not match variant prompt values.")
+    prompt_parts: list[str] = []
+    for index, segment in enumerate(segments[:-1]):
+        prompt_parts.append(segment)
+        prompt_parts.append(variant["prompt_values"][index])
+    prompt_parts.append(segments[-1].rsplit("[]", 1)[0])
+    resolved_prompt = "".join(prompt_parts).strip()
+    return resolved_prompt, {"accepted_answers": [list(variant["accepted_answers"])], "segments": []}
 
-    def answer_replacer(match: re.Match[str]) -> str:
-        content = match.group(1).strip()
-        return format_numeric(_evaluate_expression(content, env=env, rng=generator))
 
-    rendered_answers = [
-        [_TOKEN_RE.sub(answer_replacer, answer) for answer in answer_group]
-        for answer_group in accepted_answers
-    ]
-    return rendered_prompt, rendered_answers
+def bundle_variants_from_json(value: str | None) -> list[dict[str, Any]]:
+    if not value:
+        return []
+    parsed = json.loads(value)
+    if not isinstance(parsed, list):
+        raise QMLError("Bundle variants must be stored as a list.")
+    variants: list[dict[str, Any]] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            raise QMLError("Bundle variants must be objects.")
+        prompt_values = item.get("prompt_values", [])
+        accepted_answers = item.get("accepted_answers", [])
+        if not isinstance(prompt_values, list) or not isinstance(accepted_answers, list):
+            raise QMLError("Bundle variant fields must be lists.")
+        variants.append(
+            {
+                "prompt_values": [str(value) for value in prompt_values],
+                "accepted_answers": [str(value) for value in accepted_answers],
+            }
+        )
+    return variants

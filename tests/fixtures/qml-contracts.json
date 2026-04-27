@@ -1,0 +1,192 @@
+{
+  "valid_parse_cases": [
+    {
+      "name": "single text alternatives",
+      "input": "What is the capital of Norway? [oslo | christiania]",
+      "canonical_qml": "What is the capital of Norway? [oslo | christiania]",
+      "expected": {
+        "prompt": "What is the capital of Norway?",
+        "question_type": "single_text",
+        "accepted_answers": [["oslo", "christiania"]],
+        "segments": [],
+        "bundle_qml": null,
+        "bundle_variants": []
+      }
+    },
+    {
+      "name": "multi text unordered slots",
+      "input": "Name two primary colors. {red | rouge, blue}",
+      "canonical_qml": "Name two primary colors. {red | rouge, blue}",
+      "expected": {
+        "prompt": "Name two primary colors.",
+        "question_type": "multi_text",
+        "accepted_answers": [["red", "rouge"], ["blue"]],
+        "segments": [],
+        "bundle_qml": null,
+        "bundle_variants": []
+      }
+    },
+    {
+      "name": "ordered multi slots",
+      "input": "Name the first two mitosis stages. [prophase, metaphase | meta]",
+      "canonical_qml": "Name the first two mitosis stages. [prophase, metaphase | meta]",
+      "expected": {
+        "prompt": "Name the first two mitosis stages.",
+        "question_type": "ordered_multi",
+        "accepted_answers": [["prophase"], ["metaphase", "meta"]],
+        "segments": [],
+        "bundle_qml": null,
+        "bundle_variants": []
+      }
+    },
+    {
+      "name": "inline cloze",
+      "input": "The [heart] pumps [blood | plasma] through the body.",
+      "canonical_qml": "The [heart] pumps [blood | plasma] through the body.",
+      "expected": {
+        "prompt": "The [_] pumps [_] through the body.",
+        "question_type": "inline_cloze",
+        "accepted_answers": [["heart"], ["blood", "plasma"]],
+        "segments": ["The ", " pumps ", " through the body."],
+        "bundle_qml": null,
+        "bundle_variants": []
+      }
+    },
+    {
+      "name": "canonical bundle block",
+      "input": "{A patient needs {} mg. Solution strength is {} mg/ml. How much is needed? []\n {500} {40} [12.5 ml]\n {600} {30} [20 ml]}",
+      "canonical_qml": "{A patient needs {} mg. Solution strength is {} mg/ml. How much is needed? []\n {500} {40} [12.5 ml]\n {600} {30} [20 ml]}",
+      "canonical_editor_text": "A patient needs {} mg. Solution strength is {} mg/ml. How much is needed? []\n {500} {40} [12.5 ml]\n {600} {30} [20 ml]",
+      "expected": {
+        "prompt": "A patient needs {} mg. Solution strength is {} mg/ml. How much is needed? []",
+        "question_type": "bundle",
+        "accepted_answers": [],
+        "segments": [],
+        "bundle_qml": "{A patient needs {} mg. Solution strength is {} mg/ml. How much is needed? []\n {500} {40} [12.5 ml]\n {600} {30} [20 ml]}",
+        "bundle_variants": [
+          {
+            "prompt_values": ["500", "40"],
+            "accepted_answers": ["12.5 ml"]
+          },
+          {
+            "prompt_values": ["600", "30"],
+            "accepted_answers": ["20 ml"]
+          }
+        ]
+      }
+    },
+    {
+      "name": "inline first example bundle shorthand",
+      "input": "{A patient needs {400} mg. Solution strength is {20} mg/ml. How much is needed? [20]\n {600} {30} [20]\n {500} {30} [16.7 | 16.67]}",
+      "canonical_qml": "{A patient needs {} mg. Solution strength is {} mg/ml. How much is needed? []\n {400} {20} [20]\n {600} {30} [20]\n {500} {30} [16.7 | 16.67]}",
+      "canonical_editor_text": "A patient needs {} mg. Solution strength is {} mg/ml. How much is needed? []\n {400} {20} [20]\n {600} {30} [20]\n {500} {30} [16.7 | 16.67]",
+      "expected": {
+        "prompt": "A patient needs {} mg. Solution strength is {} mg/ml. How much is needed? []",
+        "question_type": "bundle",
+        "accepted_answers": [],
+        "segments": [],
+        "bundle_qml": "{A patient needs {} mg. Solution strength is {} mg/ml. How much is needed? []\n {400} {20} [20]\n {600} {30} [20]\n {500} {30} [16.7 | 16.67]}",
+        "bundle_variants": [
+          {
+            "prompt_values": ["400", "20"],
+            "accepted_answers": ["20"]
+          },
+          {
+            "prompt_values": ["600", "30"],
+            "accepted_answers": ["20"]
+          },
+          {
+            "prompt_values": ["500", "30"],
+            "accepted_answers": ["16.7", "16.67"]
+          }
+        ]
+      }
+    },
+    {
+      "name": "escaped answer cells",
+      "input": "Escaped answers [literal \\{brace\\} | literal \\[bracket\\] | pipe\\|value | comma\\, value | slash\\\\value]",
+      "canonical_qml": "Escaped answers [literal \\{brace\\} | literal \\[bracket\\] | pipe\\|value | comma\\, value | slash\\\\value]",
+      "expected": {
+        "prompt": "Escaped answers",
+        "question_type": "single_text",
+        "accepted_answers": [["literal {brace}", "literal [bracket]", "pipe|value", "comma, value", "slash\\value"]],
+        "segments": [],
+        "bundle_qml": null,
+        "bundle_variants": []
+      }
+    },
+    {
+      "name": "escaped inline literal brackets",
+      "input": "The escaped \\[word\\] is literal, but [heart] works.",
+      "canonical_qml": "The escaped \\[word\\] is literal\\, but [heart] works.",
+      "expected": {
+        "prompt": "The escaped [word] is literal, but [_] works.",
+        "question_type": "inline_cloze",
+        "accepted_answers": [["heart"]],
+        "segments": ["The escaped [word] is literal, but ", " works."],
+        "bundle_qml": null,
+        "bundle_variants": []
+      }
+    }
+  ],
+  "valid_import_entry_cases": [
+    {
+      "name": "mixed plain and bundle entries with blank lines",
+      "input": "What is the capital of Norway? [oslo | christiania]\n\n{A patient needs {} mg. Solution strength is {} mg/ml. How much is needed? []\n {500} {40} [12.5 ml]\n {600} {30} [20 ml]}\n\nName two primary colors. {red, blue}",
+      "expected_entries": [
+        {
+          "start_line": 1,
+          "end_line": 1,
+          "entry_kind": "plain",
+          "qml_text": "What is the capital of Norway? [oslo | christiania]"
+        },
+        {
+          "start_line": 3,
+          "end_line": 5,
+          "entry_kind": "bundle",
+          "qml_text": "{A patient needs {} mg. Solution strength is {} mg/ml. How much is needed? []\n {500} {40} [12.5 ml]\n {600} {30} [20 ml]}"
+        },
+        {
+          "start_line": 7,
+          "end_line": 7,
+          "entry_kind": "plain",
+          "qml_text": "Name two primary colors. {red, blue}"
+        }
+      ]
+    }
+  ],
+  "invalid_parse_cases": [
+    {
+      "name": "blank question",
+      "input": ""
+    },
+    {
+      "name": "malformed answer box",
+      "input": "Question [answer"
+    },
+    {
+      "name": "unordered multi with one slot",
+      "input": "Name one color. {red}"
+    },
+    {
+      "name": "inline cloze unbalanced brackets",
+      "input": "The [heart pumps blood."
+    },
+    {
+      "name": "bundle missing answer slot",
+      "input": "{Patient needs {} mg.\n {500} [500]}"
+    },
+    {
+      "name": "bundle row wrong prompt-cell count",
+      "input": "{Patient needs {} mg from {} source. []\n {500} [500]}"
+    },
+    {
+      "name": "bundle answer slot not final",
+      "input": "{Patient needs [] after text\n {500} [500]}"
+    },
+    {
+      "name": "malformed bundle answer cell",
+      "input": "{Patient needs {} mg. []\n {500} [500}"
+    }
+  ]
+}

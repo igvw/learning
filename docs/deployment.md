@@ -2,7 +2,7 @@
 
 ## Current Shape
 
-The current container deployment is:
+The container deployment is:
 
 - one `postgres` container
 - one `app` container
@@ -13,26 +13,36 @@ The current container deployment is:
 
 ## Environment Variables
 
+- `POSTGRES_DB`
+  Database name for the `postgres` container. Required in `.env`.
+- `POSTGRES_USER`
+  Database user for the `postgres` container. Required in `.env`.
+- `POSTGRES_PASSWORD`
+  Database password for the `postgres` container. Required in `.env`.
+- `POSTGRES_PORT`
+  Host port published for PostgreSQL. Sample `.env.example` value: `5432`.
 - `LEARNING_APP_PORT`
-  Host port published by Docker Compose. Default: `8000`
+  Host port published by Docker Compose. Sample `.env.example` value: `8000`.
 - `LEARNING_APP_IMAGE`
-  Published GHCR image used by the app service. Default: `ghcr.io/igvw/learning-app:latest`
-- `LEARNING_APP_DATABASE_URL`
-  PostgreSQL connection string used by the app container.
+  Published GHCR image used by the app service. Sample `.env.example` value: `ghcr.io/igvw/learning-app:latest`.
+- `LEARNING_APP_ENV`
+  Runtime environment label. Sample `.env.example` value: `production`.
+- `LEARNING_APP_INSTANCE_KEY`
+  Browser storage namespace and health metadata key. Sample `.env.example` value: `published`.
 - `LEARNING_APP_SEED_ON_BOOT`
-  When `true`, startup imports any missing seed content from `content/modules`. Default: `true`
+  When `true`, startup imports any missing seed content from `content/modules`. Sample `.env.example` value: `true`.
 - `LEARNING_APP_CORS_ORIGINS`
   Optional comma-separated list of allowed origins when the frontend is served from a different host.
-- `LEARNING_APP_ENV`
-  Runtime environment label. Compose sets this to `production`.
-- `POSTGRES_DB`
-  Default database name for the `postgres` container.
-- `POSTGRES_USER`
-  Default database user for the `postgres` container.
-- `POSTGRES_PASSWORD`
-  Default database password for the `postgres` container.
-- `POSTGRES_PORT`
-  Host port published for PostgreSQL. Default: `5432`
+- `LEARNING_APP_SCHEDULE_TIMEZONE`
+  App-wide timezone used for day-scale spaced-repetition buckets and day-based stats graphs. When unset, the backend defaults to `UTC`. Hosted deployments can set this to something like `Europe/Oslo`.
+- `LEARNING_APP_BOOTSTRAP_ADMIN_HANDLE`
+  Optional first-admin handle. When all three bootstrap admin vars are present and no admin exists yet, startup creates that first admin automatically.
+- `LEARNING_APP_BOOTSTRAP_ADMIN_DISPLAY_NAME`
+  Optional first-admin display name used by env bootstrap.
+- `LEARNING_APP_BOOTSTRAP_ADMIN_PASSWORD`
+  Optional first-admin password used by env bootstrap.
+- `LEARNING_APP_DATABASE_URL`
+  Optional full PostgreSQL connection string. When unset, the backend can build a local connection URL from `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD`.
 
 ## Local Development
 
@@ -112,7 +122,14 @@ docker compose -f docker-compose.deploy.yml pull
 docker compose -f docker-compose.deploy.yml up -d
 ```
 
-The app will listen on `http://127.0.0.1:${LEARNING_APP_PORT:-8000}`.
+With the sample `.env`, the app listens on `http://127.0.0.1:8000`.
+
+The sample `.env.example` also boots the first admin automatically:
+
+- handle: `admin`
+- password: `password123`
+
+If you intentionally clear the bootstrap admin vars before first startup, the app starts and the auth screen falls back to the manual first-admin bootstrap flow.
 
 What this means for offline use:
 
@@ -176,6 +193,13 @@ This recreates the app container while keeping the PostgreSQL volume.
 
 Study data lives in the named Docker volume `postgres_data`.
 
+Two different export paths exist:
+
+- `GET /api/modules/export` for verified shared content only
+- PostgreSQL dump/restore for the real app database, including users, quiz history, moderation state, and pending contributions
+
+For real backup or migration, use PostgreSQL dump/restore.
+
 What to back up:
 
 - the PostgreSQL data volume, or
@@ -184,7 +208,9 @@ What to back up:
 Example SQL backup:
 
 ```bash
-docker compose -f docker-compose.deploy.yml exec postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > learning-backup.sql
+docker compose -f docker-compose.deploy.yml exec postgres \
+  pg_dump --clean --if-exists --no-owner --no-privileges -U "$POSTGRES_USER" "$POSTGRES_DB" \
+  > learning-backup.sql
 ```
 
 Example restore into a fresh stack:
@@ -193,6 +219,85 @@ Example restore into a fresh stack:
 cat learning-backup.sql | docker compose -f docker-compose.deploy.yml exec -T postgres psql -U "$POSTGRES_USER" "$POSTGRES_DB"
 ```
 
+Restore is intended for a fresh or disposable target database. In practice it overwrites the target state.
+
+If the target machine already has data you care about, dump that target first before restoring anything into it.
+
+## Migrate An Existing Database To Another Machine
+
+Use this when moving from a current development machine to a Debian home server.
+
+Before starting:
+
+- make sure both machines are running the same app version or at least a compatible schema
+- make sure the Debian server has the same `.env` database settings you intend to keep
+- treat the Debian target database as replaceable for this migration
+
+### 1. Create a dump on the source machine
+
+If the source machine is running the repo-local stack:
+
+```bash
+docker compose exec postgres \
+  pg_dump --clean --if-exists --no-owner --no-privileges -U "$POSTGRES_USER" "$POSTGRES_DB" \
+  > learning-migration.sql
+```
+
+If the source machine is running the deploy stack instead:
+
+```bash
+docker compose -f docker-compose.deploy.yml exec postgres \
+  pg_dump --clean --if-exists --no-owner --no-privileges -U "$POSTGRES_USER" "$POSTGRES_DB" \
+  > learning-migration.sql
+```
+
+### 2. Copy the dump file to the Debian server
+
+Example:
+
+```bash
+scp learning-migration.sql your-user@debian-server:/home/your-user/
+```
+
+### 3. Start PostgreSQL on the Debian server
+
+Run this on the Debian server from the repo root:
+
+```bash
+docker compose -f docker-compose.deploy.yml up -d postgres
+```
+
+If the app container is already running and you want the cleanest restore window:
+
+```bash
+docker compose -f docker-compose.deploy.yml stop app
+```
+
+### 4. Restore the dump into the Debian database
+
+Run this on the Debian server:
+
+```bash
+cat learning-migration.sql | docker compose -f docker-compose.deploy.yml exec -T postgres psql -U "$POSTGRES_USER" "$POSTGRES_DB"
+```
+
+### 5. Start or restart the app
+
+Run this on the Debian server:
+
+```bash
+docker compose -f docker-compose.deploy.yml up -d app
+```
+
+### 6. Verify the migrated state
+
+Confirm:
+
+- you can sign in with the expected accounts
+- modules and verified questions are present
+- quiz history and stats are still visible
+- pending uploads, pending modules, and revision proposals are still present where expected
+
 ## Notes For The Next Phase
 
-The next productionization step is to add a proper migration/deploy workflow and a Postgres-backed automated test harness.
+If the manual flow becomes tedious later, the next step is to automate backup and migration operations without changing the database model.

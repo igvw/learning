@@ -1,0 +1,543 @@
+.admin-stack {
+  display: grid;
+  gap: 1rem;
+}
+
+.admin-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.admin-summary-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  text-align: left;
+  padding: 0.95rem 1rem;
+  border-radius: 1rem;
+}
+
+.admin-summary-card.wide {
+  width: 100%;
+}
+
+.admin-summary-card-copy {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.admin-summary-card-copy strong {
+  font-size: 1rem;
+}
+
+.admin-summary-card-copy .muted-copy {
+  margin: 0;
+}
+
+.admin-summary-count {
+  flex-shrink: 0;
+}
+
+.admin-bar-panel {
+  display: grid;
+  gap: 1rem;
+  align-self: start;
+}
+
+.admin-bar-form {
+  display: grid;
+  gap: 1rem;
+  align-items: end;
+}
+
+.module-bar-form {
+  grid-template-columns: minmax(18rem, 1.7fr) minmax(14rem, 1fr) auto;
+  align-items: start;
+}
+
+.module-bar-form .admin-wide-field {
+  grid-column: 1 / 3;
+}
+
+.module-bar-form .admin-action-slot {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  align-self: stretch;
+}
+
+.module-bar-form textarea {
+  min-height: 4.25rem;
+}
+
+.user-bar-form {
+  grid-template-columns: minmax(13rem, 1.2fr) minmax(13rem, 1.2fr) minmax(16rem, 1.6fr) auto;
+}
+
+.import-bar-form {
+  grid-template-columns: minmax(18rem, 1.4fr) minmax(18rem, 1.8fr) auto;
+}
+
+.admin-wide-field,
+.admin-status-slot {
+  min-width: 0;
+}
+
+.admin-status-slot {
+  display: grid;
+  align-self: center;
+}
+
+.admin-status-slot .muted-copy {
+  margin: 0;
+}
+
+.admin-action-slot {
+  display: flex;
+  align-items: end;
+  justify-content: flex-end;
+}
+
+.admin-bar-notes {
+  display: grid;
+  gap: 0.4rem;
+  max-width: 62rem;
+}
+
+.admin-bar-notes .muted-copy {
+  margin: 0;
+}
+
+.admin-module-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.admin-module-row {
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 1rem;
+  background: rgba(64, 64, 72, 0.52);
+  padding: 0.9rem 1rem;
+}
+
+.admin-module-copy {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.admin-module-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.admin-module-badge {
+  background: rgba(148, 163, 184, 0.12);
+}
+
+.moderation-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.85rem;
+}
+
+.moderation-summary-card {
+  display: grid;
+  gap: 0.45rem;
+  justify-items: start;
+  text-align: left;
+  padding: 1rem 1.1rem;
+  border-radius: 1rem;
+}
+
+.moderation-summary-card strong {
+  font-size: 1rem;
+}
+
+.moderation-summary-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.1rem;
+  min-height: 2.1rem;
+  padding: 0.25rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.moderation-overlay-panel {
+  width: min(82rem, 96vw);
+}
+
+.moderation-overlay-copy {
+  margin: 0;
+  max-width: 60rem;
+}
+
+.moderation-overlay-stack {
+  display: grid;
+  gap: 1rem;
+}
+
+.moderation-question-group {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.moderation-question-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.moderation-question-toolbar .muted-copy {
+  margin: 0;
+}
+
+.moderation-question-table-shell {
+  overflow-x: auto;
+  border-radius: 1rem;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.moderation-question-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 44rem;
+}
+
+.moderation-question-table th,
+.moderation-question-table td {
+  padding: 0.8rem 0.9rem;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.moderation-question-table th {
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  background: rgba(39, 39, 42, 0.7);
+}
+
+.moderation-question-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.moderation-checkbox-column {
+  width: 3.25rem;
+  text-align: center;
+}
+
+.moderation-question-table input[type='checkbox'] {
+  width: 1rem;
+  height: 1rem;
+}
+
+.moderation-row-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.revision-module-grid {
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+}
+
+.revision-module-card {
+  min-height: 8.25rem;
+}
+
+.moderation-revision-section {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.moderation-section-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  text-align: left;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: inherit;
+}
+
+.moderation-section-toggle .muted-copy {
+  margin: 0.2rem 0 0;
+}
+
+.moderation-detail-header {
+  align-items: start;
+}
+
+.moderation-detail-header .muted-copy {
+  margin: 0.2rem 0 0;
+}
+
+.moderation-revision-table {
+  min-width: 60rem;
+}
+
+.moderation-actions-column {
+  width: 3.4rem;
+  text-align: center;
+}
+
+.moderation-reset-column {
+  width: 4.5rem;
+  text-align: center;
+}
+
+.moderation-question-table th.moderation-actions-column,
+.moderation-question-table td.moderation-actions-column,
+.moderation-question-table th.moderation-reset-column,
+.moderation-question-table td.moderation-reset-column {
+  padding-left: 0.45rem;
+  padding-right: 0.45rem;
+}
+
+.revision-snapshot-button {
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.revision-snapshot-static {
+  width: 100%;
+}
+
+.revision-snapshot-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.revision-snapshot-panel {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.75rem 0.8rem;
+  border-radius: 0.8rem;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(46, 46, 54, 0.62);
+}
+
+.revision-snapshot-panel.current {
+  background: rgba(127, 29, 29, 0.16);
+  border-color: rgba(248, 113, 113, 0.25);
+}
+
+.revision-snapshot-panel.proposed {
+  background: rgba(21, 128, 61, 0.16);
+  border-color: rgba(74, 222, 128, 0.22);
+}
+
+.revision-snapshot-panel.delete-only {
+  background: rgba(127, 29, 29, 0.22);
+  border-color: rgba(248, 113, 113, 0.3);
+}
+
+.revision-snapshot-side-label {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.revision-snapshot-main,
+.revision-answer-groups,
+.revision-segment-list {
+  display: grid;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.revision-type-pill {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 1.75rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.revision-type-pill.changed {
+  color: var(--text-primary);
+}
+
+.revision-snapshot-panel.current .revision-type-pill.changed {
+  background: rgba(185, 28, 28, 0.26);
+  border-color: rgba(248, 113, 113, 0.36);
+  color: #fee2e2;
+}
+
+.revision-snapshot-panel.proposed .revision-type-pill.changed {
+  background: rgba(21, 128, 61, 0.28);
+  border-color: rgba(74, 222, 128, 0.36);
+  color: #dcfce7;
+}
+
+.revision-prompt {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.revision-prompt.changed {
+  color: var(--text-primary);
+}
+
+.revision-answer-groups,
+.revision-segment-list {
+  opacity: 0.82;
+}
+
+.revision-answer-groups.changed,
+.revision-segment-list.changed {
+  opacity: 1;
+}
+
+.revision-answer-chip {
+  border-width: 1px;
+  border-style: solid;
+}
+
+.revision-answer-chip.old {
+  background: rgba(185, 28, 28, 0.22);
+  border-color: rgba(248, 113, 113, 0.32);
+  color: #fecaca;
+}
+
+.revision-answer-chip.new {
+  background: rgba(22, 163, 74, 0.22);
+  border-color: rgba(74, 222, 128, 0.32);
+  color: #bbf7d0;
+}
+
+.revision-segment-code {
+  display: block;
+  padding: 0.4rem 0.5rem;
+  border-radius: 0.65rem;
+  background: rgba(68, 68, 76, 0.82);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  color: white;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.moderation-row-actions.icon-stack {
+  display: grid;
+  gap: 0.45rem;
+  justify-items: center;
+}
+
+.moderation-icon-button {
+  width: 2.2rem;
+  min-width: 2.2rem;
+  height: 2.2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.8rem;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(46, 46, 54, 0.82);
+  color: var(--text-primary);
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0;
+}
+
+.moderation-icon-button.approve {
+  border-color: rgba(74, 222, 128, 0.3);
+  background: rgba(21, 128, 61, 0.26);
+  color: #dcfce7;
+}
+
+.moderation-icon-button.reject {
+  border-color: rgba(248, 113, 113, 0.3);
+  background: rgba(127, 29, 29, 0.26);
+  color: #fee2e2;
+}
+
+.moderation-section-toggle:focus-visible,
+.revision-snapshot-button:focus-visible,
+.moderation-icon-button:focus-visible {
+  outline: 2px solid rgba(251, 191, 36, 0.7);
+  outline-offset: 3px;
+}
+
+.moderation-icon-button:disabled,
+.revision-snapshot-button:disabled {
+  opacity: 0.65;
+}
+
+.contribution-section {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.contribution-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.contribution-row {
+  display: grid;
+  gap: 0.35rem;
+  text-align: left;
+}
+
+.contribution-row .muted-copy {
+  margin: 0;
+}
+
+.contribution-revision-button {
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  color: inherit;
+}
+
+.contribution-revision-header .muted-copy {
+  margin: 0.25rem 0 0;
+}
+
+@media (max-width: 900px) {
+  .admin-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .moderation-question-toolbar {
+    align-items: stretch;
+  }
+
+  .moderation-row-actions {
+    flex-direction: column;
+  }
+
+  .revision-snapshot-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -43,6 +43,9 @@
     on:click={handleNodeClick}
   >
     <span class="module-title">{node.title}</span>
+    {#if !node.admin_verified}
+      <span class="inline-status-chip">Pending</span>
+    {/if}
     <span class="module-path">{node.full_slug}</span>
   </button>
 

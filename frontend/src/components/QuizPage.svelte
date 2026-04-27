@@ -22,7 +22,7 @@
   let reviewMode = false;
 
   function slotCount(item: QuizItem): number {
-    if (item.question_type === 'single_text' || item.question_type === 'computed_text') {
+    if (item.question_type === 'single_text') {
       return 1;
     }
     if (item.question_type === 'multi_text' || item.question_type === 'ordered_multi') {
@@ -136,6 +136,45 @@
     return '';
   }
 
+  function feedbackAnswerGroups(item: QuizItem): string[][] {
+    if (item.accepted_answer_groups && item.accepted_answer_groups.length > 0) {
+      return item.accepted_answer_groups.map((group) => [...group]);
+    }
+    if (item.canonical_answers && item.canonical_answers.length > 0) {
+      return item.canonical_answers.map((answer) => [answer]);
+    }
+    return [];
+  }
+
+  function slotWasCorrect(item: QuizItem, slotIndex: number): boolean {
+    const slotResult = item.slot_results?.find((result) => result.index === slotIndex);
+    if (slotResult) {
+      return slotResult.is_correct;
+    }
+    return slotCount(item) === 1 ? item.is_correct === true : false;
+  }
+
+  function displayedAnswerValue(item: QuizItem, slotIndex: number, currentValue: string): string {
+    if (!item.submitted_answer || !slotWasCorrect(item, slotIndex)) {
+      return currentValue;
+    }
+    return feedbackAnswerGroups(item)[slotIndex]?.join(' / ') ?? currentValue;
+  }
+
+  function incorrectFeedbackAnswers(item: QuizItem): string[] {
+    return feedbackAnswerGroups(item)
+      .filter((_, index) => !slotWasCorrect(item, index))
+      .map((group) => group.join(' / '));
+  }
+
+  function shouldShowFeedback(item: QuizItem): boolean {
+    return item.is_correct === false;
+  }
+
+  function usePlainFeedbackBox(item: QuizItem): boolean {
+    return incorrectFeedbackAnswers(item).length === 1;
+  }
+
   function handleKeydown(event: KeyboardEvent, item: QuizItem, slotIndex: number): void {
     if (busyItemId === item.id || item.submitted_answer) {
       return;
@@ -145,7 +184,7 @@
     }
 
     event.preventDefault();
-    if (item.question_type === 'single_text' || item.question_type === 'computed_text') {
+    if (item.question_type === 'single_text') {
       handleSubmit(item);
       return;
     }
@@ -231,13 +270,7 @@
     <div class="banner error">{errorMessage}</div>
   {/if}
 
-  {#if !session}
-    <div class="panel empty-state">
-      <h3>Short bursts, no mouse required.</h3>
-      <p>Start a quiz for the selected scope. Submitted cards stay on screen so the finished session becomes the review surface.</p>
-      <p class="shortcut-hint">Press <kbd>Enter</kbd> to move through fields. On the last field, <kbd>Enter</kbd> submits the question.</p>
-    </div>
-  {:else if session.items.length === 0}
+  {#if session && session.items.length === 0}
     <div class="panel empty-state">
       <h3>No questions in this scope yet.</h3>
       <p>Switch modules from the menu or create questions from the stats page.</p>
@@ -302,13 +335,13 @@
                 {/if}
               </div>
 
-              {#if item.question_type === 'single_text' || item.question_type === 'computed_text'}
+              {#if item.question_type === 'single_text'}
                 <input
                   type="text"
                   class="answer-input"
                   class:answer-correct={slotState(item, 0) === 'correct'}
                   class:answer-incorrect={slotState(item, 0) === 'incorrect'}
-                  value={currentAnswers[0] ?? ''}
+                  value={displayedAnswerValue(item, 0, currentAnswers[0] ?? '')}
                   disabled={answered || busyItemId === item.id}
                   data-active-input={!answered && activeIndex === index ? 'true' : undefined}
                   data-question-id={item.id}
@@ -326,7 +359,7 @@
                         class:answer-correct={slotState(item, slotIndex) === 'correct'}
                         class:answer-incorrect={slotState(item, slotIndex) === 'incorrect'}
                         aria-label={`Answer ${slotIndex + 1}`}
-                        value={currentAnswers[slotIndex] ?? ''}
+                        value={displayedAnswerValue(item, slotIndex, currentAnswers[slotIndex] ?? '')}
                         disabled={answered || busyItemId === item.id}
                         data-active-input={!answered && activeIndex === index && slotIndex === 0 ? 'true' : undefined}
                         data-question-id={item.id}
@@ -350,7 +383,7 @@
                         class="answer-input inline"
                         class:answer-correct={slotState(item, segmentIndex) === 'correct'}
                         class:answer-incorrect={slotState(item, segmentIndex) === 'incorrect'}
-                        value={currentAnswers[segmentIndex] ?? ''}
+                        value={displayedAnswerValue(item, segmentIndex, currentAnswers[segmentIndex] ?? '')}
                         disabled={answered || busyItemId === item.id}
                         data-active-input={!answered && activeIndex === index && segmentIndex === 0 ? 'true' : undefined}
                         data-question-id={item.id}
@@ -376,24 +409,25 @@
                 </div>
               {/if}
 
-              {#if answered && item.is_correct !== true}
-                <div class="feedback-block">
-                  {#if item.canonical_answers}
-                    {#if (item.question_type === 'single_text' || item.question_type === 'computed_text') && item.canonical_answers.length === 1}
+              {#if answered && shouldShowFeedback(item)}
+                {@const answerFeedback = incorrectFeedbackAnswers(item)}
+                {#if answerFeedback.length > 0}
+                  <div class="feedback-block">
+                    {#if usePlainFeedbackBox(item)}
                       <div class="answer-box plain-answer-box">
-                        <p>{item.canonical_answers[0]}</p>
+                        <p>{answerFeedback[0]}</p>
                       </div>
                     {:else}
                       <div class="answer-box">
                         <ul>
-                          {#each item.canonical_answers as answer}
+                          {#each answerFeedback as answer}
                             <li>{answer}</li>
                           {/each}
                         </ul>
                       </div>
                     {/if}
-                  {/if}
-                </div>
+                  </div>
+                {/if}
               {/if}
             </div>
           </article>

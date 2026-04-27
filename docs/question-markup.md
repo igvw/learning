@@ -16,7 +16,8 @@ See also:
 - [Overview](overview.md)
 - [API](api.md)
 - [TODO](TODO.md)
-- [LLM Prompt](question-markup-llm-prompt.md)
+- [QML Revised](qml-revised.md)
+- [QML Prompt Snippets](question-markup-prompts/index.md)
 
 ## File Shape
 
@@ -24,7 +25,8 @@ See also:
 - one question entry lives on one logical line
 - entries may be separated by blank lines for readability
 - `rank` is not written in the DSL
-- import assigns rank by insertion order
+- import assigns append order by insertion order
+- manual admin export writes a zip rooted at `modules-export/content/modules/`, with `module.yaml` in every verified module and `questions.qml` in every verified leaf
 
 ## Cheat Sheet
 
@@ -190,10 +192,10 @@ becomes conceptually:
 
 `rank` is intentionally omitted from authoring.
 
-Future import behavior should:
+Current import behavior:
 
-- assign rank by insertion order
-- allow later manual adjustment from the editor UI
+- append questions in upload order
+- keep question order server-managed rather than editor-controlled
 
 ## Math And Variables
 
@@ -320,12 +322,8 @@ Patient needs $m=[1-10]*100$ mg. How much is needed? [$m/z$ ml]
 
 Reason: `z` is unbound.
 
-## Future Integration
+## Bundle Blocks
 
-Later work can still:
+This document describes the current QML/DSL format only.
 
-- add export in this format
-- extend the syntax in `QML v2`
-- add richer ghost-text authoring hints
-
-The format compiles into the app's current runtime question model, including the explicit `computed_text` question type for variable-driven prompts.
+Top-level `{ ... }` bundle blocks are documented separately in [QML Revised](qml-revised.md).

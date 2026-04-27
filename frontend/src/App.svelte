@@ -1,51 +1,107 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import AdminPage from './components/AdminPage.svelte';
+  import AuthPage from './components/AuthPage.svelte';
   import EditorDrawer from './components/EditorDrawer.svelte';
   import Header from './components/Header.svelte';
   import ImportDrawer from './components/ImportDrawer.svelte';
   import ModuleMenu from './components/ModuleMenu.svelte';
   import QuizPage from './components/QuizPage.svelte';
   import StatsPage from './components/StatsPage.svelte';
+  import { buildModerationRevisionSeed } from './lib/moderation-editor';
   import {
+    findModuleTitle,
+    persistSelectedModule as persistSelectedModuleSelection,
+    routeFromPath
+  } from './lib/app-state';
+  import {
+    loadRoleDataForActor,
+    loadStatsForActor,
+    pathForRoute,
+    refreshAuthenticatedShellData,
+    resolveAuthSessionState,
+    type RefreshedShellState
+  } from './lib/app-shell-data';
+  import {
+    closeImportUiState,
+    initialImportUiState,
+    openImportUiForModule,
+    resetImportUiState,
+    updateImportUiDraft
+  } from './lib/app-shell-import';
+  import { commitImportUiFlow, startImportUiFlow } from './lib/app-shell-import-actions';
+  import { IMPORT_COMMIT_CHUNK_SIZE } from './lib/import-session';
+  import { runBulkModeration, runBulkRevisionModeration, saveQuestionMutation } from './lib/app-shell-mutations';
+  import {
+    bootstrapAdmin,
     commitQuestionImport,
     createModule,
     createQuestion,
     createQuizSession,
     createUser,
+    deleteQuestion,
+    deleteRejectedModule,
+    exportContentArchive,
+    getCurrentActor,
+    getHealth,
+    getModerationQueue,
     getModulesTree,
+    getMyContributions,
     getStats,
     getUsers,
+    login,
+    logout,
+    reviewModule,
+    reviewQuestion,
+    reviewQuestionRevision,
     reviseQuestion,
     setQuestionReviewFlag,
     submitQuizAnswer,
+    updateModule,
+    updateUserPassword,
+    updateUserRole,
     validateQuestionImportRows,
     validateQuestionImportText
   } from './lib/api';
   import { ensureModulePath, findModuleNode as findModuleNodeInTree } from './lib/module-paths';
+  import { applyQuestionReviewFlag, applySubmitAnswerResult } from './lib/quiz-session';
   import type {
+    AuthActor,
+    BulkRevisionModerationItem,
+    BulkModerationResult,
     CreateModulePayload,
+    CreateUserPayload,
+    HealthResponse,
+    ModerationActionPayload,
+    ModerationKind,
+    ModerationQueue,
+    ModerationRevisionActionPayload,
     ModuleNode,
+    MyContributions,
     QuestionDraftPayload,
-    QuestionImportResult,
     QuestionImportRowPayload,
+    QuestionRevisionProposal,
     QuestionRow,
     QuizSession,
     RouteName,
     StatsResponse,
+    UpdateModulePayload,
     User
   } from './lib/types';
-
-  const ACTIVE_USER_STORAGE_KEY = 'learning.active-user-id';
-  const ACTIVE_MODULE_STORAGE_KEY = 'learning.selected-module-id';
 
   let currentRoute: RouteName = 'quiz';
   let modules: ModuleNode[] = [];
   let selectedModuleId: number | null = null;
   let moduleMenuOpen = false;
 
+  let currentActor: AuthActor | null = null;
   let users: User[] = [];
-  let activeUserId: number | null = null;
+  let moderationQueue: ModerationQueue | null = null;
+  let contributions: MyContributions | null = null;
+  let health: HealthResponse | null = null;
+  let authLoading = true;
+  let authBusy = false;
+  let authError = '';
 
   let session: QuizSession | null = null;
   let quizBusyItemId: number | null = null;
@@ -59,67 +115,21 @@
   let reviewOnly = false;
 
   let editorOpen = false;
+  let editorMode: 'standard' | 'moderation' = 'standard';
   let editingQuestion: QuestionRow | null = null;
+  let editingRevisionProposal: QuestionRevisionProposal | null = null;
   let savingQuestion = false;
+  let deletingQuestion = false;
 
-  let importDrawerOpen = false;
-  let importTargetModuleId: number | null = null;
-  let importResult: QuestionImportResult | null = null;
-  let importBusy = false;
-  let importError = '';
-
-  function routeFromPath(pathname: string): RouteName {
-    if (pathname.startsWith('/stats')) {
-      return 'stats';
-    }
-    if (pathname.startsWith('/admin')) {
-      return 'admin';
-    }
-    return 'quiz';
-  }
-
-  function findModuleNode(nodes: ModuleNode[], moduleId: number): ModuleNode | null {
-    return findModuleNodeInTree(nodes, moduleId);
-  }
-
-  function findModuleTitle(nodes: ModuleNode[], moduleId: number): string | null {
-    return findModuleNode(nodes, moduleId)?.title ?? null;
-  }
-
-  function moduleIdExists(nodes: ModuleNode[], moduleId: number): boolean {
-    return findModuleNode(nodes, moduleId) !== null;
-  }
-
-  function findUser(usersList: User[], userId: number | null): User | null {
-    if (userId === null) {
-      return null;
-    }
-    return usersList.find((user) => user.id === userId) ?? null;
-  }
-
-  function persistActiveUser(userId: number | null): void {
-    if (userId === null) {
-      window.localStorage.removeItem(ACTIVE_USER_STORAGE_KEY);
-      return;
-    }
-    window.localStorage.setItem(ACTIVE_USER_STORAGE_KEY, String(userId));
-  }
+  let importState = initialImportUiState();
+  let instanceKey = 'default';
 
   function persistSelectedModule(moduleId: number | null): void {
-    if (moduleId === null) {
-      window.localStorage.removeItem(ACTIVE_MODULE_STORAGE_KEY);
-      return;
-    }
-    window.localStorage.setItem(ACTIVE_MODULE_STORAGE_KEY, String(moduleId));
-  }
-
-  function applyActiveUser(userId: number | null): void {
-    activeUserId = userId;
-    persistActiveUser(userId);
-    session = null;
-    quizError = '';
-    stats = null;
-    statsError = '';
+    persistSelectedModuleSelection(window.localStorage, {
+      instanceKey,
+      modules,
+      moduleId
+    });
   }
 
   function applySelectedModule(moduleId: number | null): void {
@@ -127,44 +137,128 @@
     persistSelectedModule(moduleId);
   }
 
-  function resetImportState(closeDrawer = false): void {
-    importResult = null;
-    importError = '';
-    importBusy = false;
-    if (closeDrawer) {
-      importDrawerOpen = false;
-      importTargetModuleId = null;
+  function resetAuthenticatedState(): void {
+    modules = [];
+    selectedModuleId = null;
+    session = null;
+    stats = null;
+    statsError = '';
+    users = [];
+    moderationQueue = null;
+    contributions = null;
+    reviewOnly = false;
+    moduleMenuOpen = false;
+    importState = resetImportUiState(importState, true);
+  }
+
+  function closeImportDrawer(): void {
+    importState = closeImportUiState(importState);
+  }
+
+  function updateImportDraft(qmlText: string, rows: QuestionImportRowPayload[]): void {
+    importState = updateImportUiDraft(importState, qmlText, rows);
+  }
+
+  async function loadRoleData(): Promise<void> {
+    const roleData = await loadRoleDataForActor({
+      actor: currentActor,
+      getUsers,
+      getModerationQueue,
+      getMyContributions
+    });
+    users = roleData.users;
+    moderationQueue = roleData.moderationQueue;
+    contributions = roleData.contributions;
+  }
+
+  function applyRefreshedShellData(refreshed: RefreshedShellState): void {
+    modules = refreshed.modules;
+    importState = {
+      ...importState,
+      targetModuleId: refreshed.importTargetModuleId
+    };
+    applySelectedModule(refreshed.selectedModuleId);
+    users = refreshed.users;
+    moderationQueue = refreshed.moderationQueue;
+    contributions = refreshed.contributions;
+    if (currentRoute === 'stats') {
+      stats = refreshed.stats;
+      statsError = refreshed.statsErrorMessage;
     }
   }
 
-  async function loadModules(): Promise<void> {
-    const loadedModules = await getModulesTree();
-    modules = loadedModules;
-    if (importTargetModuleId !== null && !moduleIdExists(loadedModules, importTargetModuleId)) {
-      importTargetModuleId = null;
-    }
-    if (loadedModules.length === 0) {
-      applySelectedModule(null);
+  async function refreshAuthenticatedData(actor: AuthActor | null = currentActor): Promise<void> {
+    const refreshed = await refreshAuthenticatedShellData({
+      actor,
+      currentRoute,
+      selectedModuleId,
+      importState,
+      instanceKey,
+      storage: window.localStorage,
+      getModulesTree,
+      getUsers,
+      getModerationQueue,
+      getMyContributions,
+      getStats
+    });
+    applyRefreshedShellData(refreshed);
+  }
+
+  async function loadStats(): Promise<void> {
+    statsLoading = true;
+    const loadedStats = await loadStatsForActor({
+      actor: currentActor,
+      selectedModuleId,
+      getStats
+    });
+    stats = loadedStats.stats;
+    statsError = loadedStats.errorMessage;
+    statsLoading = false;
+  }
+
+  async function resolveAuthSession(): Promise<void> {
+    authLoading = true;
+    authError = '';
+    const resolvedState = await resolveAuthSessionState({
+      currentRoute,
+      selectedModuleId,
+      importState,
+      storage: window.localStorage,
+      getHealth,
+      getCurrentActor,
+      getModulesTree,
+      getUsers,
+      getModerationQueue,
+      getMyContributions,
+      getStats
+    });
+    health = resolvedState.health;
+    instanceKey = resolvedState.instanceKey;
+    currentActor = resolvedState.currentActor;
+
+    if (!resolvedState.currentActor) {
+      resetAuthenticatedState();
+      authLoading = false;
       return;
     }
 
-    const savedModuleId = Number(window.localStorage.getItem(ACTIVE_MODULE_STORAGE_KEY));
-    const nextSelectedModuleId =
-      selectedModuleId !== null && moduleIdExists(loadedModules, selectedModuleId)
-        ? selectedModuleId
-        : Number.isFinite(savedModuleId) && moduleIdExists(loadedModules, savedModuleId)
-          ? savedModuleId
-          : loadedModules[0].id;
-
-    applySelectedModule(nextSelectedModuleId);
+    applyRefreshedShellData(resolvedState);
+    authLoading = false;
   }
 
-  function hasSelectedModuleChanged(moduleId: number | null): boolean {
-    return selectedModuleId !== moduleId;
+  async function navigate(route: RouteName): Promise<void> {
+    currentRoute = route;
+    window.history.pushState({}, '', pathForRoute(route));
+    if (route === 'stats') {
+      await loadStats();
+    }
+    if (route === 'admin' && currentActor) {
+      await loadRoleData();
+    }
   }
 
   async function handleSelectModule(moduleId: number | null, keepMenuOpen = false): Promise<void> {
-    const moduleChanged = hasSelectedModuleChanged(moduleId);
+    const moduleChanged = selectedModuleId !== moduleId;
     applySelectedModule(moduleId);
     moduleMenuOpen = keepMenuOpen;
     if (!moduleChanged) {
@@ -172,117 +266,91 @@
     }
     session = null;
     quizError = '';
-    resetImportState(true);
     if (currentRoute === 'stats') {
       await loadStats();
     }
   }
 
-  async function loadUsersAndRestoreSelection(): Promise<void> {
-    const loadedUsers = await getUsers();
-    users = loadedUsers;
-
-    const currentUser = findUser(loadedUsers, activeUserId);
-    if (currentUser) {
-      return;
-    }
-
-    const savedUserId = Number(window.localStorage.getItem(ACTIVE_USER_STORAGE_KEY));
-    if (Number.isFinite(savedUserId) && findUser(loadedUsers, savedUserId)) {
-      applyActiveUser(savedUserId);
-      return;
-    }
-
-    if (loadedUsers.length > 0) {
-      applyActiveUser(loadedUsers[0].id);
-      return;
-    }
-
-    applyActiveUser(null);
-  }
-
-  async function loadStats(): Promise<void> {
-    if (activeUserId === null) {
-      stats = null;
-      statsError = '';
-      statsLoading = false;
-      return;
-    }
-
-    statsLoading = true;
-    statsError = '';
+  async function handleLogin(payload: { handle: string; password: string }): Promise<void> {
+    authBusy = true;
+    authError = '';
     try {
-      stats = await getStats(activeUserId, selectedModuleId, reviewOnly);
+      currentActor = await login(payload);
+      await refreshAuthenticatedData(currentActor);
     } catch (error) {
-      statsError = error instanceof Error ? error.message : 'Unable to load stats.';
+      authError = error instanceof Error ? error.message : 'Unable to sign in.';
     } finally {
-      statsLoading = false;
+      authBusy = false;
     }
   }
 
-  async function navigate(route: RouteName): Promise<void> {
-    currentRoute = route;
-    window.history.pushState({}, '', route === 'quiz' ? '/quiz' : route === 'stats' ? '/stats' : '/admin');
-    if (route === 'stats') {
-      await loadStats();
+  async function handleBootstrapAdmin(payload: {
+    handle: string;
+    display_name: string;
+    password: string;
+  }): Promise<void> {
+    authBusy = true;
+    authError = '';
+    try {
+      currentActor = await bootstrapAdmin(payload);
+      health = health ? { ...health, bootstrap_required: false } : null;
+      await refreshAuthenticatedData(currentActor);
+    } catch (error) {
+      authError = error instanceof Error ? error.message : 'Unable to create the first admin.';
+    } finally {
+      authBusy = false;
     }
   }
 
-  async function handleSelectUser(userId: number): Promise<void> {
-    applyActiveUser(userId);
-    if (currentRoute === 'stats') {
-      await loadStats();
-    }
+  async function handleLogout(): Promise<void> {
+    await logout();
+    currentActor = null;
+    resetAuthenticatedState();
   }
 
-  async function handleCreateUser(payload: { handle: string; display_name: string }): Promise<User> {
+  async function handleCreateUser(payload: CreateUserPayload): Promise<User> {
     const createdUser = await createUser(payload);
-    await loadUsersAndRestoreSelection();
-    applyActiveUser(createdUser.id);
-    if (currentRoute === 'stats') {
-      await loadStats();
-    }
+    await loadRoleData();
     return createdUser;
   }
 
+  async function handleUpdateUserPassword(userId: number, password: string): Promise<void> {
+    await updateUserPassword(userId, { password });
+  }
+
+  async function handleUpdateUserRole(userId: number, role: 'admin' | 'user'): Promise<User> {
+    const updatedUser = await updateUserRole(userId, { role });
+    if (currentActor?.id === userId) {
+      currentActor = await getCurrentActor();
+      await refreshAuthenticatedData(currentActor);
+      return updatedUser;
+    }
+    await loadRoleData();
+    return updatedUser;
+  }
+
   async function handleStartQuiz(): Promise<void> {
-    if (activeUserId === null) {
-      quizError = 'Create a user in Admin or select one from the header before starting a quiz.';
+    if (!currentActor) {
+      quizError = 'Sign in before starting a quiz.';
       return;
     }
     quizError = '';
     try {
-      session = await createQuizSession(activeUserId, selectedModuleId, quizQuestionCount);
+      session = await createQuizSession(selectedModuleId, quizQuestionCount);
     } catch (error) {
       quizError = error instanceof Error ? error.message : 'Unable to start a quiz.';
     }
   }
 
   async function handleSubmitAnswer(itemId: number, answers: string[]): Promise<void> {
-    if (!session || activeUserId === null) {
+    if (!session) {
       return;
     }
     quizBusyItemId = itemId;
     quizError = '';
     try {
-      const result = await submitQuizAnswer(activeUserId, session.id, itemId, answers);
-      session = {
-        ...session,
-        completed_at: result.session_completed ? new Date().toISOString() : session.completed_at,
-        items: session.items.map((item) =>
-          item.id === itemId
-            ? {
-                ...item,
-                submitted_answer: result.submitted_answer,
-                is_correct: result.is_correct,
-                score_earned: result.score_earned,
-                score_possible: result.score_possible,
-                slot_results: result.slot_results,
-                canonical_answers: result.canonical_answers
-              }
-            : item
-        )
-      };
+      const result = await submitQuizAnswer(session.id, itemId, answers);
+      session = applySubmitAnswerResult(session, itemId, result, new Date().toISOString());
     } catch (error) {
       quizError = error instanceof Error ? error.message : 'Unable to submit this answer.';
     } finally {
@@ -290,30 +358,19 @@
     }
   }
 
-  async function handleToggleReviewOnly(value: boolean): Promise<void> {
+  function handleToggleReviewOnly(value: boolean): void {
     reviewOnly = value;
-    await loadStats();
   }
 
   async function handleMarkForRevision(questionId: number): Promise<void> {
-    if (!session || activeUserId === null) {
+    if (!session) {
       return;
     }
     markingReviewQuestionId = questionId;
     quizError = '';
     try {
-      await setQuestionReviewFlag(activeUserId, questionId, true);
-      session = {
-        ...session,
-        items: session.items.map((item) =>
-          item.question_id === questionId
-            ? {
-                ...item,
-                review_flag: true
-              }
-            : item
-        )
-      };
+      await setQuestionReviewFlag(questionId, true);
+      session = applyQuestionReviewFlag(session, questionId, true);
     } catch (error) {
       quizError = error instanceof Error ? error.message : 'Unable to mark this question for revision.';
     } finally {
@@ -322,127 +379,199 @@
   }
 
   function handleOpenCreate(): void {
+    editorMode = 'standard';
+    editingRevisionProposal = null;
     editingQuestion = null;
+    deletingQuestion = false;
     editorOpen = true;
   }
 
   function handleOpenEdit(question: QuestionRow): void {
+    editorMode = 'standard';
+    editingRevisionProposal = null;
+    deletingQuestion = false;
     editorOpen = true;
     editingQuestion = question;
   }
 
+  function handleOpenRevisionEditor(proposal: QuestionRevisionProposal): void {
+    editorMode = 'moderation';
+    editingRevisionProposal = proposal;
+    editingQuestion = buildModerationRevisionSeed(proposal, proposal.delete_requested ? 'current' : 'proposed');
+    deletingQuestion = false;
+    editorOpen = true;
+  }
+
   function handleOpenImportForModule(moduleId: number): void {
-    importError = '';
-    importResult = null;
-    importTargetModuleId = moduleId;
-    importDrawerOpen = true;
+    if (currentActor?.role !== 'admin') {
+      return;
+    }
+    importState = openImportUiForModule(importState, moduleId);
+  }
+
+  async function handleExportContent(): Promise<void> {
+    await exportContentArchive();
   }
 
   async function handleCreateModule(payload: CreateModulePayload): Promise<ModuleNode> {
-    return ensureModulePath({
+    const created = await ensureModulePath({
       modules,
       parentId: payload.parent_id ?? null,
       titlePath: payload.title,
       instruction: payload.instruction,
       createModule,
       reloadModules: async () => {
-        await loadModules();
+        await refreshAuthenticatedData(currentActor);
         return modules;
       }
     });
+    return created;
+  }
+
+  async function handleUpdateModule(moduleId: number, payload: UpdateModulePayload): Promise<ModuleNode> {
+    const updated = await updateModule(moduleId, payload);
+    await refreshAuthenticatedData(currentActor);
+    return findModuleNodeInTree(modules, updated.id) ?? updated;
+  }
+
+  function closeEditor(): void {
+    editorOpen = false;
+    editorMode = 'standard';
+    editingQuestion = null;
+    editingRevisionProposal = null;
+    deletingQuestion = false;
+  }
+
+  async function reloadAfterQuestionMutation(): Promise<void> {
+    session = null;
+    await refreshAuthenticatedData();
+    if (currentRoute !== 'stats') {
+      await navigate('stats');
+    }
+  }
+
+  async function reloadAfterModerationMutation(): Promise<void> {
+    await refreshAuthenticatedData();
   }
 
   async function handleSaveQuestion(payload: QuestionDraftPayload, resetStats: boolean): Promise<void> {
     savingQuestion = true;
     try {
-      if (editingQuestion) {
-        await reviseQuestion(editingQuestion.question_id, {
-          ...payload,
-          reset_stats: resetStats
-        });
+      const reloadKind = await saveQuestionMutation({
+        editorMode,
+        editingQuestion,
+        editingRevisionProposal,
+        payload,
+        resetStats,
+        createQuestion,
+        reviseQuestion,
+        reviewQuestionRevision
+      });
+      closeEditor();
+      if (reloadKind === 'moderation') {
+        await reloadAfterModerationMutation();
       } else {
-        await createQuestion(activeUserId, payload);
-      }
-      editorOpen = false;
-      editingQuestion = null;
-      session = null;
-      if (currentRoute !== 'stats') {
-        await navigate('stats');
-      } else {
-        await loadStats();
+        await reloadAfterQuestionMutation();
       }
     } finally {
       savingQuestion = false;
     }
   }
 
-  async function handleStartImport(qmlText: string): Promise<void> {
-    if (!importTargetModuleNode) {
-      return;
-    }
-    importBusy = true;
-    importError = '';
+  async function handleDeleteQuestion(questionId: number): Promise<void> {
+    deletingQuestion = true;
     try {
-      importResult = await validateQuestionImportText(importTargetModuleNode.id, qmlText);
-    } catch (error) {
-      importError = error instanceof Error ? error.message : 'Unable to start this import.';
+      await deleteQuestion(questionId);
+      closeEditor();
+      await reloadAfterQuestionMutation();
     } finally {
-      importBusy = false;
+      deletingQuestion = false;
     }
   }
 
-  async function handleRevalidateImport(rows: QuestionImportRowPayload[]): Promise<void> {
-    if (!importTargetModuleNode) {
-      return;
-    }
-    importBusy = true;
-    importError = '';
-    try {
-      importResult = await validateQuestionImportRows(importTargetModuleNode.id, rows);
-    } catch (error) {
-      importError = error instanceof Error ? error.message : 'Unable to revalidate this upload.';
-    } finally {
-      importBusy = false;
-    }
+  async function handleStartImport(qmlText: string): Promise<void> {
+    importState = await startImportUiFlow({
+      state: importState,
+      actor: currentActor,
+      moduleNode: importTargetModuleNode,
+      qmlText,
+      validateText: validateQuestionImportText,
+      onStateChange: (nextState) => (importState = nextState),
+      getState: () => importState
+    });
   }
 
   async function handleCommitImport(rows: QuestionImportRowPayload[]): Promise<void> {
-    if (!importTargetModuleNode) {
-      return;
+    const result = await commitImportUiFlow({
+      state: importState,
+      actor: currentActor,
+      moduleNode: importTargetModuleNode,
+      rows,
+      validateRows: validateQuestionImportRows,
+      commitRows: commitQuestionImport,
+      chunkSize: IMPORT_COMMIT_CHUNK_SIZE,
+      onStateChange: (nextState) => (importState = nextState),
+      getState: () => importState
+    });
+    importState = result.state;
+    if (result.committedAll) {
+      await reloadAfterQuestionMutation();
     }
-    importBusy = true;
-    importError = '';
-    try {
-      const nextState = await commitQuestionImport(importTargetModuleNode.id, rows);
-      if (nextState.committed) {
-        resetImportState(true);
-        session = null;
-        if (currentRoute === 'stats') {
-          await loadStats();
-        }
-        return;
-      }
-      importResult = nextState;
-    } catch (error) {
-      importError = error instanceof Error ? error.message : 'Unable to commit this upload.';
-    } finally {
-      importBusy = false;
+  }
+
+  async function handleModerationAction(
+    kind: ModerationKind,
+    id: number,
+    payload: ModerationRevisionActionPayload
+  ): Promise<void> {
+    if (kind === 'module') {
+      await reviewModule(id, payload);
+    } else if (kind === 'question') {
+      await reviewQuestion(id, payload);
+    } else {
+      await reviewQuestionRevision(id, payload);
     }
+    await reloadAfterModerationMutation();
+  }
+
+  async function handleDeleteRejectedModule(moduleId: number): Promise<void> {
+    await deleteRejectedModule(moduleId);
+    await reloadAfterModerationMutation();
+  }
+
+  async function handleBulkQuestionModeration(
+    questionIds: number[],
+    payload: ModerationActionPayload
+  ): Promise<BulkModerationResult> {
+    const result = await runBulkModeration({
+      ids: questionIds,
+      payload,
+      handler: reviewQuestion
+    });
+    await reloadAfterModerationMutation();
+    return result;
+  }
+
+  async function handleBulkRevisionModeration(
+    items: BulkRevisionModerationItem[],
+    payload: ModerationActionPayload
+  ): Promise<BulkModerationResult> {
+    const result = await runBulkRevisionModeration({
+      items,
+      payload,
+      reviewQuestionRevision
+    });
+    await reloadAfterModerationMutation();
+    return result;
   }
 
   onMount(() => {
     currentRoute = routeFromPath(window.location.pathname);
-    void (async () => {
-      await loadModules();
-      await loadUsersAndRestoreSelection();
-      if (currentRoute === 'stats') {
-        await loadStats();
-      }
-    })();
+    void resolveAuthSession();
 
     const handlePopstate = (): void => {
       currentRoute = routeFromPath(window.location.pathname);
-      if (currentRoute === 'stats') {
+      if (currentRoute === 'stats' && currentActor) {
         void loadStats();
       }
     };
@@ -455,108 +584,130 @@
     selectedModuleId === null
       ? modules[0]?.title ?? 'Selected Module'
       : findModuleTitle(modules, selectedModuleId) ?? 'Selected Module';
-  $: selectedModuleNode = selectedModuleId === null ? null : findModuleNode(modules, selectedModuleId);
+  $: selectedModuleNode = selectedModuleId === null ? null : findModuleNodeInTree(modules, selectedModuleId);
   $: selectedModuleIsLeaf = Boolean(selectedModuleNode && selectedModuleNode.children.length === 0);
   $: selectedModuleInstruction = selectedModuleNode?.instruction ?? '';
-  $: importTargetModuleNode = importTargetModuleId === null ? null : findModuleNode(modules, importTargetModuleId);
-  $: activeUser = findUser(users, activeUserId);
-  $: activeUserLabel = activeUser?.display_name ?? 'No user selected';
-  $: showUserGate = currentRoute !== 'admin' && activeUserId === null;
+  $: importTargetModuleNode =
+    importState.targetModuleId === null ? null : findModuleNodeInTree(modules, importState.targetModuleId);
 </script>
 
-<div class="app-shell">
-  <div class="glow glow-one"></div>
-  <div class="glow glow-two"></div>
-
-  <Header
-    currentRoute={currentRoute}
-    users={users}
-    activeUserId={activeUserId}
-    onNavigate={navigate}
-    onToggleMenu={() => (moduleMenuOpen = !moduleMenuOpen)}
-    onSelectUser={handleSelectUser}
+{#if authLoading}
+  <section class="page">
+    <div class="panel empty-state">
+      <h3>Loading...</h3>
+    </div>
+  </section>
+{:else if !currentActor}
+  <AuthPage
+    bootstrapRequired={health?.bootstrap_required ?? false}
+    busy={authBusy}
+    errorMessage={authError}
+    onLogin={handleLogin}
+    onBootstrapAdmin={handleBootstrapAdmin}
   />
+{:else}
+  <div class="app-shell">
+    <div class="glow glow-one"></div>
+    <div class="glow glow-two"></div>
 
-  <ModuleMenu
-    open={moduleMenuOpen}
-    modules={modules}
-    selectedModuleId={selectedModuleId}
-    selectedModuleLabel={selectedModuleLabel}
-    onClose={() => (moduleMenuOpen = false)}
-    onSelect={handleSelectModule}
-  />
+    <Header
+      currentRoute={currentRoute}
+      currentActor={currentActor}
+      onNavigate={navigate}
+      onToggleMenu={() => (moduleMenuOpen = !moduleMenuOpen)}
+      onLogout={handleLogout}
+    />
 
-  <main class="page-shell">
-    {#if showUserGate}
-      <section class="page">
-        <div class="panel empty-state user-gate-panel">
-          <p class="eyebrow">Active user required</p>
-          <h2>Create a user in Admin</h2>
-          <p class="muted-copy">Quiz progress, review flags, and stats belong to a specific user.</p>
-          <button class="primary-button" type="button" on:click={() => void navigate('admin')}>
-            Open Admin
-          </button>
-        </div>
-      </section>
-    {:else if currentRoute === 'quiz'}
-      <QuizPage
-        session={session}
-        moduleLabel={selectedModuleLabel}
-        moduleInstruction={selectedModuleInstruction}
-        selectedModuleIsLeaf={selectedModuleIsLeaf}
-        questionCount={quizQuestionCount}
-        busyItemId={quizBusyItemId}
-        markingReviewQuestionId={markingReviewQuestionId}
-        errorMessage={quizError}
-        onChangeQuestionCount={(value) => (quizQuestionCount = value)}
-        onStartQuiz={handleStartQuiz}
-        onMarkForRevision={handleMarkForRevision}
-        onSubmit={handleSubmitAnswer}
-      />
-    {:else if currentRoute === 'stats'}
-      <StatsPage
-        moduleLabel={selectedModuleLabel}
-        activeUserLabel={activeUserLabel}
-        stats={stats}
-        loading={statsLoading}
-        reviewOnly={reviewOnly}
-        errorMessage={statsError}
-        onToggleReviewOnly={handleToggleReviewOnly}
-        onOpenCreate={handleOpenCreate}
-        onOpenEdit={handleOpenEdit}
-      />
-    {:else}
-      <AdminPage
-        modules={modules}
-        users={users}
-        activeUser={activeUser}
-        selectedModuleId={selectedModuleId}
-        onCreateUser={handleCreateUser}
-        onCreateModule={handleCreateModule}
-        onOpenImport={handleOpenImportForModule}
-      />
-    {/if}
-  </main>
+    <ModuleMenu
+      open={moduleMenuOpen}
+      modules={modules}
+      selectedModuleId={selectedModuleId}
+      selectedModuleLabel={selectedModuleLabel}
+      onClose={() => (moduleMenuOpen = false)}
+      onSelect={handleSelectModule}
+    />
 
-  <EditorDrawer
-    open={editorOpen}
-    modules={modules}
-    defaultModuleId={selectedModuleId}
-    editingQuestion={editingQuestion}
-    saving={savingQuestion}
-    onClose={() => (editorOpen = false)}
-    onSave={handleSaveQuestion}
-  />
+    <main class="page-shell">
+      {#if currentRoute === 'quiz'}
+        <QuizPage
+          session={session}
+          moduleLabel={selectedModuleLabel}
+          moduleInstruction={selectedModuleInstruction}
+          selectedModuleIsLeaf={selectedModuleIsLeaf}
+          questionCount={quizQuestionCount}
+          busyItemId={quizBusyItemId}
+          markingReviewQuestionId={markingReviewQuestionId}
+          errorMessage={quizError}
+          onChangeQuestionCount={(value) => (quizQuestionCount = value)}
+          onStartQuiz={handleStartQuiz}
+          onMarkForRevision={handleMarkForRevision}
+          onSubmit={handleSubmitAnswer}
+        />
+      {:else if currentRoute === 'stats'}
+        <StatsPage
+          moduleLabel={selectedModuleLabel}
+          stats={stats}
+          loading={statsLoading}
+          reviewOnly={reviewOnly}
+          errorMessage={statsError}
+          onToggleReviewOnly={handleToggleReviewOnly}
+          onOpenCreate={handleOpenCreate}
+          onOpenEdit={handleOpenEdit}
+        />
+      {:else}
+        <AdminPage
+          currentActor={currentActor}
+          modules={modules}
+          users={users}
+          selectedModuleId={selectedModuleId}
+          moderationQueue={moderationQueue}
+          contributions={contributions}
+          onCreateUser={handleCreateUser}
+          onUpdateUserRole={handleUpdateUserRole}
+          onUpdateUserPassword={handleUpdateUserPassword}
+          onCreateModule={handleCreateModule}
+          onUpdateModule={handleUpdateModule}
+          onOpenImport={handleOpenImportForModule}
+          onExportContent={handleExportContent}
+          onModerationAction={handleModerationAction}
+          onDeleteRejectedModule={handleDeleteRejectedModule}
+          onBulkQuestionModeration={handleBulkQuestionModeration}
+          onBulkRevisionModeration={handleBulkRevisionModeration}
+          onOpenRevisionEditor={handleOpenRevisionEditor}
+        />
+      {/if}
+    </main>
 
-  <ImportDrawer
-    open={importDrawerOpen}
-    moduleNode={importTargetModuleNode}
-    result={importResult}
-    busy={importBusy}
-    errorMessage={importError}
-    onClose={() => resetImportState(true)}
-    onStartImport={handleStartImport}
-    onRevalidate={handleRevalidateImport}
-    onCommit={handleCommitImport}
-  />
-</div>
+    <EditorDrawer
+      open={editorOpen}
+      modules={modules}
+      defaultModuleId={selectedModuleId}
+      editingQuestion={editingQuestion}
+      mode={editorMode}
+      saving={savingQuestion}
+      deleting={deletingQuestion}
+      currentActor={currentActor}
+      onClose={closeEditor}
+      onSave={handleSaveQuestion}
+      onDelete={handleDeleteQuestion}
+    />
+
+    <ImportDrawer
+      open={currentActor?.role === 'admin' && importState.open}
+      moduleNode={importTargetModuleNode}
+      result={importState.result}
+      busy={importState.busy}
+      errorMessage={importState.error}
+      draftText={importState.draftQmlText}
+      draftRows={importState.draftRows}
+      saveStatusMessageOverride={importState.saveStatusMessage}
+      saveStatusToneOverride={importState.saveStatusTone}
+      saveProgressTotal={importState.saveProgressTotal}
+      saveProgressCompleted={importState.saveProgressCompleted}
+      onClose={closeImportDrawer}
+      onDraftChange={updateImportDraft}
+      onStartImport={handleStartImport}
+      onCommit={handleCommitImport}
+    />
+  </div>
+{/if}

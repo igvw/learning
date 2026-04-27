@@ -1,78 +1,44 @@
-from __future__ import annotations
-
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Optional, Union
 
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from .api.dependencies import service_error_response
+from .api.routers import ALL_ROUTERS
 from .database import get_connection, initialize_database
-from .schemas import (
-    CommitQuestionImportIn,
-    CreateModuleIn,
-    ModuleNodeOut,
-    QuestionDraftIn,
-    QuestionImportResultOut,
-    QuestionMutationOut,
-    QuestionReviewFlagIn,
-    QuestionReviewFlagOut,
-    QuestionRevisionIn,
-    QuizSessionCreateIn,
-    StatsResponseOut,
-    SubmitAnswerIn,
-    SubmitAnswerOut,
-    UserCreateIn,
-    UserOut,
-    ValidateQuestionImportIn,
-    QuizSessionOut,
-)
-from .services import (
-    ServiceError,
-    commit_question_import,
-    create_module,
-    create_question,
-    create_quiz_session,
-    create_user,
-    get_module_tree,
-    get_stats,
-    list_users,
-    revise_question,
-    set_question_review_flag,
-    submit_answer,
-    sync_seed_content,
-    validate_question_import,
-)
+from .services import ServiceError, bootstrap_admin_from_environment, sync_seed_content
 from .settings import CONTENT_DIR, FRONTEND_DIST_DIR, cors_origins, resolve_database_url, seed_on_boot
 
 
-def _handle_service_error(error: ServiceError) -> None:
-    raise HTTPException(status_code=error.status_code, detail=str(error)) from error
-
-
-def _require_user_id(x_user_id: Optional[int]) -> int:
-    if x_user_id is None:
-        raise HTTPException(status_code=400, detail="X-User-Id header is required.")
-    return x_user_id
-
-
 def create_app(
-    database_url: Optional[Union[str, Path]] = None,
-    content_root: Optional[Union[str, Path]] = None,
+    database_url: str | Path | None = None,
+    content_root: str | Path | None = None,
 ) -> FastAPI:
+    explicit_database_url = None
+    if database_url is not None:
+        cleaned_database_url = str(database_url).strip()
+        if cleaned_database_url:
+            explicit_database_url = cleaned_database_url
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        initialize_database(app.state.database_url)
-        if seed_on_boot():
-            with get_connection(app.state.database_url) as connection:
+        resolved_database_url = resolve_database_url(app.state.database_url_input)
+        app.state.database_url = resolved_database_url
+        initialize_database(resolved_database_url)
+        with get_connection(resolved_database_url) as connection:
+            bootstrap_admin_from_environment(connection)
+            if seed_on_boot():
                 sync_seed_content(connection, app.state.content_root)
         yield
 
     app = FastAPI(title="Learning App API", lifespan=lifespan)
-    app.state.database_url = resolve_database_url(database_url)
+    app.state.database_url_input = explicit_database_url
+    app.state.database_url = explicit_database_url
     app.state.content_root = Path(content_root).resolve() if content_root else CONTENT_DIR
+    app.add_exception_handler(ServiceError, service_error_response)
 
     allowed_origins = cors_origins()
     if allowed_origins:
@@ -84,165 +50,8 @@ def create_app(
             allow_headers=["*"],
         )
 
-    @app.get("/api/health")
-    def health() -> dict[str, str]:
-        return {"status": "ok"}
-
-    @app.get("/api/modules/tree", response_model=list[ModuleNodeOut])
-    def modules_tree() -> list[dict]:
-        with get_connection(app.state.database_url) as connection:
-            return get_module_tree(connection)
-
-    @app.get("/api/users", response_model=list[UserOut])
-    def users_list() -> list[dict]:
-        with get_connection(app.state.database_url) as connection:
-            try:
-                return list_users(connection)
-            except ServiceError as error:
-                _handle_service_error(error)
-
-    @app.post("/api/users", response_model=UserOut)
-    def users_create(payload: UserCreateIn) -> dict:
-        with get_connection(app.state.database_url) as connection:
-            try:
-                return create_user(connection, handle=payload.handle, display_name=payload.display_name)
-            except ServiceError as error:
-                _handle_service_error(error)
-
-    @app.post("/api/modules", response_model=ModuleNodeOut)
-    def modules_create(payload: CreateModuleIn) -> dict:
-        with get_connection(app.state.database_url) as connection:
-            try:
-                module = create_module(
-                    connection,
-                    title=payload.title,
-                    parent_id=payload.parent_id,
-                    instruction=payload.instruction,
-                )
-            except ServiceError as error:
-                _handle_service_error(error)
-            tree = get_module_tree(connection)
-            stack = list(tree)
-            while stack:
-                node = stack.pop()
-                if node["id"] == module["id"]:
-                    return node
-                stack.extend(node["children"])
-        raise HTTPException(status_code=500, detail="Module creation did not return a created node.")
-
-    @app.post("/api/quiz-sessions", response_model=QuizSessionOut)
-    def quiz_sessions_create(
-        payload: QuizSessionCreateIn,
-        x_user_id: Optional[int] = Header(default=None, alias="X-User-Id"),
-    ) -> dict:
-        with get_connection(app.state.database_url) as connection:
-            try:
-                return create_quiz_session(
-                    connection,
-                    user_id=_require_user_id(x_user_id),
-                    module_id=payload.module_id,
-                    count=payload.count,
-                )
-            except ServiceError as error:
-                _handle_service_error(error)
-
-    @app.post("/api/quiz-sessions/{session_id}/items/{item_id}/submit", response_model=SubmitAnswerOut)
-    def quiz_sessions_submit(
-        session_id: int,
-        item_id: int,
-        payload: SubmitAnswerIn,
-        x_user_id: Optional[int] = Header(default=None, alias="X-User-Id"),
-    ) -> dict:
-        with get_connection(app.state.database_url) as connection:
-            try:
-                return submit_answer(
-                    connection,
-                    user_id=_require_user_id(x_user_id),
-                    session_id=session_id,
-                    item_id=item_id,
-                    answers=payload.answers,
-                )
-            except ServiceError as error:
-                _handle_service_error(error)
-
-    @app.get("/api/stats", response_model=StatsResponseOut)
-    def stats(
-        module_id: Optional[int] = None,
-        review_only: bool = Query(default=False),
-        x_user_id: Optional[int] = Header(default=None, alias="X-User-Id"),
-    ) -> dict:
-        with get_connection(app.state.database_url) as connection:
-            try:
-                return get_stats(
-                    connection,
-                    user_id=_require_user_id(x_user_id),
-                    module_id=module_id,
-                    review_only=review_only,
-                )
-            except ServiceError as error:
-                _handle_service_error(error)
-
-    @app.post("/api/questions", response_model=QuestionMutationOut)
-    def questions_create(
-        payload: QuestionDraftIn,
-        x_user_id: Optional[int] = Header(default=None, alias="X-User-Id"),
-    ) -> dict:
-        with get_connection(app.state.database_url) as connection:
-            try:
-                return create_question(connection, payload, user_id=x_user_id)
-            except ServiceError as error:
-                _handle_service_error(error)
-
-    @app.post("/api/questions/{question_id}/revisions", response_model=QuestionMutationOut)
-    def questions_revise(question_id: int, payload: QuestionRevisionIn) -> dict:
-        with get_connection(app.state.database_url) as connection:
-            try:
-                draft = QuestionDraftIn(**payload.model_dump(exclude={"reset_stats"}))
-                return revise_question(connection, question_id, draft, reset_stats=payload.reset_stats)
-            except ServiceError as error:
-                _handle_service_error(error)
-
-    @app.patch("/api/questions/{question_id}/review-flag", response_model=QuestionReviewFlagOut)
-    def questions_review_flag(
-        question_id: int,
-        payload: QuestionReviewFlagIn,
-        x_user_id: Optional[int] = Header(default=None, alias="X-User-Id"),
-    ) -> dict:
-        with get_connection(app.state.database_url) as connection:
-            try:
-                return set_question_review_flag(
-                    connection,
-                    user_id=_require_user_id(x_user_id),
-                    question_id=question_id,
-                    review_flag=payload.review_flag,
-                )
-            except ServiceError as error:
-                _handle_service_error(error)
-
-    @app.post("/api/question-imports/validate", response_model=QuestionImportResultOut)
-    def question_imports_validate(payload: ValidateQuestionImportIn) -> dict:
-        with get_connection(app.state.database_url) as connection:
-            try:
-                return validate_question_import(
-                    connection,
-                    module_id=payload.module_id,
-                    qml_text=payload.qml_text,
-                    rows=[row.model_dump() for row in payload.rows] if payload.rows else None,
-                )
-            except ServiceError as error:
-                _handle_service_error(error)
-
-    @app.post("/api/question-imports/commit", response_model=QuestionImportResultOut)
-    def question_imports_commit(payload: CommitQuestionImportIn) -> dict:
-        with get_connection(app.state.database_url) as connection:
-            try:
-                return commit_question_import(
-                    connection,
-                    module_id=payload.module_id,
-                    rows=[row.model_dump() for row in payload.rows],
-                )
-            except ServiceError as error:
-                _handle_service_error(error)
+    for router in ALL_ROUTERS:
+        app.include_router(router)
 
     assets_dir = FRONTEND_DIST_DIR / "assets"
     if assets_dir.exists():

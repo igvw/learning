@@ -1,0 +1,351 @@
+import json
+import random
+from typing import Any
+
+from ..database import DatabaseConnection, execute_insert_returning_id, utc_now
+from .auth import Actor
+from .bundles import resolved_bundle_question_runtime
+from .catalog import ensure_user_exists, get_scope_module_ids
+from .errors import NotFoundError, ValidationError
+from .questions import accepted_answer_groups, canonical_answers, default_answers, public_type_config, resolved_runtime, score_possible
+from .text import json_dumps, normalize_text
+from .schedule import (
+    _bucketed_question_selection,
+    _eligible_quiz_candidates,
+    _latest_scored_session_id,
+    _question_attempt_history,
+    _question_stats_by_question,
+    _randomize_quiz_order,
+    _review_flags_by_question,
+    _schedule_snapshot_from_attempts,
+)
+from .visibility import list_effective_question_rows
+
+
+def create_quiz_session(
+    connection: DatabaseConnection,
+    *,
+    user_id: int,
+    module_id: int | None,
+    count: int,
+    actor: Actor | None = None,
+    rng: random.Random | None = None,
+) -> dict[str, Any]:
+    ensure_user_exists(connection, user_id)
+    scope_module_ids = get_scope_module_ids(connection, module_id, actor=actor)
+    candidate_rows = list_effective_question_rows(connection, actor=actor, scope_module_ids=scope_module_ids)
+
+    question_ids = [row["question_id"] for row in candidate_rows]
+    review_flags = _review_flags_by_question(connection, user_id=user_id, question_ids=question_ids)
+    stats_by_question = _question_stats_by_question(connection, user_id=user_id, question_ids=question_ids)
+    history_by_question = _question_attempt_history(connection, user_id=user_id, question_ids=question_ids)
+    latest_scored_session_id = _latest_scored_session_id(connection, user_id=user_id)
+    now = utc_now()
+    scheduled_candidates: list[dict[str, Any]] = []
+    for row in candidate_rows:
+        stats = stats_by_question.get(
+            row["question_id"],
+            {"attempts_count": 0, "correct_count": 0.0, "incorrect_count": 0.0, "last_asked_at": None},
+        )
+        schedule = _schedule_snapshot_from_attempts(
+            history_by_question.get(row["question_id"], []),
+            now=now,
+            latest_scored_session_id=latest_scored_session_id,
+        )
+        scheduled_candidates.append(
+            {
+                **dict(row),
+                **stats,
+                **schedule,
+                "latest_scored_session_id": latest_scored_session_id,
+                "review_flag": review_flags.get(row["question_id"], False),
+            }
+        )
+
+    eligible_candidates = _eligible_quiz_candidates(scheduled_candidates)
+    if scheduled_candidates and not eligible_candidates:
+        raise ValidationError("All questions in this scope are currently flagged for review.")
+
+    chosen_rows = _bucketed_question_selection(
+        eligible_candidates,
+        count=min(count, len(eligible_candidates)),
+        now=now,
+    )
+    chosen_rows = _randomize_quiz_order(chosen_rows, rng=rng)
+    session_id = execute_insert_returning_id(
+        connection,
+        """
+        INSERT INTO quiz_sessions (user_id, module_id, created_at)
+        VALUES (?, ?, ?)
+        """,
+        (user_id, module_id, now),
+    )
+
+    items: list[dict[str, Any]] = []
+    for index, row in enumerate(chosen_rows, start=1):
+        runtime_question_type = row["question_type"]
+        bundle_variant_id = None
+        if row["question_type"] == "bundle":
+            bundle_variant_id, resolved_prompt, resolved_type_config = resolved_bundle_question_runtime(
+                connection=connection,
+                question_id=row["question_id"],
+                prompt=row["prompt"],
+                rng=rng or random.Random(),
+            )
+            runtime_question_type = "single_text"
+        else:
+            resolved_prompt, resolved_type_config = resolved_runtime(
+                row["question_type"],
+                row["prompt"],
+                row["type_config"],
+                rng=rng,
+            )
+        connection.execute(
+            """
+            INSERT INTO quiz_session_items (
+                session_id,
+                question_id,
+                bundle_variant_id,
+                score_earned,
+                score_possible,
+                resolved_prompt,
+                resolved_type_config_json
+            )
+            VALUES (?, ?, ?, NULL, ?, ?, ?)
+            """,
+            (
+                session_id,
+                row["question_id"],
+                bundle_variant_id,
+                score_possible(resolved_type_config),
+                resolved_prompt,
+                json_dumps({**resolved_type_config, "__question_type__": runtime_question_type}),
+            ),
+        )
+        items.append(
+            {
+                "id": row["question_id"],
+                "position": index,
+                "question_id": row["question_id"],
+                "module_id": row["module_id"],
+                "module_instruction": row["module_instruction"] or "",
+                "review_flag": bool(row["review_flag"]),
+                "prompt": resolved_prompt,
+                "question_type": runtime_question_type,
+                "rank": row["rank"],
+                "type_config": public_type_config(runtime_question_type, resolved_type_config),
+                "admin_verified": bool(row["admin_verified"]),
+                "moderation_status": row["moderation_status"],
+                "created_by_user_id": row["created_by_user_id"],
+                "creator_display_name": row["creator_display_name"],
+                "submitted_answer": None,
+                "is_correct": None,
+                "score_earned": None,
+                "score_possible": score_possible(resolved_type_config),
+            }
+        )
+
+    return {
+        "id": session_id,
+        "module_id": module_id,
+        "completed_at": None,
+        "items": items,
+    }
+
+
+def _unordered_multi_alignment(expected_groups: list[list[str]], normalized_inputs: list[str]) -> list[int | None]:
+    normalized_expected_groups = [{normalize_text(answer) for answer in group} for group in expected_groups]
+    padded_inputs = normalized_inputs[: len(expected_groups)] + [""] * max(0, len(expected_groups) - len(normalized_inputs))
+
+    def match_slots(input_index: int, remaining_indices: list[int]) -> list[int | None]:
+        if input_index >= len(padded_inputs):
+            return []
+
+        best_match = [None, *match_slots(input_index + 1, remaining_indices)]
+        best_score = sum(1 for value in best_match if value is not None)
+        submitted = padded_inputs[input_index]
+        for expected_index in remaining_indices:
+            if submitted in normalized_expected_groups[expected_index]:
+                next_remaining = [value for value in remaining_indices if value != expected_index]
+                candidate = [expected_index, *match_slots(input_index + 1, next_remaining)]
+                candidate_score = sum(1 for value in candidate if value is not None)
+                if candidate_score > best_score:
+                    best_match = candidate
+                    best_score = candidate_score
+        return best_match
+
+    return match_slots(0, list(range(len(normalized_expected_groups))))
+
+
+def evaluate_answers(
+    question_type: str,
+    type_config: dict[str, Any],
+    answers: list[str],
+) -> tuple[bool, float, float, list[dict[str, Any]], list[bool]]:
+    normalized_inputs = [normalize_text(answer) for answer in answers]
+    expected_groups = type_config.get("accepted_answers", [])
+    possible_score = float(score_possible(type_config))
+    slot_total = max(len(expected_groups), 1)
+
+    if question_type == "multi_text":
+        aligned_expected_indices = _unordered_multi_alignment(expected_groups, normalized_inputs)
+        used_expected_indices = {value for value in aligned_expected_indices if value is not None}
+        remaining_expected_indices = [index for index in range(len(expected_groups)) if index not in used_expected_indices]
+        slot_results = []
+        matched_default_answers = []
+        for index, matched_expected_index in enumerate(aligned_expected_indices):
+            if matched_expected_index is not None:
+                expected_text = " / ".join(expected_groups[matched_expected_index])
+                matches_default = normalized_inputs[index] == normalize_text(expected_groups[matched_expected_index][0])
+            elif remaining_expected_indices:
+                expected_text = " / ".join(expected_groups[remaining_expected_indices.pop(0)])
+                matches_default = False
+            elif expected_groups:
+                expected_text = " / ".join(expected_groups[min(index, len(expected_groups) - 1)])
+                matches_default = False
+            else:
+                expected_text = ""
+                matches_default = False
+            slot_results.append(
+                {
+                    "index": index,
+                    "is_correct": matched_expected_index is not None,
+                    "expected": expected_text,
+                }
+            )
+            matched_default_answers.append(matched_expected_index is not None and matches_default)
+        earned_score = len(used_expected_indices) / slot_total
+        return earned_score == possible_score, earned_score, possible_score, slot_results, matched_default_answers
+
+    slot_results = []
+    matched_default_answers = []
+    all_correct = True
+    correct_slots = 0
+    for index, expected_group in enumerate(expected_groups):
+        submitted = normalized_inputs[index] if index < len(normalized_inputs) else ""
+        expected_normalized = {normalize_text(answer) for answer in expected_group}
+        is_correct = submitted in expected_normalized
+        slot_results.append({"index": index, "is_correct": is_correct, "expected": " / ".join(expected_group)})
+        matched_default_answers.append(is_correct and bool(expected_group) and submitted == normalize_text(expected_group[0]))
+        all_correct = all_correct and is_correct
+        if is_correct:
+            correct_slots += 1
+
+    earned_score = correct_slots / slot_total
+    if question_type == "single_text" and len(expected_groups) == 1:
+        return slot_results[0]["is_correct"], earned_score, possible_score, slot_results, matched_default_answers
+    return all_correct, earned_score, possible_score, slot_results, matched_default_answers
+
+
+def submit_answer(
+    connection: DatabaseConnection,
+    *,
+    user_id: int,
+    session_id: int,
+    item_id: int,
+    answers: list[str],
+) -> dict[str, Any]:
+    ensure_user_exists(connection, user_id)
+    row = connection.execute(
+        """
+        SELECT
+            qsi.question_id,
+            qsi.bundle_variant_id,
+            qsi.score_earned,
+            qsi.score_possible,
+            qsi.resolved_prompt,
+            qsi.resolved_type_config_json,
+            q.question_type,
+            q.prompt,
+            q.module_id,
+            q.type_config_json
+        FROM quiz_session_items AS qsi
+        JOIN quiz_sessions AS qs ON qs.id = qsi.session_id
+        JOIN questions AS q ON q.id = qsi.question_id
+        WHERE qsi.session_id = ? AND qsi.question_id = ? AND qs.user_id = ?
+        """,
+        (session_id, item_id, user_id),
+    ).fetchone()
+    if row is None:
+        raise NotFoundError("Quiz session item was not found.")
+    if row["score_earned"] is not None:
+        raise ValidationError("Quiz session item has already been answered.")
+
+    resolved_type_config = json.loads(row["resolved_type_config_json"] or row["type_config_json"])
+    question_type = resolved_type_config.pop("__question_type__", row["question_type"])
+    is_correct, earned_score, possible_score_value, slot_results, matched_default_answers = evaluate_answers(
+        question_type, resolved_type_config, answers
+    )
+    answered_at = utc_now()
+    connection.execute(
+        """
+        UPDATE quiz_session_items
+        SET score_earned = ?, score_possible = ?, submitted_answer_json = ?
+        WHERE session_id = ? AND question_id = ?
+        """,
+        (earned_score, possible_score_value, json_dumps(answers), session_id, item_id),
+    )
+    connection.execute(
+        """
+        INSERT INTO attempts (
+            session_id,
+            user_id,
+            question_id,
+            module_id,
+            bundle_variant_id,
+            score_earned,
+            score_possible,
+            submitted_answer_json,
+            answered_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (session_id, question_id) DO UPDATE
+        SET
+            module_id = EXCLUDED.module_id,
+            bundle_variant_id = EXCLUDED.bundle_variant_id,
+            score_earned = EXCLUDED.score_earned,
+            score_possible = EXCLUDED.score_possible,
+            submitted_answer_json = EXCLUDED.submitted_answer_json,
+            answered_at = EXCLUDED.answered_at
+        """,
+        (
+            session_id,
+            user_id,
+            row["question_id"],
+            row["module_id"],
+            row["bundle_variant_id"],
+            earned_score,
+            possible_score_value,
+            json_dumps(answers),
+            answered_at,
+        ),
+    )
+
+    pending = connection.execute(
+        """
+        SELECT COUNT(*) AS pending_count
+        FROM quiz_session_items
+        WHERE session_id = ? AND score_earned IS NULL
+        """,
+        (session_id,),
+    ).fetchone()["pending_count"]
+    session_completed = pending == 0
+    if session_completed:
+        connection.execute(
+            "UPDATE quiz_sessions SET completed_at = COALESCE(completed_at, ?) WHERE id = ?",
+            (answered_at, session_id),
+        )
+
+    return {
+        "item_id": item_id,
+        "is_correct": is_correct,
+        "score_earned": earned_score,
+        "score_possible": possible_score_value,
+        "slot_results": slot_results,
+        "canonical_answers": canonical_answers(resolved_type_config),
+        "default_answers": default_answers(resolved_type_config),
+        "accepted_answer_groups": accepted_answer_groups(resolved_type_config),
+        "matched_default_answers": matched_default_answers,
+        "session_completed": session_completed,
+        "submitted_answer": answers,
+    }
