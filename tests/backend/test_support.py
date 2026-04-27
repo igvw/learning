@@ -15,9 +15,6 @@ from backend.app.settings import auth_cookie_name
 from backend.app.settings import CONTENT_DIR, resolve_database_url
 
 
-APP_DATABASE_URL = resolve_database_url()
-
-
 def _database_name(database_url: str) -> str:
     return urlsplit(database_url).path.lstrip("/")
 
@@ -40,7 +37,22 @@ def _derive_test_database_url(app_database_url: str) -> str:
     return _replace_database_name(app_database_url, test_database_name)
 
 
-TEST_DATABASE_URL = os.environ.get("LEARNING_APP_TEST_DATABASE_URL") or _derive_test_database_url(APP_DATABASE_URL)
+def _derive_app_database_url(test_database_url: str) -> str:
+    database_name = _database_name(test_database_url)
+    app_database_name = database_name.removesuffix("_test") or database_name
+    return _replace_database_name(test_database_url, app_database_name)
+
+
+def _resolve_backend_test_database_urls() -> tuple[str, str]:
+    explicit_test_database_url = (os.environ.get("LEARNING_APP_TEST_DATABASE_URL") or "").strip()
+    if explicit_test_database_url:
+        return _derive_app_database_url(explicit_test_database_url), explicit_test_database_url
+
+    app_database_url = resolve_database_url()
+    return app_database_url, _derive_test_database_url(app_database_url)
+
+
+APP_DATABASE_URL, TEST_DATABASE_URL = _resolve_backend_test_database_urls()
 
 
 def validate_test_database_url(test_database_url: str, app_database_url: str) -> None:
