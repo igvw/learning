@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from ...database import DatabaseConnection
 from ...schemas import CreateModuleIn, ModuleNodeOut, UpdateModuleIn
-from ...services import Actor, create_module, export_verified_content_archive, get_module_tree, update_module
+from ...services import Actor, create_module, delete_module, export_verified_content_archive, get_module_tree, update_module
 from ..dependencies import database_connection, require_actor, require_admin_actor
 
 
@@ -64,6 +64,16 @@ def modules_update(
     if updated_node is not None:
         return updated_node
     raise HTTPException(status_code=500, detail="Module update did not return an updated node.")
+
+
+@router.delete("/api/modules/{module_id}", status_code=status.HTTP_204_NO_CONTENT)
+def modules_delete(
+    module_id: int,
+    _: Actor = Depends(require_admin_actor),
+    connection: DatabaseConnection = Depends(database_connection),
+) -> Response:
+    delete_module(connection, module_id=module_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/api/modules/export")

@@ -23,7 +23,15 @@ from .service.authoring import (
     set_question_review_flag,
     sync_seed_content,
 )
-from .service.catalog import create_module, create_user, export_verified_content_archive, get_module_tree, list_users, update_module
+from .service.catalog import (
+    create_module,
+    create_user,
+    delete_module,
+    export_verified_content_archive,
+    get_module_tree,
+    list_users,
+    update_module,
+)
 from .service.errors import NotFoundError, ServiceError, ValidationError
 from .service.imports import commit_question_import, validate_question_import
 from .service.moderation import (
@@ -52,6 +60,7 @@ __all__ = [
     "create_question",
     "create_quiz_session",
     "create_user",
+    "delete_module",
     "delete_rejected_module_submission",
     "delete_question",
     "export_verified_content_archive",

@@ -9,7 +9,7 @@ from .authoring import (
     delete_question_record,
     ensure_unique_question_prompt,
 )
-from .catalog import ensure_unique_module_slug
+from .catalog import _delete_module_subtree, _module_subtree_rows, ensure_unique_module_slug
 from .errors import NotFoundError, ValidationError
 from .questions import bundle_qml_from_snapshot, bundle_qml_from_storage, draft_kwargs_from_snapshot
 from .text import title_from_slug
@@ -325,27 +325,21 @@ def delete_rejected_module_submission(connection: DatabaseConnection, *, module_
     if bool(row["admin_verified"]) or row["moderation_status"] != "rejected":
         raise ValidationError("Only rejected unverified modules can be deleted from moderation.")
 
-    subtree_rows = connection.execute(
-        """
-        WITH RECURSIVE module_tree AS (
-            SELECT id, parent_id, full_slug, admin_verified, moderation_status
-            FROM modules
-            WHERE id = ?
-            UNION ALL
-            SELECT child.id, child.parent_id, child.full_slug, child.admin_verified, child.moderation_status
-            FROM modules AS child
-            JOIN module_tree AS parent ON child.parent_id = parent.id
-        )
-        SELECT id, full_slug, admin_verified, moderation_status
-        FROM module_tree
-        ORDER BY full_slug ASC
+    subtree_rows = _module_subtree_rows(connection, module_id)
+    module_ids = [int(candidate["id"]) for candidate in subtree_rows]
+    placeholders = ", ".join("?" for _ in module_ids)
+    subtree_status_rows = connection.execute(
+        f"""
+        SELECT id, admin_verified, moderation_status
+        FROM modules
+        WHERE id IN ({placeholders})
         """,
-        (module_id,),
+        tuple(module_ids),
     ).fetchall()
     verified_descendant = next(
         (
             candidate
-            for candidate in subtree_rows
+            for candidate in subtree_status_rows
             if int(candidate["id"]) != module_id
             and (bool(candidate["admin_verified"]) or candidate["moderation_status"] == "verified")
         ),
@@ -356,11 +350,10 @@ def delete_rejected_module_submission(connection: DatabaseConnection, *, module_
             "Cannot delete a rejected module subtree that contains verified descendants."
         )
 
-    module_ids = [int(candidate["id"]) for candidate in subtree_rows]
-    placeholders = ", ".join("?" for _ in module_ids)
-    connection.execute(
-        f"DELETE FROM modules WHERE id IN ({placeholders})",
-        tuple(module_ids),
+    _delete_module_subtree(
+        connection,
+        module_id=module_id,
+        safety_message="Rejected module submissions with attempted questions or active quiz sessions cannot be deleted.",
     )
 
 

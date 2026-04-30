@@ -4,8 +4,6 @@
 
   export let session: QuizSession | null = null;
   export let moduleLabel = 'Selected Module';
-  export let moduleInstruction = '';
-  export let selectedModuleIsLeaf = false;
   export let questionCount = 10;
   export let busyItemId: number | null = null;
   export let markingReviewQuestionId: number | null = null;
@@ -259,13 +257,6 @@
     {/if}
   </div>
 
-  {#if selectedModuleIsLeaf && moduleInstruction}
-    <div class="panel instruction-panel">
-      <p class="eyebrow">Instruction</p>
-      <p>{moduleInstruction}</p>
-    </div>
-  {/if}
-
   {#if errorMessage}
     <div class="banner error">{errorMessage}</div>
   {/if}
@@ -301,10 +292,6 @@
             {/if}
 
             <div class="quiz-card-body">
-              {#if !selectedModuleIsLeaf && item.module_instruction}
-                <p class="eyebrow quiz-item-instruction">{item.module_instruction}</p>
-              {/if}
-
               <div class="quiz-card-prompt-row">
                 <div class="quiz-card-prompt-content">
                   {#if shouldShowPromptHeading(item)}

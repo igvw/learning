@@ -192,6 +192,12 @@ export function updateModule(moduleId: number, payload: UpdateModulePayload): Pr
   });
 }
 
+export function deleteModule(moduleId: number): Promise<void> {
+  return request<void>(`/api/modules/${moduleId}`, {
+    method: 'DELETE'
+  });
+}
+
 export async function exportContentArchive(): Promise<void> {
   const response = await fetch('/api/modules/export', {
     credentials: 'same-origin'

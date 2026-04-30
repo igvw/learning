@@ -1,6 +1,8 @@
 from io import BytesIO
 from zipfile import ZipFile
 
+from backend.app.database import get_connection
+
 from test_support import PostgresBackendTestCase
 
 
@@ -179,6 +181,76 @@ class ModuleApiTests(PostgresBackendTestCase):
         )
         self.assertEqual(rename_response.status_code, 400)
         self.assertEqual(rename_response.json()["detail"], "Only leaf modules can be renamed.")
+
+    def test_admin_can_delete_empty_module(self) -> None:
+        norwegian = self.create_module_record("Norwegian")
+
+        delete_response = self.client.delete(f"/api/modules/{norwegian['id']}", headers=self.admin_headers)
+
+        self.assertEqual(delete_response.status_code, 204)
+        tree_response = self.client.get("/api/modules/tree", headers=self.admin_headers)
+        self.assertEqual(tree_response.status_code, 200)
+        self.assertNotIn(norwegian["id"], {node["id"] for node in tree_response.json()})
+
+    def test_admin_can_delete_unattempted_module_subtree_with_questions(self) -> None:
+        norwegian = self.create_module_record("Norwegian")
+        vocabulary = self.create_module_record("Vocabulary", norwegian["id"])
+        nouns = self.create_module_record("Nouns", vocabulary["id"])
+        question_id = self.create_question_record(nouns["id"], "hund", [["dog"]])["question_id"]
+
+        delete_response = self.client.delete(f"/api/modules/{vocabulary['id']}", headers=self.admin_headers)
+
+        self.assertEqual(delete_response.status_code, 204)
+        with get_connection(self.database_url) as connection:
+            remaining_modules = connection.execute(
+                "SELECT id FROM modules WHERE id IN (?, ?)",
+                (vocabulary["id"], nouns["id"]),
+            ).fetchall()
+            remaining_question = connection.execute(
+                "SELECT id FROM questions WHERE id = ?",
+                (question_id,),
+            ).fetchone()
+        self.assertEqual(remaining_modules, [])
+        self.assertIsNone(remaining_question)
+
+    def test_module_delete_rejects_attempted_questions(self) -> None:
+        norwegian = self.create_module_record("Norwegian")
+        question_id = self.create_question_record(norwegian["id"], "hund", [["dog"]])["question_id"]
+        user = self.create_user()
+        session = self.start_quiz_session(user["id"], norwegian["id"], 1)
+        item = next(item for item in session["items"] if item["question_id"] == question_id)
+        self.submit_quiz_item(user["id"], session["id"], item["id"], ["dog"])
+
+        delete_response = self.client.delete(f"/api/modules/{norwegian['id']}", headers=self.admin_headers)
+
+        self.assertEqual(delete_response.status_code, 400)
+        self.assertEqual(
+            delete_response.json()["detail"],
+            "Modules with attempted questions or active quiz sessions cannot be deleted.",
+        )
+
+    def test_module_delete_rejects_active_quiz_session_items(self) -> None:
+        norwegian = self.create_module_record("Norwegian")
+        self.create_question_record(norwegian["id"], "hund", [["dog"]])
+        user = self.create_user()
+        self.start_quiz_session(user["id"], norwegian["id"], 1)
+
+        delete_response = self.client.delete(f"/api/modules/{norwegian['id']}", headers=self.admin_headers)
+
+        self.assertEqual(delete_response.status_code, 400)
+        self.assertEqual(
+            delete_response.json()["detail"],
+            "Modules with attempted questions or active quiz sessions cannot be deleted.",
+        )
+
+    def test_module_delete_requires_admin(self) -> None:
+        norwegian = self.create_module_record("Norwegian")
+        user = self.create_user()
+
+        delete_response = self.client.delete(f"/api/modules/{norwegian['id']}", headers=self.user_headers(int(user["id"])))
+
+        self.assertEqual(delete_response.status_code, 403)
+        self.assertEqual(delete_response.json()["detail"], "Admin access is required.")
 
     def test_question_delete_removes_question_without_reordering_remaining_siblings(self) -> None:
         norwegian = self.create_module_record("Norwegian")

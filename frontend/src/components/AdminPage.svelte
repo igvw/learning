@@ -54,6 +54,9 @@
   export let onUpdateModule: (moduleId: number, payload: UpdateModulePayload) => Promise<ModuleNode> = async () => {
     throw new Error('Module update handler is not configured.');
   };
+  export let onDeleteModule: (moduleId: number) => Promise<void> = async () => {
+    throw new Error('Module delete handler is not configured.');
+  };
   export let onOpenImport: (moduleId: number) => void = () => {};
   export let onExportContent: () => Promise<void> = async () => {
     throw new Error('Content export handler is not configured.');
@@ -202,6 +205,7 @@
     selectedModuleId={selectedModuleId}
     onCreateModule={onCreateModule}
     onUpdateModule={onUpdateModule}
+    onDeleteModule={onDeleteModule}
     onOpenImport={onOpenImport}
     onExportContent={onExportContent}
   />
@@ -225,6 +229,7 @@
     selectedModuleId={selectedModuleId}
     onCreateModule={onCreateModule}
     onUpdateModule={onUpdateModule}
+    onDeleteModule={onDeleteModule}
     onOpenImport={onOpenImport}
     onExportContent={onExportContent}
   />

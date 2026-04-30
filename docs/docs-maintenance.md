@@ -25,7 +25,7 @@ This document defines the docs structure, ownership boundaries, and editing rule
 - `docs/question-markup.md`
   QML format reference.
 - `docs/question-markup-prompts/`
-  Short external-LLM prompt snippets for QML generation.
+  Short external-LLM prompts for generating question markup.
 - `docs/TODO.md` and `docs/roadmap.md`
   Planning and future work.
 

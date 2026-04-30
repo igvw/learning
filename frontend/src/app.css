@@ -379,11 +379,6 @@ kbd {
   min-width: 8rem;
 }
 
-.instruction-panel p:last-child,
-.quiz-item-instruction {
-  margin: 0;
-}
-
 .answer-input,
 textarea,
 select,

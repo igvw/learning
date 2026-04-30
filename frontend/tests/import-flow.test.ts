@@ -9,6 +9,7 @@ vi.mock('../src/lib/api', () => ({
   createQuestion: vi.fn(),
   createQuizSession: vi.fn(),
   createUser: vi.fn(),
+  deleteModule: vi.fn(),
   deleteQuestion: vi.fn(),
   getCurrentActor: vi.fn(),
   getHealth: vi.fn(),

@@ -204,9 +204,6 @@
                 <p class="muted-copy import-summary-note">Pending module</p>
               {/if}
             </div>
-            {#if moduleNode?.instruction}
-              <p class="muted-copy import-summary-copy">{moduleNode.instruction}</p>
-            {/if}
             {#if !isLeaf(moduleNode)}
               <p class="muted-copy import-summary-note">Select a leaf module before importing questions.</p>
             {/if}

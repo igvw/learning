@@ -1,4 +1,4 @@
-import type { QuestionRow } from '../types';
+import type { LogicalBucket, QuestionRow } from '../types';
 
 export type SortDirection = 'asc' | 'desc';
 export type SortKey = 'prompt' | 'bucket' | 'last_seen' | 'rank' | 'attempts' | 'correct_percentage';
@@ -18,37 +18,68 @@ export const sortDefinitions: SortDefinition[] = [
   { key: 'correct_percentage', label: 'Correct', defaultDirection: 'desc' }
 ];
 
-function bucketSortTuple(question: QuestionRow): [number, string] {
-  switch (question.schedule.logical_bucket) {
-    case '1h':
-      return [0, question.prompt_preview];
-    case '3h':
-      return [1, question.prompt_preview];
-    case '6h':
-      return [2, question.prompt_preview];
-    case '12h':
-      return [3, question.prompt_preview];
-    case '1d':
-      return [4, question.prompt_preview];
-    case '3d':
-      return [5, question.prompt_preview];
-    case '7d':
-      return [6, question.prompt_preview];
-    case '14d':
-      return [7, question.prompt_preview];
-    case '30d':
-      return [8, question.prompt_preview];
-    case '60d':
-      return [9, question.prompt_preview];
-    case 'unseen':
-      return [10, question.prompt_preview];
-    case 'mastery':
-      return [11, question.prompt_preview];
+export const visibleQuestionSortDefinitions = sortDefinitions.filter((definition) => definition.key !== 'bucket');
+
+export type QuestionBucketDefinition = {
+  key: LogicalBucket;
+  label: string;
+};
+
+export type QuestionBucketGroup = QuestionBucketDefinition & {
+  questions: QuestionRow[];
+};
+
+export const questionBucketDefinitions: QuestionBucketDefinition[] = [
+  { key: 'review', label: 'Review' },
+  { key: '1h', label: '1h' },
+  { key: '3h', label: '3h' },
+  { key: '6h', label: '6h' },
+  { key: '12h', label: '12h' },
+  { key: '1d', label: '1d' },
+  { key: '3d', label: '3d' },
+  { key: '7d', label: '7d' },
+  { key: '14d', label: '14d' },
+  { key: '30d', label: '30d' },
+  { key: '60d', label: '60d' },
+  { key: 'unseen', label: 'Unseen' },
+  { key: 'mastery', label: 'Mastery' }
+];
+
+function bucketOrder(logicalBucket: LogicalBucket): number {
+  switch (logicalBucket) {
     case 'review':
-      return [12, question.prompt_preview];
+      return 0;
+    case '1h':
+      return 1;
+    case '3h':
+      return 2;
+    case '6h':
+      return 3;
+    case '12h':
+      return 4;
+    case '1d':
+      return 5;
+    case '3d':
+      return 6;
+    case '7d':
+      return 7;
+    case '14d':
+      return 8;
+    case '30d':
+      return 9;
+    case '60d':
+      return 10;
+    case 'unseen':
+      return 11;
+    case 'mastery':
+      return 12;
     default:
-      return [99, question.prompt_preview];
+      return 99;
   }
+}
+
+function bucketSortTuple(question: QuestionRow): [number, string] {
+  return [bucketOrder(question.schedule.logical_bucket), question.prompt_preview];
 }
 
 function compareBucket(left: QuestionRow, right: QuestionRow): number {
@@ -111,4 +142,11 @@ export function sortQuestions(
     }
     return left.question_id - right.question_id;
   });
+}
+
+export function groupQuestionsByBucket(questions: QuestionRow[]): QuestionBucketGroup[] {
+  return questionBucketDefinitions.map((definition) => ({
+    ...definition,
+    questions: questions.filter((question) => question.schedule.logical_bucket === definition.key)
+  }));
 }

@@ -13,10 +13,16 @@ Admins see:
 
 - compact top-row summary cards for `Accounts`, `Modules`, `Import`, and `Export`
 - overlay-based account creation, role updates, and password reset
-- overlay-based global module editing
+- overlay-based global module editing, path-based creation, and safe module deletion
 - overlay-based manual full-content export
 - overlay-based QML import
 - moderation summary cards for pending modules, pending uploaded questions, and question revision/delete proposals
+
+Module management behavior:
+
+- `Module path` is a slash-separated full path with existing-path suggestions
+- existing path segments are reused automatically when creating missing descendants
+- module deletion is admin-only and is rejected when attempted or active quiz content depends on the subtree
 
 Moderation behavior:
 

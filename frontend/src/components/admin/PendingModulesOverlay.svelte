@@ -108,9 +108,6 @@
             <span class="muted-copy">{reviewBadge(module.moderation_status, module.admin_verified)}</span>
           </div>
           <p class="muted-copy">By {module.creator_display_name ?? 'Unknown'}.</p>
-          {#if module.instruction}
-            <p class="muted-copy">{module.instruction}</p>
-          {/if}
           {#if module.admin_review_note}
             <p class="muted-copy">{module.admin_review_note}</p>
           {/if}

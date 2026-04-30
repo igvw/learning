@@ -14,23 +14,28 @@
   export let onUpdateModule: (moduleId: number, payload: UpdateModulePayload) => Promise<ModuleNode> = async () => {
     throw new Error('Module update handler is not configured.');
   };
+  export let onDeleteModule: (moduleId: number) => Promise<void> = async () => {
+    throw new Error('Module delete handler is not configured.');
+  };
   export let onOpenImport: (moduleId: number) => void = () => {};
   export let onExportContent: () => Promise<void> = async () => {
     throw new Error('Content export handler is not configured.');
   };
 
   let createTitle = '';
-  let createParentId = '';
+  let createPathPickerOpen = false;
+  let createPathShell: HTMLElement | null = null;
   let importModuleId: number | string | null = null;
-  let createInstruction = '';
   let createSaving = false;
   let createError = '';
   let createSuccess = '';
   let editTitle = '';
-  let editInstruction = '';
   let editSaving = false;
   let editError = '';
   let editSuccess = '';
+  let deleteSaving = false;
+  let deleteError = '';
+  let deleteSuccess = '';
   let exportSaving = false;
   let exportError = '';
   let exportSuccess = '';
@@ -43,12 +48,12 @@
     try {
       const created = await onCreateModule({
         title: createTitle.trim(),
-        parent_id: createParentId ? Number(createParentId) : null,
-        instruction: createInstruction.trim()
+        parent_id: null,
+        instruction: ''
       });
       createSuccess = `${created.admin_verified ? 'Module ready' : 'Pending module ready'}: ${created.full_slug}.`;
       createTitle = '';
-      createInstruction = '';
+      createPathPickerOpen = false;
     } catch (error) {
       createError = error instanceof Error ? error.message : 'Unable to create this module.';
     } finally {
@@ -66,13 +71,39 @@
       }
       const updated = await onUpdateModule(selectedEditableLeafModule.id, {
         title: editTitle.trim(),
-        instruction: editInstruction.trim()
+        instruction: ''
       });
       editSuccess = `${updated.admin_verified ? 'Module ready' : 'Pending module updated'}: ${updated.full_slug}.`;
     } catch (error) {
       editError = error instanceof Error ? error.message : 'Unable to update this module.';
     } finally {
       editSaving = false;
+    }
+  }
+
+  async function handleDeleteModule(): Promise<void> {
+    deleteError = '';
+    deleteSuccess = '';
+    if (!selectedDeletableModule) {
+      deleteError = 'Select a module before deleting it.';
+      return;
+    }
+    const confirmed = window.confirm(
+      `Delete ${selectedDeletableModule.full_slug} and its unattempted descendants? This cannot be undone.`
+    );
+    if (!confirmed) {
+      return;
+    }
+    deleteSaving = true;
+    try {
+      const deletedPath = selectedDeletableModule.full_slug;
+      await onDeleteModule(selectedDeletableModule.id);
+      deleteSuccess = `Deleted module: ${deletedPath}.`;
+      editTitle = '';
+    } catch (error) {
+      deleteError = error instanceof Error ? error.message : 'Unable to delete this module.';
+    } finally {
+      deleteSaving = false;
     }
   }
 
@@ -98,13 +129,35 @@
     }
   }
 
-  $: editableParentModules = isAdmin
-    ? flatModules.filter((module) => !module.isLeaf)
-    : flatModules.filter((module) => !module.isLeaf && module.admin_verified);
+  function handleWindowPointerDown(event: PointerEvent): void {
+    if (!createPathPickerOpen || !createPathShell) {
+      return;
+    }
+    if (createPathShell.contains(event.target as Node)) {
+      return;
+    }
+    createPathPickerOpen = false;
+  }
+
+  function selectPathSuggestion(path: string): void {
+    createTitle = path;
+    createPathPickerOpen = false;
+  }
+
+  function filteredPathSuggestions(modules: FlatModule[], query: string): FlatModule[] {
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    if (!normalizedQuery) {
+      return modules;
+    }
+    return modules.filter((module) => module.full_slug.toLocaleLowerCase().includes(normalizedQuery));
+  }
+
   $: showModuleSection = mode === 'all' || mode === 'modules';
   $: showExportSection = isAdmin && (mode === 'all' || mode === 'export');
   $: showImportSection = isAdmin && (mode === 'all' || mode === 'import');
   $: selectedModule = flatModules.find((module) => module.id === selectedModuleId) ?? null;
+  $: selectedDeletableModule = isAdmin ? selectedModule : null;
+  $: pathSuggestions = filteredPathSuggestions(flatModules, createTitle);
   $: selectedEditableLeafModule =
     selectedModule?.isLeaf && (isAdmin || (!!currentActorId && !selectedModule.admin_verified && selectedModule.created_by_user_id === currentActorId))
       ? selectedModule
@@ -121,17 +174,18 @@
   }
   $: {
     const nextLeafSignature = selectedEditableLeafModule
-      ? `${selectedEditableLeafModule.id}:${selectedEditableLeafModule.title}:${selectedEditableLeafModule.instruction}`
+      ? `${selectedEditableLeafModule.id}:${selectedEditableLeafModule.title}`
       : '';
     if (nextLeafSignature !== syncedLeafSignature) {
       syncedLeafSignature = nextLeafSignature;
       editTitle = selectedEditableLeafModule?.title ?? '';
-      editInstruction = selectedEditableLeafModule?.instruction ?? '';
       editError = '';
       editSuccess = '';
     }
   }
 </script>
+
+<svelte:window on:pointerdown|capture={handleWindowPointerDown} />
 
 {#if showModuleSection}
   <article class="panel admin-bar-panel">
@@ -147,18 +201,27 @@
     {#if editSuccess}
       <div class="banner success">{editSuccess}</div>
     {/if}
+    {#if deleteError}
+      <div class="banner error">{deleteError}</div>
+    {/if}
+    {#if deleteSuccess}
+      <div class="banner success">{deleteSuccess}</div>
+    {/if}
 
     <div class="admin-bar-form module-bar-form">
       <div class="admin-wide-field">
-        <h4>{isAdmin ? 'Selected leaf module' : 'Selected editable pending leaf'}</h4>
-        {#if selectedEditableLeafModule}
+        <h4>{isAdmin ? 'Selected module' : 'Selected editable pending leaf'}</h4>
+        {#if selectedModule}
           <p class="muted-copy">
-            Current path: <code>{selectedEditableLeafModule.full_slug}</code>
+            Current path: <code>{selectedModule.full_slug}</code>
           </p>
+          {#if !selectedEditableLeafModule}
+            <p class="muted-copy">Only leaf modules can be renamed.</p>
+          {/if}
         {:else}
           <p class="muted-copy">
             {isAdmin
-              ? 'Select a leaf module from the menu before renaming it.'
+              ? 'Select a module from the menu before renaming or deleting it.'
               : 'Select one of your own pending leaf modules from the menu before renaming it.'}
           </p>
         {/if}
@@ -169,15 +232,20 @@
         <input type="text" bind:value={editTitle} disabled={!selectedEditableLeafModule || editSaving} />
       </label>
 
-      <label class="field admin-wide-field">
-        <span>Instruction</span>
-        <textarea rows="4" bind:value={editInstruction} disabled={!selectedEditableLeafModule || editSaving}></textarea>
-      </label>
-
-      <div class="admin-action-slot">
+      <div class="admin-action-slot module-action-buttons">
         <button class="primary-button" type="button" disabled={!selectedEditableLeafModule || editSaving} on:click={() => void handleUpdateModule()}>
           {editSaving ? 'Saving...' : 'Save Module'}
         </button>
+        {#if isAdmin}
+          <button
+            class="danger-button"
+            type="button"
+            disabled={!selectedDeletableModule || deleteSaving}
+            on:click={() => void handleDeleteModule()}
+          >
+            {deleteSaving ? 'Deleting...' : 'Delete Module'}
+          </button>
+        {/if}
       </div>
     </div>
 
@@ -192,22 +260,47 @@
       <div class="admin-wide-field">
         <h4>{isAdmin ? 'Create module' : 'Create pending leaf module'}</h4>
       </div>
-      <label class="field">
+      <label class="field module-path-create-field" bind:this={createPathShell}>
         <span>Module path</span>
-        <input type="text" bind:value={createTitle} placeholder="norwegian/vocabulary/nouns_to_english" />
-      </label>
-      <label class="field">
-        <span>Parent module</span>
-        <select bind:value={createParentId}>
-          <option value="">Top level</option>
-          {#each editableParentModules as module}
-            <option value={module.id}>{'\u00A0'.repeat(module.depth * 2)}{module.full_slug}</option>
-          {/each}
-        </select>
-      </label>
-      <label class="field admin-wide-field">
-        <span>Instruction</span>
-        <textarea rows="4" bind:value={createInstruction}></textarea>
+        <input
+          type="text"
+          bind:value={createTitle}
+          placeholder="norwegian/vocabulary/nouns_to_english"
+          autocomplete="off"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded={createPathPickerOpen}
+          aria-controls="module-path-suggestions"
+          on:focus={() => {
+            createPathPickerOpen = true;
+          }}
+          on:input={() => {
+            createPathPickerOpen = true;
+          }}
+        />
+        {#if createPathPickerOpen}
+          <div class="module-path-suggestions" id="module-path-suggestions" role="listbox" aria-label="Existing module paths">
+            {#if pathSuggestions.length === 0}
+              <p class="muted-copy module-path-empty">No matching module paths yet.</p>
+            {:else}
+              {#each pathSuggestions as module (module.id)}
+                <button
+                  type="button"
+                  class="module-path-suggestion"
+                  role="option"
+                  aria-selected={module.full_slug === createTitle}
+                  on:mousedown|preventDefault={() => selectPathSuggestion(module.full_slug)}
+                >
+                  <span>{module.full_slug}</span>
+                  {#if !module.admin_verified}
+                    <span class="inline-status-chip">Pending</span>
+                  {/if}
+                </button>
+              {/each}
+            {/if}
+          </div>
+        {/if}
+        <p class="muted-copy module-path-help">Use a slash-separated full path. Existing segments are reused automatically.</p>
       </label>
       <div class="admin-action-slot">
         <button class="primary-button" type="button" disabled={createSaving} on:click={() => void handleCreateModule()}>

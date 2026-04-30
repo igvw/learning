@@ -1,6 +1,6 @@
 import { render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import AdminPage from '../src/components/AdminPage.svelte';
 import type { ModuleNode } from '../src/lib/types';
@@ -12,6 +12,10 @@ import {
 } from './builders';
 
 describe('AdminPage', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('creates users from admin, updates the selected leaf module, creates a module, and offers leaf-module import', async () => {
     const user = userEvent.setup();
     const createUserSpy = vi.fn().mockResolvedValue({
@@ -24,10 +28,9 @@ describe('AdminPage', () => {
     const createSpy = vi.fn().mockResolvedValue(
       buildModuleNode({
         id: 8,
-        title: 'Norwegian',
-        slug: 'norwegian',
-        full_slug: 'norwegian',
-        instruction: 'Translate the Norwegian term into English.'
+        title: 'New Leaf',
+        slug: 'new_leaf',
+        full_slug: 'nursing/vocabulary/new_leaf'
       })
     );
     const updateSpy = vi.fn().mockResolvedValue(
@@ -47,6 +50,8 @@ describe('AdminPage', () => {
       created_at: '2026-04-05T10:00:00Z'
     });
     const updatePasswordSpy = vi.fn().mockResolvedValue(undefined);
+    const deleteSpy = vi.fn().mockResolvedValue(undefined);
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     const openImportSpy = vi.fn();
     const exportContentSpy = vi.fn().mockResolvedValue(undefined);
     const modules: ModuleNode[] = [
@@ -86,6 +91,7 @@ describe('AdminPage', () => {
         onUpdateUserPassword: updatePasswordSpy,
         onCreateModule: createSpy,
         onUpdateModule: updateSpy,
+        onDeleteModule: deleteSpy,
         onOpenImport: openImportSpy,
         onExportContent: exportContentSpy
       }
@@ -142,35 +148,46 @@ describe('AdminPage', () => {
     const modulesDialog = await screen.findByRole('dialog', { name: 'Modules' });
     expect(within(modulesDialog).getByRole('button', { name: 'Save Module' }).className).toContain('primary-button');
     expect(within(modulesDialog).getByRole('button', { name: 'Create Module' }).className).toContain('primary-button');
-    expect(within(modulesDialog).getByText('Selected leaf module')).toBeTruthy();
+    expect(within(modulesDialog).getByRole('button', { name: 'Delete Module' }).className).toContain('danger-button');
+    expect(within(modulesDialog).getByText('Selected module')).toBeTruthy();
     expect(within(modulesDialog).getByText('Create module')).toBeTruthy();
+    expect(within(modulesDialog).queryByLabelText('Parent module')).toBeNull();
+    expect(within(modulesDialog).queryByLabelText('Instruction')).toBeNull();
 
     const titleInput = within(modulesDialog).getByDisplayValue('Checks');
     await user.clear(titleInput);
     await user.type(titleInput, 'Safety Checks');
-    const editInstruction = within(modulesDialog).getByDisplayValue('List the safety checks in order.');
-    await user.clear(editInstruction);
-    await user.type(editInstruction, 'List each safety check before continuing.');
     await user.click(within(modulesDialog).getByRole('button', { name: 'Save Module' }));
 
     expect(updateSpy).toHaveBeenCalledWith(2, {
       title: 'Safety Checks',
-      instruction: 'List each safety check before continuing.'
+      instruction: ''
     });
     expect(await screen.findByText('Module ready: nursing/safety_checks.')).toBeTruthy();
 
-    await user.type(within(modulesDialog).getByPlaceholderText('norwegian/vocabulary/nouns_to_english'), 'Vocabulary');
-    await user.selectOptions(within(modulesDialog).getByLabelText('Parent module'), '1');
-    await user.type(within(modulesDialog).getAllByLabelText('Instruction')[1], 'Use the Norwegian term as the prompt.');
+    await user.click(within(modulesDialog).getByRole('button', { name: 'Delete Module' }));
+    expect(confirmSpy).toHaveBeenCalledWith(
+      'Delete nursing/checks and its unattempted descendants? This cannot be undone.'
+    );
+    expect(deleteSpy).toHaveBeenCalledWith(2);
+    expect(await screen.findByText('Deleted module: nursing/checks.')).toBeTruthy();
+
+    const modulePathInput = within(modulesDialog).getByPlaceholderText('norwegian/vocabulary/nouns_to_english') as HTMLInputElement;
+    await user.click(modulePathInput);
+    expect(within(modulesDialog).getByRole('option', { name: 'nursing/checks' })).toBeTruthy();
+    await user.click(within(modulesDialog).getByRole('option', { name: 'nursing' }));
+    expect(modulePathInput.value).toBe('nursing');
+    await user.clear(modulePathInput);
+    await user.type(modulePathInput, 'nursing/vocabulary/new_leaf');
     await user.click(within(modulesDialog).getByRole('button', { name: 'Create Module' }));
 
     expect(createSpy).toHaveBeenCalledWith({
-      title: 'Vocabulary',
-      parent_id: 1,
-      instruction: 'Use the Norwegian term as the prompt.'
+      title: 'nursing/vocabulary/new_leaf',
+      parent_id: null,
+      instruction: ''
     });
 
-    expect(await screen.findByText('Module ready: norwegian.')).toBeTruthy();
+    expect(await screen.findByText('Module ready: nursing/vocabulary/new_leaf.')).toBeTruthy();
 
     await user.click(within(modulesDialog).getByRole('button', { name: 'Close' }));
 
@@ -233,6 +250,11 @@ describe('AdminPage', () => {
     expect(screen.queryByRole('button', { name: /^Export/ })).toBeNull();
     expect(screen.getByRole('button', { name: /^Modules/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /^My contributions/ })).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: /^Modules/ }));
+    const modulesDialog = await screen.findByRole('dialog', { name: 'Pending modules' });
+    expect(within(modulesDialog).queryByRole('button', { name: 'Delete Module' })).toBeNull();
+    await user.click(within(modulesDialog).getByRole('button', { name: 'Close' }));
 
     await user.click(screen.getByRole('button', { name: /^My contributions/ }));
     const contributionsDialog = await screen.findByRole('dialog', { name: 'My contributions' });

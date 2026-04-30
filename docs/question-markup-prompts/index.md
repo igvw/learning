@@ -1,10 +1,10 @@
-# QML Prompt Snippets
+# Question Markup Prompts
 
-Short copy-pasteable prompts for external LLMs.
+Short copy-pasteable prompts for asking an external LLM to generate question markup.
 
 Use:
 
-- [general.md](general.md) for the shared QML rules
+- [general.md](general.md) to generate a mix of question shapes
 - one type file for the exact shape you want:
   - [single_text.md](single_text.md)
   - [multi_text.md](multi_text.md)
@@ -12,4 +12,4 @@ Use:
   - [inline_cloze.md](inline_cloze.md)
   - [bundle.md](bundle.md)
 
-The plain-line types match the current syntax in [Question Markup DSL](../question-markup.md). The bundle prompt uses the revised top-level `{ ... }` block syntax from [QML Revised](../qml-revised.md).
+These prompts are written for external LLMs and should not require app or repo knowledge. The current internal format is documented in [Question Markup DSL](../question-markup.md), and bundle planning details live in [QML Revised](../qml-revised.md).

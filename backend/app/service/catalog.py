@@ -254,6 +254,88 @@ def update_module(
     }
 
 
+def _module_subtree_rows(connection: DatabaseConnection, module_id: int) -> list[Any]:
+    return connection.execute(
+        """
+        WITH RECURSIVE module_tree AS (
+            SELECT id, parent_id, full_slug
+            FROM modules
+            WHERE id = ?
+            UNION ALL
+            SELECT child.id, child.parent_id, child.full_slug
+            FROM modules AS child
+            JOIN module_tree AS parent ON child.parent_id = parent.id
+        )
+        SELECT id, full_slug
+        FROM module_tree
+        ORDER BY full_slug ASC
+        """,
+        (module_id,),
+    ).fetchall()
+
+
+def _delete_module_subtree(
+    connection: DatabaseConnection,
+    *,
+    module_id: int,
+    safety_message: str,
+) -> None:
+    subtree_rows = _module_subtree_rows(connection, module_id)
+    if not subtree_rows:
+        raise NotFoundError(f"Module {module_id} was not found.")
+
+    module_ids = [int(row["id"]) for row in subtree_rows]
+    placeholders = ", ".join("?" for _ in module_ids)
+    question_rows = connection.execute(
+        f"""
+        SELECT id
+        FROM questions
+        WHERE module_id IN ({placeholders})
+        """,
+        tuple(module_ids),
+    ).fetchall()
+    question_ids = [int(row["id"]) for row in question_rows]
+    if question_ids:
+        question_placeholders = ", ".join("?" for _ in question_ids)
+        attempt_count = connection.execute(
+            f"""
+            SELECT COUNT(*) AS attempt_count
+            FROM attempts
+            WHERE question_id IN ({question_placeholders})
+            """,
+            tuple(question_ids),
+        ).fetchone()["attempt_count"]
+        if attempt_count:
+            raise ValidationError(safety_message)
+
+        active_item_count = connection.execute(
+            f"""
+            SELECT COUNT(*) AS active_item_count
+            FROM quiz_session_items AS items
+            JOIN quiz_sessions AS sessions ON sessions.id = items.session_id
+            WHERE items.question_id IN ({question_placeholders})
+              AND sessions.completed_at IS NULL
+            """,
+            tuple(question_ids),
+        ).fetchone()["active_item_count"]
+        if active_item_count:
+            raise ValidationError(safety_message)
+
+    connection.execute(
+        f"DELETE FROM modules WHERE id IN ({placeholders})",
+        tuple(module_ids),
+    )
+
+
+def delete_module(connection: DatabaseConnection, *, module_id: int) -> None:
+    ensure_module_exists(connection, module_id)
+    _delete_module_subtree(
+        connection,
+        module_id=module_id,
+        safety_message="Modules with attempted questions or active quiz sessions cannot be deleted.",
+    )
+
+
 def get_module_tree(connection: DatabaseConnection, actor: Actor | None = None) -> list[dict[str, Any]]:
     rows = [row for row in _active_module_rows(connection) if _module_visible_to_actor(row, actor)]
 

@@ -17,7 +17,7 @@ See also:
 - [API](api.md)
 - [TODO](TODO.md)
 - [QML Revised](qml-revised.md)
-- [QML Prompt Snippets](question-markup-prompts/index.md)
+- [Question Markup Prompts](question-markup-prompts/index.md)
 
 ## File Shape
 

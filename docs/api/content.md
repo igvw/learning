@@ -60,6 +60,16 @@ Leaf-module rename behavior:
 - only the selected leaf segment is renamed
 - parent paths remain unchanged
 
+### `DELETE /api/modules/{module_id}`
+
+Admin-only. Hard-deletes a module subtree when it is safe to remove.
+
+Delete behavior:
+
+- deletes the selected module and descendant modules
+- deletes contained questions only when they have no attempts
+- rejects deletion when any contained question has attempts or is in an active quiz session
+
 ### `GET /api/modules/export`
 
 Admin-only. Downloads the full verified shared content tree as one zip archive.

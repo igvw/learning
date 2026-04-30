@@ -1,12 +1,10 @@
 <script lang="ts">
+  import StatsAllQuestionsOverlay from './StatsAllQuestionsOverlay.svelte';
+  import StatsQuestionTable from './StatsQuestionTable.svelte';
   import RetryEligibilityOverlay from './RetryEligibilityOverlay.svelte';
   import StageDueMatrixOverlay from './StageDueMatrixOverlay.svelte';
   import type { QuestionRow, StatsResponse } from '../lib/types';
-  import {
-    formatBucketLabel,
-    formatLastSeen,
-    formatScore
-  } from '../lib/stats/format';
+  import { formatScore } from '../lib/stats/format';
   import {
     buildAuxiliaryStageGraph,
     buildRecoveryStageGraph,
@@ -29,8 +27,9 @@
     emptyStageDueMatrixGraph,
   } from '../lib/stats/due-graphs';
   import {
+    groupQuestionsByBucket,
     sortDefinitions,
-    sortQuestions,
+    visibleQuestionSortDefinitions,
     type SortDirection,
     type SortKey
   } from '../lib/stats/table';
@@ -46,8 +45,11 @@
 
   let sortKey: SortKey | null = null;
   let sortDirection: SortDirection = 'asc';
+  let entryDetailOpen = false;
   let retryDetailOpen = false;
   let stageDetailOpen = false;
+  let expandedBuckets: Record<string, boolean> = {};
+  let bucketResetSignature = '';
 
   function handleSort(nextSortKey: SortKey): void {
     const definition = sortDefinitions.find((candidate) => candidate.key === nextSortKey);
@@ -62,15 +64,9 @@
     sortDirection = definition.defaultDirection;
   }
 
-  function sortIndicator(candidateKey: SortKey): string {
-    if (sortKey !== candidateKey) {
-      return '';
-    }
-    return sortDirection === 'asc' ? ' ↑' : ' ↓';
-  }
-
   function openRetryDetail(): void {
     stageDetailOpen = false;
+    entryDetailOpen = false;
     retryDetailOpen = true;
   }
 
@@ -83,6 +79,7 @@
 
   function openStageDetail(): void {
     retryDetailOpen = false;
+    entryDetailOpen = false;
     stageDetailOpen = true;
   }
 
@@ -93,10 +90,30 @@
     }
   }
 
+  function openEntryDetail(): void {
+    retryDetailOpen = false;
+    stageDetailOpen = false;
+    entryDetailOpen = true;
+  }
+
+  function handleEntryDetailKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      openEntryDetail();
+    }
+  }
+
+  function toggleBucket(bucketKey: string): void {
+    expandedBuckets = {
+      ...expandedBuckets,
+      [bucketKey]: !expandedBuckets[bucketKey]
+    };
+  }
+
   $: mainQuestions = stats ? stats.questions.filter((question) => !question.review_flag) : [];
   $: reviewQuestions = stats ? stats.questions.filter((question) => question.review_flag) : [];
   $: displayedQuestions = reviewOnly ? reviewQuestions : mainQuestions;
-  $: sortedDisplayedQuestions = sortQuestions(displayedQuestions, sortKey, sortDirection);
+  $: bucketGroups = groupQuestionsByBucket(displayedQuestions);
   $: emptyMessage = reviewOnly ? 'No review questions in this scope.' : 'No non-review questions in this scope.';
   $: sessionGraph = stats ? buildSessionGraph(stats.recent_sessions) : emptySessionGraph;
   $: recoveryStageGraph = stats ? buildRecoveryStageGraph(stats.questions) : emptyRecoveryStageGraph;
@@ -115,8 +132,18 @@
     ? buildStageDueMatrixGraph(stats.questions, new Date(), stats.schedule_timezone)
     : emptyStageDueMatrixGraph;
   $: if (!stats) {
+    entryDetailOpen = false;
     retryDetailOpen = false;
     stageDetailOpen = false;
+  }
+  $: {
+    const nextBucketResetSignature = stats
+      ? `${moduleLabel}:${reviewOnly}:${displayedQuestions.map((question) => question.question_id).join('|')}`
+      : '';
+    if (nextBucketResetSignature !== bucketResetSignature) {
+      bucketResetSignature = nextBucketResetSignature;
+      expandedBuckets = {};
+    }
   }
 </script>
 
@@ -212,7 +239,15 @@
         {/if}
       </div>
 
-      <div class="panel stats-chart-panel stats-chart-panel-entry">
+      <div
+        class="panel stats-chart-panel stats-chart-panel-entry graph-launch-panel"
+        role="button"
+        tabindex="0"
+        aria-haspopup="dialog"
+        aria-label="Open all questions"
+        on:click={openEntryDetail}
+        on:keydown={handleEntryDetailKeydown}
+      >
         <div class="panel-header">
           <div><h3>Entry states</h3></div>
         </div>
@@ -398,60 +433,48 @@
       </div>
     </div>
 
-    <div class="panel table-panel">
+    <div class="panel table-panel question-bucket-panel">
       <div class="panel-header">
         <div>
           <h3>Questions</h3>
         </div>
       </div>
 
-      {#if sortedDisplayedQuestions.length === 0}
+      {#if displayedQuestions.length === 0}
         <p class="muted-copy">{emptyMessage}</p>
-      {:else}
-        <div class="table-shell">
-          <table>
-            <thead>
-              <tr>
-                {#each sortDefinitions as definition (definition.key)}
-                  <th>
-                    <button
-                      class="table-sort-button"
-                      type="button"
-                      on:click={() => handleSort(definition.key)}
-                    >
-                      {definition.label}{sortIndicator(definition.key)}
-                    </button>
-                  </th>
-                {/each}
-              </tr>
-            </thead>
-            <tbody>
-              {#each sortedDisplayedQuestions as question (question.question_id)}
-                <tr
-                  class:flagged-review={question.review_flag}
-                  class:hot0-row={!question.review_flag && question.schedule.bucket === 'hot0'}
-                  class:hot1-row={!question.review_flag && (question.schedule.bucket === 'hot1' || question.schedule.bucket === 'hot1_sit_out')}
-                  on:click={() => onOpenEdit(question)}
-                >
-                  <td>{question.rank}</td>
-                  <td>
-                    <div class="question-cell">
-                      <span>{question.prompt_preview}</span>
-                      {#if !question.admin_verified}
-                        <span class="inline-status-chip">Unverified</span>
-                      {/if}
-                    </div>
-                  </td>
-                  <td>{formatBucketLabel(question)}</td>
-                  <td>{formatLastSeen(question.last_asked_at)}</td>
-                  <td>{question.attempts}</td>
-                  <td>{Math.round(question.correct_percentage * 100)}%</td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
       {/if}
+
+      <div class="question-bucket-stack">
+        {#each bucketGroups as group (group.key)}
+          <section class="question-bucket-card">
+            <button
+              class="question-bucket-toggle"
+              type="button"
+              aria-expanded={expandedBuckets[group.key] ?? false}
+              on:click={() => toggleBucket(group.key)}
+            >
+              <span class="question-bucket-title">{group.label}</span>
+              <span class="question-bucket-count">{group.questions.length}</span>
+              <span class="question-bucket-caret" aria-hidden="true">{expandedBuckets[group.key] ? '-' : '+'}</span>
+            </button>
+
+            {#if expandedBuckets[group.key]}
+              {#if group.questions.length === 0}
+                <p class="muted-copy question-bucket-empty">No questions in this bucket.</p>
+              {:else}
+                <StatsQuestionTable
+                  questions={group.questions}
+                  definitions={visibleQuestionSortDefinitions}
+                  sortKey={sortKey}
+                  sortDirection={sortDirection}
+                  onSort={handleSort}
+                  onOpenEdit={onOpenEdit}
+                />
+              {/if}
+            {/if}
+          </section>
+        {/each}
+      </div>
     </div>
   {:else}
     <div class="panel empty-state">
@@ -467,6 +490,16 @@
   open={stageDetailOpen}
   graph={stageDueMatrixGraph}
   onClose={() => (stageDetailOpen = false)}
+/>
+<StatsAllQuestionsOverlay
+  open={entryDetailOpen}
+  questions={displayedQuestions}
+  emptyMessage={emptyMessage}
+  sortKey={sortKey}
+  sortDirection={sortDirection}
+  onSort={handleSort}
+  onOpenEdit={onOpenEdit}
+  onClose={() => (entryDetailOpen = false)}
 />
 <RetryEligibilityOverlay
   open={retryDetailOpen}

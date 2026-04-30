@@ -16,7 +16,7 @@ For supporting docs, see:
 - [Deployment](deployment.md)
 - [Question Markup DSL](question-markup.md)
 - [QML Revised](qml-revised.md)
-- [QML Prompt Snippets](question-markup-prompts/index.md)
+- [Question Markup Prompts](question-markup-prompts/index.md)
 - [TODO](TODO.md)
 - [Roadmap](roadmap.md)
 
@@ -44,7 +44,6 @@ Modules form a hierarchy such as `norwegian/vocabulary/nouns_to_english`.
 
 - leaf modules hold questions
 - parent modules act as broader study scopes
-- modules may include an `instruction` so short prompts can stay concise
 
 ### Questions
 

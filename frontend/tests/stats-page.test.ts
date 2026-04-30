@@ -568,7 +568,7 @@ describe('StatsPage', () => {
     expect(graph.chartHeight).toBe(72);
   });
 
-  it('filters the single table to review questions, keeps graphs visible, and sorts the displayed rows', async () => {
+  it('groups questions into bucket cards, keeps graphs visible, and preserves the full table overlay', async () => {
     const user = userEvent.setup();
     const openSpy = vi.fn();
     const toggleSpy = vi.fn();
@@ -709,24 +709,68 @@ describe('StatsPage', () => {
     });
 
     let mainPanel = screen.getByRole('heading', { name: 'Questions' }).closest('.panel') as HTMLElement;
+    expect(Array.from(mainPanel.querySelectorAll('.question-bucket-title')).map((node) => node.textContent)).toEqual([
+      'Review',
+      '1h',
+      '3h',
+      '6h',
+      '12h',
+      '1d',
+      '3d',
+      '7d',
+      '14d',
+      '30d',
+      '60d',
+      'Unseen',
+      'Mastery'
+    ]);
+    expect(Array.from(mainPanel.querySelectorAll('.question-bucket-count')).map((node) => node.textContent)).toEqual([
+      '0',
+      '0',
+      '1',
+      '0',
+      '0',
+      '0',
+      '0',
+      '0',
+      '0',
+      '0',
+      '0',
+      '0',
+      '1'
+    ]);
     expect(screen.queryByText('What structure anchors most plants in the ground?')).toBeNull();
+    expect(screen.queryByText('What is the capital of Canada?')).toBeNull();
+
+    const threeHourBucket = within(mainPanel).getByRole('button', { name: /^3h\s+1/ });
+    expect(threeHourBucket.getAttribute('aria-expanded')).toBe('false');
+    await user.click(threeHourBucket);
+    expect(threeHourBucket.getAttribute('aria-expanded')).toBe('true');
     expect(within(mainPanel).getByText('What is the capital of Canada?')).toBeTruthy();
-    expect(within(mainPanel).getByText('What is the capital of Sweden?')).toBeTruthy();
+    expect(within(mainPanel).queryByRole('button', { name: 'Bucket' })).toBeNull();
+    expect(within(mainPanel).getByRole('button', { name: /^Last seen/ })).toBeTruthy();
 
     await user.click(within(mainPanel).getByText('What is the capital of Canada?'));
     expect(openSpy).toHaveBeenCalledWith(stats.questions[1]);
 
-    await user.click(within(mainPanel).getByRole('button', { name: 'Bucket' }));
-    await waitFor(() => {
-      const rowsAfterScheduleSort = within(mainPanel).getAllByRole('row');
-      expect(rowsAfterScheduleSort[1].textContent).toContain('What is the capital of Canada?');
-      expect(rowsAfterScheduleSort[1].textContent).toContain('3h');
-    });
+    await user.click(screen.getByRole('button', { name: 'Open all questions' }));
+    let allQuestionsDialog = await screen.findByRole('dialog', { name: 'All questions' });
+    expect(within(allQuestionsDialog).getByRole('button', { name: 'Bucket' })).toBeTruthy();
+    expect(within(allQuestionsDialog).getByText('What is the capital of Canada?')).toBeTruthy();
+    expect(within(allQuestionsDialog).getByText('What is the capital of Sweden?')).toBeTruthy();
+    expect(allQuestionsDialog.textContent).toMatch(/Apr 2, \d{2}:\d{2}/);
+    expect(allQuestionsDialog.textContent).not.toMatch(/\bAM\b|\bPM\b/i);
 
-    await user.click(within(mainPanel).getByRole('button', { name: 'Attempts' }));
+    await user.click(within(allQuestionsDialog).getByRole('button', { name: 'Last seen' }));
     await waitFor(() => {
-      const rowsAfterSort = within(mainPanel).getAllByRole('row');
-      expect(rowsAfterSort[1].textContent).toContain('What is the capital of Canada?');
+      const rowsAfterLastSeenSort = within(allQuestionsDialog).getAllByRole('row');
+      expect(rowsAfterLastSeenSort[1].textContent).toContain('What is the capital of Sweden?');
+      expect(rowsAfterLastSeenSort[2].textContent).toContain('What is the capital of Canada?');
+    });
+    await user.click(within(allQuestionsDialog).getByText('What is the capital of Sweden?'));
+    expect(openSpy).toHaveBeenLastCalledWith(stats.questions[2]);
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'All questions' })).toBeNull();
     });
 
     await user.click(screen.getByRole('checkbox'));
@@ -742,9 +786,12 @@ describe('StatsPage', () => {
     });
 
     mainPanel = screen.getByRole('heading', { name: 'Questions' }).closest('.panel') as HTMLElement;
+    expect(within(mainPanel).getByRole('button', { name: /^Review\s+2/ }).getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByText('What is the capital of Canada?')).toBeNull();
+
+    await user.click(within(mainPanel).getByRole('button', { name: /^Review\s+2/ }));
     expect(within(mainPanel).getByText('What structure anchors most plants in the ground?')).toBeTruthy();
     expect(within(mainPanel).getByText('What process lets plants turn light into stored energy?')).toBeTruthy();
-    expect(screen.queryByText('What is the capital of Canada?')).toBeNull();
 
     await user.click(within(mainPanel).getByText('What structure anchors most plants in the ground?'));
     expect(openSpy).toHaveBeenLastCalledWith(stats.questions[0]);
@@ -781,11 +828,12 @@ describe('StatsPage', () => {
     expect(graphLabels).toContain('7');
     expect(graphLabels).toContain('>7');
     expect(view.container.querySelector('.graph-average-line title')?.textContent).toBe('83%');
-    expect(screen.queryByRole('button', { name: 'Review' })).toBeNull();
+    expect(within(mainPanel).getByRole('button', { name: /^Review\s+2/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Open spaced repetition stage details' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Open retry eligibility details' })).toBeTruthy();
-    expect(within(mainPanel).getByRole('button', { name: 'Bucket' })).toBeTruthy();
-    expect(within(mainPanel).getByRole('button', { name: 'Last seen' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Open all questions' })).toBeTruthy();
+    expect(within(mainPanel).queryByRole('button', { name: 'Bucket' })).toBeNull();
+    expect(within(mainPanel).getByRole('button', { name: /^Last seen/ })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Type' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Module' })).toBeNull();
 
@@ -794,11 +842,14 @@ describe('StatsPage', () => {
     expect(firstRowClass).toContain('flagged-review');
     expect(firstRowClass).not.toContain('hot1-row');
 
-    await user.click(within(mainPanel).getByRole('button', { name: 'Last seen' }));
+    await user.click(screen.getByRole('button', { name: 'Open all questions' }));
+    allQuestionsDialog = await screen.findByRole('dialog', { name: 'All questions' });
+    expect(within(allQuestionsDialog).getByText('What structure anchors most plants in the ground?')).toBeTruthy();
+    expect(within(allQuestionsDialog).getByText('What process lets plants turn light into stored energy?')).toBeTruthy();
+    expect(within(allQuestionsDialog).queryByText('What is the capital of Canada?')).toBeNull();
+    await user.keyboard('{Escape}');
     await waitFor(() => {
-      const rowsAfterLastSeenSort = within(mainPanel).getAllByRole('row');
-      expect(rowsAfterLastSeenSort[1].textContent).toContain('What process lets plants turn light into stored energy?');
-      expect(rowsAfterLastSeenSort[2].textContent).toContain('What structure anchors most plants in the ground?');
+      expect(screen.queryByRole('dialog', { name: 'All questions' })).toBeNull();
     });
   });
 

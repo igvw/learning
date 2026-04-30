@@ -39,6 +39,7 @@
     createQuestion,
     createQuizSession,
     createUser,
+    deleteModule,
     deleteQuestion,
     deleteRejectedModule,
     exportContentArchive,
@@ -434,6 +435,11 @@
     return findModuleNodeInTree(modules, updated.id) ?? updated;
   }
 
+  async function handleDeleteModule(moduleId: number): Promise<void> {
+    await deleteModule(moduleId);
+    await refreshAuthenticatedData(currentActor);
+  }
+
   function closeEditor(): void {
     editorOpen = false;
     editorMode = 'standard';
@@ -585,8 +591,6 @@
       ? modules[0]?.title ?? 'Selected Module'
       : findModuleTitle(modules, selectedModuleId) ?? 'Selected Module';
   $: selectedModuleNode = selectedModuleId === null ? null : findModuleNodeInTree(modules, selectedModuleId);
-  $: selectedModuleIsLeaf = Boolean(selectedModuleNode && selectedModuleNode.children.length === 0);
-  $: selectedModuleInstruction = selectedModuleNode?.instruction ?? '';
   $: importTargetModuleNode =
     importState.targetModuleId === null ? null : findModuleNodeInTree(modules, importState.targetModuleId);
 </script>
@@ -632,8 +636,6 @@
         <QuizPage
           session={session}
           moduleLabel={selectedModuleLabel}
-          moduleInstruction={selectedModuleInstruction}
-          selectedModuleIsLeaf={selectedModuleIsLeaf}
           questionCount={quizQuestionCount}
           busyItemId={quizBusyItemId}
           markingReviewQuestionId={markingReviewQuestionId}
@@ -667,6 +669,7 @@
           onUpdateUserPassword={handleUpdateUserPassword}
           onCreateModule={handleCreateModule}
           onUpdateModule={handleUpdateModule}
+          onDeleteModule={handleDeleteModule}
           onOpenImport={handleOpenImportForModule}
           onExportContent={handleExportContent}
           onModerationAction={handleModerationAction}
