@@ -16,6 +16,7 @@ vi.mock('../src/lib/api', () => ({
   getModerationQueue: vi.fn(),
   getModulesTree: vi.fn(),
   getMyContributions: vi.fn(),
+  getQuestion: vi.fn(),
   getStats: vi.fn(),
   getUsers: vi.fn(),
   login: vi.fn(),

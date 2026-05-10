@@ -7,10 +7,12 @@
   export let questionCount = 10;
   export let busyItemId: number | null = null;
   export let markingReviewQuestionId: number | null = null;
+  export let openingEditorQuestionId: number | null = null;
   export let errorMessage = '';
   export let onChangeQuestionCount: (value: number) => void = () => {};
   export let onStartQuiz: () => Promise<void> | void = () => {};
-  export let onMarkForRevision: (questionId: number) => Promise<void> | void = () => {};
+  export let onToggleReviewFlag: (questionId: number, reviewFlag: boolean) => Promise<void> | void = () => {};
+  export let onOpenEdit: (questionId: number) => Promise<void> | void = () => {};
   export let onSubmit: (itemId: number, answers: string[]) => Promise<void> = async () => {};
 
   let draftAnswers: Record<number, string[]> = {};
@@ -108,6 +110,27 @@
     void onSubmit(item.id, answers);
   }
 
+  function reviewFlagLabel(item: QuizItem): string {
+    if (markingReviewQuestionId === item.question_id) {
+      return 'Updating review flag';
+    }
+    return item.review_flag ? 'Remove review flag' : 'Flag for review';
+  }
+
+  function toggleReviewFlag(item: QuizItem): void {
+    if (markingReviewQuestionId === item.question_id) {
+      return;
+    }
+    void onToggleReviewFlag(item.question_id, !item.review_flag);
+  }
+
+  function openEdit(item: QuizItem): void {
+    if (openingEditorQuestionId === item.question_id) {
+      return;
+    }
+    void onOpenEdit(item.question_id);
+  }
+
   async function focusSlotInput(itemId: number, slotIndex: number): Promise<void> {
     await tick();
     const nextInput = document.querySelector<HTMLInputElement>(
@@ -198,6 +221,42 @@
     }
   }
 
+  function findShortcutReviewTarget(): QuizItem | null {
+    if (!session || session.items.length === 0) {
+      return null;
+    }
+    const targetIndex = activeIndex === -1 ? session.items.length - 1 : activeIndex - 1;
+    if (targetIndex < 0) {
+      return null;
+    }
+    const target = session.items[targetIndex];
+    return target.submitted_answer === null ? null : target;
+  }
+
+  function isReviewShortcut(event: KeyboardEvent): boolean {
+    return (
+      event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.shiftKey &&
+      (event.code === 'KeyR' || event.key.toLowerCase() === 'r')
+    );
+  }
+
+  function handleReviewShortcut(event: KeyboardEvent): void {
+    if (!isReviewShortcut(event)) {
+      return;
+    }
+
+    const target = findShortcutReviewTarget();
+    if (!target || markingReviewQuestionId === target.question_id) {
+      return;
+    }
+
+    event.preventDefault();
+    toggleReviewFlag(target);
+  }
+
   $: if (session?.id !== sessionMarker) {
     sessionMarker = session?.id ?? null;
     draftAnswers = buildDrafts(session);
@@ -227,6 +286,8 @@
     void focusCompletionAction();
   }
 </script>
+
+<svelte:window on:keydown={handleReviewShortcut} />
 
 <section class="page quiz-page">
   <div class="page-intro">
@@ -298,27 +359,33 @@
                     <h3>{index + 1}. {item.prompt}</h3>
                   {/if}
                 </div>
-                {#if revealAll && answered}
-                  <button
-                    class="ghost-button flag-button"
-                    class:flagged={item.review_flag}
-                    class:loading={markingReviewQuestionId === item.question_id}
-                    type="button"
-                    aria-label={
-                      item.review_flag
-                        ? 'Marked for revision'
-                        : markingReviewQuestionId === item.question_id
-                          ? 'Flagging revision'
-                          : 'Flag for revision'
-                    }
-                    disabled={item.review_flag || markingReviewQuestionId === item.question_id}
-                    on:click={() => void onMarkForRevision(item.question_id)}
-                  >
-                    <svg class="flag-icon" viewBox="0 0 16 16" aria-hidden="true">
-                      <path d="M4 2v12" />
-                      <path d="M5 2h7l-2 3 2 3H5z" />
-                    </svg>
-                  </button>
+                {#if answered}
+                  <div class="quiz-card-review-actions">
+                    {#if item.review_flag}
+                      <button
+                        class="ghost-button quiz-edit-button"
+                        type="button"
+                        disabled={openingEditorQuestionId === item.question_id}
+                        on:click={() => openEdit(item)}
+                      >
+                        {openingEditorQuestionId === item.question_id ? 'Opening...' : 'Edit question'}
+                      </button>
+                    {/if}
+                    <button
+                      class="ghost-button flag-button"
+                      class:flagged={item.review_flag}
+                      class:loading={markingReviewQuestionId === item.question_id}
+                      type="button"
+                      aria-label={reviewFlagLabel(item)}
+                      disabled={markingReviewQuestionId === item.question_id}
+                      on:click={() => toggleReviewFlag(item)}
+                    >
+                      <svg class="flag-icon" viewBox="0 0 16 16" aria-hidden="true">
+                        <path d="M4 2v12" />
+                        <path d="M5 2h7l-2 3 2 3H5z" />
+                      </svg>
+                    </button>
+                  </div>
                 {/if}
               </div>
 
@@ -426,7 +493,7 @@
       <div class="panel completion-panel">
         <p class="eyebrow">Session complete</p>
         <h3>{formatScore(totalScoreEarned)}/{formatScore(totalScorePossible)} points</h3>
-        <p>{completedCount} submissions recorded. Mark any questions above for revision, review mistakes, or start another quiz.</p>
+        <p>{completedCount} submissions recorded. Mark any questions above for review, review mistakes, or start another quiz.</p>
         <div class="completion-actions">
           <button
             bind:this={completionActionButton}

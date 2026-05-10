@@ -35,7 +35,7 @@ describe('quiz-session helpers', () => {
     expect(updated.items[1].submitted_answer).toBeNull();
   });
 
-  it('applies a review flag only to the targeted question', () => {
+  it('applies and clears a review flag only on the targeted question', () => {
     const session = buildQuizSession({
       items: [
         buildQuizItem({ id: 1, question_id: 10, review_flag: false }),
@@ -47,5 +47,10 @@ describe('quiz-session helpers', () => {
 
     expect(updated.items[0].review_flag).toBe(false);
     expect(updated.items[1].review_flag).toBe(true);
+
+    const cleared = applyQuestionReviewFlag(updated, 11, false);
+
+    expect(cleared.items[0].review_flag).toBe(false);
+    expect(cleared.items[1].review_flag).toBe(false);
   });
 });

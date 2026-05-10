@@ -1,12 +1,35 @@
 from fastapi import APIRouter, Depends
 
 from ...database import DatabaseConnection
-from ...schemas import QuestionDraftIn, QuestionMutationOut, QuestionReviewFlagIn, QuestionReviewFlagOut, QuestionRevisionIn
-from ...services import Actor, create_question, delete_question, revise_question, set_question_review_flag
+from ...schemas import (
+    QuestionDraftIn,
+    QuestionMutationOut,
+    QuestionReviewFlagIn,
+    QuestionReviewFlagOut,
+    QuestionRevisionIn,
+    QuestionRowOut,
+)
+from ...services import (
+    Actor,
+    create_question,
+    delete_question,
+    get_question,
+    revise_question,
+    set_question_review_flag,
+)
 from ..dependencies import database_connection, require_actor
 
 
 router = APIRouter()
+
+
+@router.get("/api/questions/{question_id}", response_model=QuestionRowOut)
+def questions_get(
+    question_id: int,
+    actor: Actor = Depends(require_actor),
+    connection: DatabaseConnection = Depends(database_connection),
+) -> dict:
+    return get_question(connection, user_id=int(actor.user_id), question_id=question_id, actor=actor)
 
 
 @router.post("/api/questions", response_model=QuestionMutationOut)

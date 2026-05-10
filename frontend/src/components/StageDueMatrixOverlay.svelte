@@ -11,14 +11,26 @@
     }
   }
 
+  function handleShellClick(event: MouseEvent): void {
+    if (event.target === event.currentTarget) {
+      onClose();
+    }
+  }
+
 </script>
 
 <svelte:window on:keydown={handleWindowKeydown} />
 
 {#if open}
-  <div class="modal-backdrop stage-detail-backdrop" role="presentation" on:click={onClose}>
-    <div class="modal-shell stage-detail-shell" role="presentation" on:click|stopPropagation>
-      <div class="panel modal-panel stage-detail-panel" role="dialog" aria-modal="true" aria-labelledby="stage-detail-title">
+  <div class="modal-backdrop stage-detail-backdrop" role="presentation"></div>
+  <div class="modal-shell stage-detail-shell" role="presentation" on:click={handleShellClick}>
+    <div
+      class="panel modal-panel stage-detail-panel"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="stage-detail-title"
+      tabindex="-1"
+    >
         <div class="panel-header sticky stage-detail-header">
           <div>
             <h2 id="stage-detail-title">Spaced repetition stage details</h2>
@@ -81,6 +93,5 @@
           </div>
         {/if}
       </div>
-    </div>
   </div>
 {/if}

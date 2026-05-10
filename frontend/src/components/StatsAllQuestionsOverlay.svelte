@@ -26,34 +26,45 @@
     onOpenEdit(question);
     onClose();
   }
+
+  function handleShellClick(event: MouseEvent): void {
+    if (event.target === event.currentTarget) {
+      onClose();
+    }
+  }
 </script>
 
 <svelte:window on:keydown={handleWindowKeydown} />
 
 {#if open}
-  <div class="modal-backdrop stats-all-questions-backdrop" role="presentation" on:click={onClose}>
-    <div class="modal-shell stats-all-questions-shell" role="presentation" on:click|stopPropagation>
-      <div class="panel modal-panel stats-all-questions-panel" role="dialog" aria-modal="true" aria-labelledby="all-questions-title">
-        <div class="panel-header sticky stats-all-questions-header">
-          <div>
-            <h2 id="all-questions-title">All questions</h2>
-          </div>
-          <button type="button" class="ghost-button" on:click={onClose}>Close</button>
+  <div class="modal-backdrop stats-all-questions-backdrop" role="presentation"></div>
+  <div class="modal-shell stats-all-questions-shell" role="presentation" on:click={handleShellClick}>
+    <div
+      class="panel modal-panel stats-all-questions-panel"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="all-questions-title"
+      tabindex="-1"
+    >
+      <div class="panel-header sticky stats-all-questions-header">
+        <div>
+          <h2 id="all-questions-title">All questions</h2>
         </div>
-
-        {#if questions.length === 0}
-          <p class="muted-copy">{emptyMessage}</p>
-        {:else}
-          <StatsQuestionTable
-            questions={questions}
-            definitions={sortDefinitions}
-            sortKey={sortKey}
-            sortDirection={sortDirection}
-            onSort={onSort}
-            onOpenEdit={handleOpenEdit}
-          />
-        {/if}
+        <button type="button" class="ghost-button" on:click={onClose}>Close</button>
       </div>
+
+      {#if questions.length === 0}
+        <p class="muted-copy">{emptyMessage}</p>
+      {:else}
+        <StatsQuestionTable
+          questions={questions}
+          definitions={sortDefinitions}
+          sortKey={sortKey}
+          sortDirection={sortDirection}
+          onSort={onSort}
+          onOpenEdit={handleOpenEdit}
+        />
+      {/if}
     </div>
   </div>
 {/if}

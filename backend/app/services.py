@@ -43,7 +43,7 @@ from .service.moderation import (
     review_question_submission,
 )
 from .service.quiz import create_quiz_session, submit_answer
-from .service.stats import get_stats
+from .service.stats import get_question, get_stats
 
 
 __all__ = [
@@ -66,6 +66,7 @@ __all__ = [
     "export_verified_content_archive",
     "get_module_tree",
     "get_actor_from_token",
+    "get_question",
     "get_stats",
     "login_user",
     "list_moderation_queue",

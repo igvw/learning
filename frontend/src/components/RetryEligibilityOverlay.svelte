@@ -12,6 +12,12 @@
     }
   }
 
+  function handleShellClick(event: MouseEvent): void {
+    if (event.target === event.currentTarget) {
+      onClose();
+    }
+  }
+
   $: hourlyTotal = hourlyGraph.hours.reduce((total, hour) => total + hour.count, 0);
   $: longRangeTotal = longRangeGraph.weeks.reduce((total, week) => total + week.count, 0);
 </script>
@@ -19,9 +25,15 @@
 <svelte:window on:keydown={handleWindowKeydown} />
 
 {#if open}
-  <div class="modal-backdrop retry-detail-backdrop" role="presentation" on:click={onClose}>
-    <div class="modal-shell retry-detail-shell" role="presentation" on:click|stopPropagation>
-      <div class="panel modal-panel retry-detail-panel" role="dialog" aria-modal="true" aria-labelledby="retry-detail-title">
+  <div class="modal-backdrop retry-detail-backdrop" role="presentation"></div>
+  <div class="modal-shell retry-detail-shell" role="presentation" on:click={handleShellClick}>
+    <div
+      class="panel modal-panel retry-detail-panel"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="retry-detail-title"
+      tabindex="-1"
+    >
         <div class="panel-header sticky retry-detail-header">
           <div>
             <h2 id="retry-detail-title">Retry eligibility details</h2>
@@ -123,6 +135,5 @@
           </section>
         </div>
       </div>
-    </div>
   </div>
 {/if}

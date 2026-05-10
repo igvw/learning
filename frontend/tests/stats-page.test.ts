@@ -574,12 +574,12 @@ describe('StatsPage', () => {
     const toggleSpy = vi.fn();
     const stats = buildStatsResponse({
       summary: {
-        total_questions: 4,
+        total_questions: 5,
         reviewed_questions: 2,
-        total_attempts: 7,
+        total_attempts: 8,
         total_correct: 4,
-        total_possible: 6,
-        accuracy: 2 / 3
+        total_possible: 7,
+        accuracy: 4 / 7
       },
       recent_sessions: [
         buildRecentSession({
@@ -666,6 +666,33 @@ describe('StatsPage', () => {
           }
         }),
         buildQuestionRow({
+          question_id: 54,
+          module_id: 3,
+          module_full_slug: 'biology/plants',
+          prompt: 'What pigment makes leaves green?',
+          prompt_preview: 'What pigment makes leaves green?',
+          rank: 4,
+          attempts: 1,
+          correct_percentage: 0,
+          first_asked_at: '2026-04-04T07:30:00Z',
+          last_asked_at: '2026-04-04T07:30:00Z',
+          accepted_answers: [['chlorophyll']],
+          recent_incorrect_answers: [
+            {
+              answer_text: 'xylem',
+              count: 1,
+              latest_answered_at: '2026-04-04T07:30:00Z'
+            }
+          ],
+          schedule: {
+            bucket: 'hot1',
+            logical_bucket: '1h',
+            recovery_streak: 1,
+            interval_step: 0,
+            last_incorrect_at: '2026-04-04T07:30:00Z'
+          }
+        }),
+        buildQuestionRow({
           question_id: 53,
           module_id: 3,
           module_full_slug: 'biology/plants',
@@ -708,9 +735,12 @@ describe('StatsPage', () => {
       }
     });
 
-    let mainPanel = screen.getByRole('heading', { name: 'Questions' }).closest('.panel') as HTMLElement;
-    expect(Array.from(mainPanel.querySelectorAll('.question-bucket-title')).map((node) => node.textContent)).toEqual([
-      'Review',
+    expect(screen.getByLabelText('Review')).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Questions' })).toBeNull();
+
+    let bucketStack = view.container.querySelector('.stats-question-buckets') as HTMLElement;
+    expect(Array.from(bucketStack.querySelectorAll('.question-bucket-title')).map((node) => node.textContent)).toEqual([
+      'Active',
       '1h',
       '3h',
       '6h',
@@ -724,8 +754,8 @@ describe('StatsPage', () => {
       'Unseen',
       'Mastery'
     ]);
-    expect(Array.from(mainPanel.querySelectorAll('.question-bucket-count')).map((node) => node.textContent)).toEqual([
-      '0',
+    expect(Array.from(bucketStack.querySelectorAll('.question-bucket-count')).map((node) => node.textContent)).toEqual([
+      '1',
       '0',
       '1',
       '0',
@@ -739,36 +769,69 @@ describe('StatsPage', () => {
       '0',
       '1'
     ]);
+    expect(Array.from(bucketStack.querySelectorAll('.question-bucket-caret')).map((node) => node.textContent)).toEqual(
+      Array.from({ length: 13 }, () => 'v')
+    );
     expect(screen.queryByText('What structure anchors most plants in the ground?')).toBeNull();
     expect(screen.queryByText('What is the capital of Canada?')).toBeNull();
 
-    const threeHourBucket = within(mainPanel).getByRole('button', { name: /^3h\s+1/ });
+    const activeBucket = within(bucketStack).getByRole('button', { name: /^Active\s+1/ });
+    await user.click(activeBucket);
+    expect(within(bucketStack).getByText('What pigment makes leaves green?')).toBeTruthy();
+    expect(within(bucketStack).getByRole('button', { name: /^1h\s+0/ })).toBeTruthy();
+
+    const threeHourBucket = within(bucketStack).getByRole('button', { name: /^3h\s+1/ });
     expect(threeHourBucket.getAttribute('aria-expanded')).toBe('false');
     await user.click(threeHourBucket);
     expect(threeHourBucket.getAttribute('aria-expanded')).toBe('true');
-    expect(within(mainPanel).getByText('What is the capital of Canada?')).toBeTruthy();
-    expect(within(mainPanel).queryByRole('button', { name: 'Bucket' })).toBeNull();
-    expect(within(mainPanel).getByRole('button', { name: /^Last seen/ })).toBeTruthy();
+    expect(threeHourBucket.querySelector('.question-bucket-caret')?.textContent).toBe('^');
+    expect(within(bucketStack).getByText('What is the capital of Canada?')).toBeTruthy();
+    expect(within(bucketStack).queryByRole('button', { name: 'Bucket' })).toBeNull();
+    expect(within(bucketStack).getAllByRole('button', { name: /^Last seen/ }).length).toBeGreaterThan(0);
 
-    await user.click(within(mainPanel).getByText('What is the capital of Canada?'));
+    await user.click(within(bucketStack).getByText('What is the capital of Canada?'));
     expect(openSpy).toHaveBeenCalledWith(stats.questions[1]);
 
     await user.click(screen.getByRole('button', { name: 'Open all questions' }));
     let allQuestionsDialog = await screen.findByRole('dialog', { name: 'All questions' });
     expect(within(allQuestionsDialog).getByRole('button', { name: 'Bucket' })).toBeTruthy();
+    expect(within(allQuestionsDialog).getByText('Active')).toBeTruthy();
+    expect(within(allQuestionsDialog).getByText('What pigment makes leaves green?')).toBeTruthy();
     expect(within(allQuestionsDialog).getByText('What is the capital of Canada?')).toBeTruthy();
     expect(within(allQuestionsDialog).getByText('What is the capital of Sweden?')).toBeTruthy();
+    expect(within(allQuestionsDialog).queryByText('What structure anchors most plants in the ground?')).toBeNull();
     expect(allQuestionsDialog.textContent).toMatch(/Apr 2, \d{2}:\d{2}/);
     expect(allQuestionsDialog.textContent).not.toMatch(/\bAM\b|\bPM\b/i);
 
     await user.click(within(allQuestionsDialog).getByRole('button', { name: 'Last seen' }));
     await waitFor(() => {
       const rowsAfterLastSeenSort = within(allQuestionsDialog).getAllByRole('row');
-      expect(rowsAfterLastSeenSort[1].textContent).toContain('What is the capital of Sweden?');
-      expect(rowsAfterLastSeenSort[2].textContent).toContain('What is the capital of Canada?');
+      expect(rowsAfterLastSeenSort[1].textContent).toContain('What pigment makes leaves green?');
+      expect(rowsAfterLastSeenSort[2].textContent).toContain('What is the capital of Sweden?');
+      expect(rowsAfterLastSeenSort[3].textContent).toContain('What is the capital of Canada?');
     });
     await user.click(within(allQuestionsDialog).getByText('What is the capital of Sweden?'));
     expect(openSpy).toHaveBeenLastCalledWith(stats.questions[2]);
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'All questions' })).toBeNull();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Open all questions' }));
+    allQuestionsDialog = await screen.findByRole('dialog', { name: 'All questions' });
+    await user.click(within(allQuestionsDialog).getByRole('button', { name: 'Close' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'All questions' })).toBeNull();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Open all questions' }));
+    allQuestionsDialog = await screen.findByRole('dialog', { name: 'All questions' });
+    await user.click(allQuestionsDialog);
+    expect(screen.getByRole('dialog', { name: 'All questions' })).toBeTruthy();
+    const allQuestionsShell = view.container.querySelector('.stats-all-questions-shell');
+    expect(allQuestionsShell).toBeTruthy();
+    if (allQuestionsShell) {
+      await user.click(allQuestionsShell);
+    }
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: 'All questions' })).toBeNull();
     });
@@ -785,15 +848,61 @@ describe('StatsPage', () => {
       onOpenEdit: openSpy
     });
 
-    mainPanel = screen.getByRole('heading', { name: 'Questions' }).closest('.panel') as HTMLElement;
-    expect(within(mainPanel).getByRole('button', { name: /^Review\s+2/ }).getAttribute('aria-expanded')).toBe('false');
+    bucketStack = view.container.querySelector('.stats-question-buckets') as HTMLElement;
+    expect(Array.from(bucketStack.querySelectorAll('.question-bucket-title')).map((node) => node.textContent)).toEqual([
+      'Review'
+    ]);
+    expect(Array.from(bucketStack.querySelectorAll('.question-bucket-count')).map((node) => node.textContent)).toEqual([
+      '2'
+    ]);
+    expect(within(bucketStack).getByRole('button', { name: /^Review\s+2/ }).getAttribute('aria-expanded')).toBe('false');
     expect(screen.queryByText('What is the capital of Canada?')).toBeNull();
 
-    await user.click(within(mainPanel).getByRole('button', { name: /^Review\s+2/ }));
-    expect(within(mainPanel).getByText('What structure anchors most plants in the ground?')).toBeTruthy();
-    expect(within(mainPanel).getByText('What process lets plants turn light into stored energy?')).toBeTruthy();
+    await user.click(within(bucketStack).getByRole('button', { name: /^Review\s+2/ }));
+    expect(within(bucketStack).getByText('What structure anchors most plants in the ground?')).toBeTruthy();
+    expect(within(bucketStack).getByText('What process lets plants turn light into stored energy?')).toBeTruthy();
 
-    await user.click(within(mainPanel).getByText('What structure anchors most plants in the ground?'));
+    await view.rerender({
+      moduleLabel: 'Biology',
+      stats: buildStatsResponse({
+        ...stats,
+        questions: [
+          buildQuestionRow({
+            ...stats.questions[0],
+            prompt: 'What root structure anchors most plants in the ground?',
+            prompt_preview: 'What root structure anchors most plants in the ground?'
+          }),
+          stats.questions[4]
+        ]
+      }),
+      loading: false,
+      reviewOnly: true,
+      onToggleReviewOnly: toggleSpy,
+      onOpenCreate: vi.fn(),
+      onOpenEdit: openSpy
+    });
+
+    bucketStack = view.container.querySelector('.stats-question-buckets') as HTMLElement;
+    expect(within(bucketStack).getByRole('button', { name: /^Review\s+2/ }).getAttribute('aria-expanded')).toBe('true');
+    expect(within(bucketStack).getByText('What root structure anchors most plants in the ground?')).toBeTruthy();
+    expect(within(bucketStack).getByText('What process lets plants turn light into stored energy?')).toBeTruthy();
+
+    await view.rerender({
+      moduleLabel: 'Chemistry',
+      stats,
+      loading: false,
+      reviewOnly: true,
+      onToggleReviewOnly: toggleSpy,
+      onOpenCreate: vi.fn(),
+      onOpenEdit: openSpy
+    });
+
+    bucketStack = view.container.querySelector('.stats-question-buckets') as HTMLElement;
+    expect(within(bucketStack).getByRole('button', { name: /^Review\s+2/ }).getAttribute('aria-expanded')).toBe('false');
+
+    await user.click(within(bucketStack).getByRole('button', { name: /^Review\s+2/ }));
+
+    await user.click(within(bucketStack).getByText('What structure anchors most plants in the ground?'));
     expect(openSpy).toHaveBeenLastCalledWith(stats.questions[0]);
 
     expect(screen.getByRole('img', { name: 'Recent session accuracy graph' })).toBeTruthy();
@@ -828,17 +937,17 @@ describe('StatsPage', () => {
     expect(graphLabels).toContain('7');
     expect(graphLabels).toContain('>7');
     expect(view.container.querySelector('.graph-average-line title')?.textContent).toBe('83%');
-    expect(within(mainPanel).getByRole('button', { name: /^Review\s+2/ })).toBeTruthy();
+    expect(within(bucketStack).getByRole('button', { name: /^Review\s+2/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Open spaced repetition stage details' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Open retry eligibility details' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Open all questions' })).toBeTruthy();
-    expect(within(mainPanel).queryByRole('button', { name: 'Bucket' })).toBeNull();
-    expect(within(mainPanel).getByRole('button', { name: /^Last seen/ })).toBeTruthy();
+    expect(within(bucketStack).queryByRole('button', { name: 'Bucket' })).toBeNull();
+    expect(within(bucketStack).getByRole('button', { name: /^Last seen/ })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Type' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Module' })).toBeNull();
 
     const firstRowClass =
-      within(mainPanel).getByText('What structure anchors most plants in the ground?').closest('tr')?.className ?? '';
+      within(bucketStack).getByText('What structure anchors most plants in the ground?').closest('tr')?.className ?? '';
     expect(firstRowClass).toContain('flagged-review');
     expect(firstRowClass).not.toContain('hot1-row');
 
@@ -920,12 +1029,15 @@ describe('StatsPage', () => {
     });
 
     await user.click(screen.getByRole('heading', { name: 'Retry eligibility' }));
+    const reopenedRetryDialog = screen.getByRole('dialog', { name: 'Retry eligibility details' });
+    expect(reopenedRetryDialog).toBeTruthy();
+    await user.click(reopenedRetryDialog);
     expect(screen.getByRole('dialog', { name: 'Retry eligibility details' })).toBeTruthy();
 
-    const backdrop = view.container.querySelector('.retry-detail-backdrop');
-    expect(backdrop).toBeTruthy();
-    if (backdrop) {
-      await user.click(backdrop);
+    const retryShell = view.container.querySelector('.retry-detail-shell');
+    expect(retryShell).toBeTruthy();
+    if (retryShell) {
+      await user.click(retryShell);
     }
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: 'Retry eligibility details' })).toBeNull();
@@ -1023,12 +1135,15 @@ describe('StatsPage', () => {
     });
 
     await user.click(screen.getByRole('heading', { name: 'Spaced repetition stages' }));
+    const reopenedStageDialog = screen.getByRole('dialog', { name: 'Spaced repetition stage details' });
+    expect(reopenedStageDialog).toBeTruthy();
+    await user.click(reopenedStageDialog);
     expect(screen.getByRole('dialog', { name: 'Spaced repetition stage details' })).toBeTruthy();
 
-    const backdrop = view.container.querySelector('.stage-detail-backdrop');
-    expect(backdrop).toBeTruthy();
-    if (backdrop) {
-      await user.click(backdrop);
+    const stageShell = view.container.querySelector('.stage-detail-shell');
+    expect(stageShell).toBeTruthy();
+    if (stageShell) {
+      await user.click(stageShell);
     }
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: 'Spaced repetition stage details' })).toBeNull();

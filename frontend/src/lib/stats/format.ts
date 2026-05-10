@@ -1,4 +1,5 @@
 import type { QuestionRow } from '../types';
+import { getDisplayBucketKey } from './table';
 
 export function formatScore(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1).replace(/\.0$/, '');
@@ -9,15 +10,17 @@ export function formatScorePair(earned: number, possible: number): string {
 }
 
 export function formatBucketLabel(question: QuestionRow): string {
-  switch (question.schedule.logical_bucket) {
+  switch (getDisplayBucketKey(question)) {
     case 'review':
       return 'Review';
+    case 'active':
+      return 'Active';
     case 'unseen':
       return 'Unseen';
     case 'mastery':
       return 'Mastery';
     default:
-      return question.schedule.logical_bucket;
+      return getDisplayBucketKey(question);
   }
 }
 

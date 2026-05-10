@@ -356,8 +356,16 @@ kbd {
   min-width: 0;
 }
 
-.quiz-card-prompt-row .flag-button {
+.quiz-card-review-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   flex-shrink: 0;
+}
+
+.quiz-edit-button {
+  min-height: 2.6rem;
+  white-space: nowrap;
 }
 
 .quiz-start-controls {

@@ -2,6 +2,7 @@ import type { LogicalBucket, QuestionRow } from '../types';
 
 export type SortDirection = 'asc' | 'desc';
 export type SortKey = 'prompt' | 'bucket' | 'last_seen' | 'rank' | 'attempts' | 'correct_percentage';
+export type DisplayBucketKey = 'active' | LogicalBucket;
 
 export type SortDefinition = {
   key: SortKey;
@@ -21,7 +22,7 @@ export const sortDefinitions: SortDefinition[] = [
 export const visibleQuestionSortDefinitions = sortDefinitions.filter((definition) => definition.key !== 'bucket');
 
 export type QuestionBucketDefinition = {
-  key: LogicalBucket;
+  key: DisplayBucketKey;
   label: string;
 };
 
@@ -31,6 +32,7 @@ export type QuestionBucketGroup = QuestionBucketDefinition & {
 
 export const questionBucketDefinitions: QuestionBucketDefinition[] = [
   { key: 'review', label: 'Review' },
+  { key: 'active', label: 'Active' },
   { key: '1h', label: '1h' },
   { key: '3h', label: '3h' },
   { key: '6h', label: '6h' },
@@ -45,41 +47,52 @@ export const questionBucketDefinitions: QuestionBucketDefinition[] = [
   { key: 'mastery', label: 'Mastery' }
 ];
 
-function bucketOrder(logicalBucket: LogicalBucket): number {
-  switch (logicalBucket) {
+const activeScheduleBuckets = new Set(['hot0', 'hot1', 'hot1_sit_out']);
+
+export function getDisplayBucketKey(question: QuestionRow): DisplayBucketKey {
+  if (question.schedule.logical_bucket !== 'review' && activeScheduleBuckets.has(question.schedule.bucket)) {
+    return 'active';
+  }
+  return question.schedule.logical_bucket;
+}
+
+function bucketOrder(bucketKey: DisplayBucketKey): number {
+  switch (bucketKey) {
     case 'review':
       return 0;
-    case '1h':
+    case 'active':
       return 1;
-    case '3h':
+    case '1h':
       return 2;
-    case '6h':
+    case '3h':
       return 3;
-    case '12h':
+    case '6h':
       return 4;
-    case '1d':
+    case '12h':
       return 5;
-    case '3d':
+    case '1d':
       return 6;
-    case '7d':
+    case '3d':
       return 7;
-    case '14d':
+    case '7d':
       return 8;
-    case '30d':
+    case '14d':
       return 9;
-    case '60d':
+    case '30d':
       return 10;
-    case 'unseen':
+    case '60d':
       return 11;
-    case 'mastery':
+    case 'unseen':
       return 12;
+    case 'mastery':
+      return 13;
     default:
       return 99;
   }
 }
 
 function bucketSortTuple(question: QuestionRow): [number, string] {
-  return [bucketOrder(question.schedule.logical_bucket), question.prompt_preview];
+  return [bucketOrder(getDisplayBucketKey(question)), question.prompt_preview];
 }
 
 function compareBucket(left: QuestionRow, right: QuestionRow): number {
@@ -147,6 +160,6 @@ export function sortQuestions(
 export function groupQuestionsByBucket(questions: QuestionRow[]): QuestionBucketGroup[] {
   return questionBucketDefinitions.map((definition) => ({
     ...definition,
-    questions: questions.filter((question) => question.schedule.logical_bucket === definition.key)
+    questions: questions.filter((question) => getDisplayBucketKey(question) === definition.key)
   }));
 }

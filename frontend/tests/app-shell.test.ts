@@ -18,6 +18,7 @@ vi.mock('../src/lib/api', () => ({
   getModerationQueue: vi.fn(),
   getModulesTree: vi.fn(),
   getMyContributions: vi.fn(),
+  getQuestion: vi.fn(),
   getStats: vi.fn(),
   getUsers: vi.fn(),
   login: vi.fn(),
@@ -42,7 +43,10 @@ import {
   buildModerationQueue,
   buildModuleNode,
   buildMyContributions,
+  buildQuestionRow,
   buildQuestionRevisionProposal,
+  buildQuizItem,
+  buildQuizSession,
   buildStatsResponse
 } from './builders';
 
@@ -127,6 +131,93 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Sign in' })).toBeTruthy();
     });
+  });
+
+  it('opens a flagged quiz question in the editor and returns to the quiz after save', async () => {
+    const user = userEvent.setup();
+    const bundleQml =
+      '{A patient needs {} mg. The solution has {} mg/ml. How much is needed? []\n {500} {40} [12.5 ml]\n {600} {30} [20 ml]}';
+
+    mockAuthenticatedUser();
+    vi.mocked(api.createQuizSession).mockResolvedValue(
+      buildQuizSession({
+        id: 44,
+        items: [
+          buildQuizItem({
+            id: 91,
+            question_id: 91,
+            prompt: 'A patient needs 500 mg. The solution has 40 mg/ml. How much is needed?',
+            question_type: 'single_text',
+            submitted_answer: ['12.5 ml'],
+            is_correct: true,
+            review_flag: true,
+            score_earned: 1,
+            score_possible: 1,
+            canonical_answers: ['12.5 ml'],
+            default_answers: ['12.5 ml'],
+            accepted_answer_groups: [['12.5 ml']],
+            matched_default_answers: [true]
+          }),
+          buildQuizItem({
+            id: 92,
+            position: 2,
+            question_id: 92,
+            prompt: 'What is the capital of Sweden?'
+          })
+        ]
+      })
+    );
+    vi.mocked(api.getQuestion).mockResolvedValue(
+      buildQuestionRow({
+        question_id: 91,
+        module_id: 1,
+        module_full_slug: 'biology',
+        prompt: 'A patient needs {} mg. The solution has {} mg/ml. How much is needed? []',
+        question_type: 'bundle',
+        accepted_answers: [],
+        bundle_qml: bundleQml,
+        review_flag: true
+      })
+    );
+    vi.mocked(api.reviseQuestion).mockResolvedValue({
+      question_id: 91,
+      proposal_id: 1,
+      admin_verified: true,
+      moderation_status: 'verified',
+      delete_requested: false
+    });
+
+    window.history.replaceState({}, '', '/quiz');
+    render(App);
+
+    await screen.findByRole('heading', { name: 'Biology' });
+    await user.click(screen.getByRole('button', { name: 'Start Quiz' }));
+    await screen.findByText('1. A patient needs 500 mg. The solution has 40 mg/ml. How much is needed?');
+
+    await user.click(screen.getByRole('button', { name: 'Edit question' }));
+
+    await waitFor(() => {
+      expect(api.getQuestion).toHaveBeenCalledWith(91);
+    });
+    const bundleInput = await screen.findByLabelText('Bundle QML');
+    expect((bundleInput as HTMLTextAreaElement).value).toBe(
+      'A patient needs {} mg. The solution has {} mg/ml. How much is needed? []\n{500} {40} [12.5 ml]\n{600} {30} [20 ml]'
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Save Revision' }));
+
+    await waitFor(() => {
+      expect(api.reviseQuestion).toHaveBeenCalledWith(91, expect.objectContaining({
+        module_id: 1,
+        question_type: 'bundle',
+        bundle_qml: expect.stringContaining('{600} {30} [20 ml]'),
+        reset_stats: true
+      }));
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { name: 'Revise Question' })).toBeNull();
+    });
+    expect(screen.getByText('1. A patient needs 500 mg. The solution has 40 mg/ml. How much is needed?')).toBeTruthy();
   });
 
   it('refreshes auth state after an admin updates their own role', async () => {

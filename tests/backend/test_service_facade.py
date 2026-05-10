@@ -25,6 +25,7 @@ class ServiceFacadeUnitTests(unittest.TestCase):
             "export_verified_content_archive",
             "get_actor_from_token",
             "get_module_tree",
+            "get_question",
             "get_stats",
             "list_moderation_queue",
             "list_my_contributions",

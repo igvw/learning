@@ -15,6 +15,7 @@ import type {
   QuestionImportRowPayload,
   QuestionMutationResult,
   QuestionReviewFlagResult,
+  QuestionRow,
   QuizSession,
   StatsResponse,
   SubmitAnswerResult,
@@ -239,6 +240,10 @@ export function submitQuizAnswer(sessionId: number, itemId: number, answers: str
     method: 'POST',
     body: JSON.stringify({ answers })
   });
+}
+
+export function getQuestion(questionId: number): Promise<QuestionRow> {
+  return request<QuestionRow>(`/api/questions/${questionId}`);
 }
 
 export function getStats(moduleId: number | null): Promise<StatsResponse> {

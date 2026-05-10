@@ -4,6 +4,7 @@ from ..database import DatabaseConnection, utc_now
 from ..settings import schedule_timezone_name
 from .auth import Actor
 from .catalog import ensure_user_exists, get_scope_module_ids
+from .errors import NotFoundError
 from .questions import preview_prompt
 from .schedule import (
     _iso_timestamp_sort_value,
@@ -15,7 +16,103 @@ from .schedule import (
     _review_flags_by_question,
     _schedule_snapshot_from_attempts,
 )
-from .visibility import list_effective_question_rows
+from .visibility import get_effective_question_row, list_effective_question_rows
+
+
+def _default_question_stats() -> dict[str, Any]:
+    return {
+        "attempts_count": 0,
+        "correct_count": 0.0,
+        "incorrect_count": 0.0,
+        "first_asked_at": None,
+        "last_asked_at": None,
+    }
+
+
+def _question_payload(
+    row: dict[str, Any],
+    *,
+    review_flag: bool,
+    stats: dict[str, Any],
+    history: list[dict[str, Any]],
+    latest_scored_session_id: int | None,
+    recent_incorrect_answers: list[dict[str, Any]],
+    now: str,
+) -> dict[str, Any]:
+    type_config = row["type_config"]
+    denominator = stats["correct_count"] + stats["incorrect_count"]
+    schedule = _schedule_snapshot_from_attempts(
+        history,
+        now=now,
+        latest_scored_session_id=latest_scored_session_id,
+    )
+    return {
+        "question_id": row["question_id"],
+        "module_id": row["module_id"],
+        "module_full_slug": row["module_full_slug"],
+        "prompt": row["prompt"],
+        "prompt_preview": preview_prompt(row["prompt"], row["question_type"], type_config),
+        "question_type": row["question_type"],
+        "rank": row["rank"],
+        "attempts": stats["attempts_count"],
+        "correct_percentage": (stats["correct_count"] / denominator) if denominator else 0.0,
+        "first_asked_at": stats["first_asked_at"],
+        "last_asked_at": stats["last_asked_at"],
+        "review_flag": review_flag,
+        "admin_verified": bool(row["admin_verified"]),
+        "moderation_status": row["moderation_status"],
+        "created_by_user_id": row["created_by_user_id"],
+        "creator_display_name": row["creator_display_name"],
+        "accepted_answers": type_config.get("accepted_answers", []),
+        "segments": type_config.get("segments", []),
+        "bundle_qml": row.get("bundle_qml"),
+        "recent_incorrect_answers": recent_incorrect_answers,
+        "schedule": {
+            "bucket": schedule["bucket"],
+            "logical_bucket": _logical_bucket_label(
+                bucket=schedule["bucket"],
+                interval_step=schedule["interval_step"],
+                bucket_origin_step=schedule.get("bucket_origin_step"),
+                review_flag=review_flag,
+            ),
+            "recovery_streak": schedule["recovery_streak"],
+            "interval_step": schedule["interval_step"],
+            "last_incorrect_at": schedule["last_incorrect_at"],
+            "next_due_at": schedule["next_due_at"],
+        },
+    }
+
+
+def get_question(
+    connection: DatabaseConnection,
+    *,
+    user_id: int,
+    question_id: int,
+    actor: Actor | None = None,
+) -> dict[str, Any]:
+    ensure_user_exists(connection, user_id)
+    row = get_effective_question_row(connection, actor=actor, question_id=question_id)
+    if row is None:
+        raise NotFoundError(f"Question {question_id} was not found.")
+
+    question_ids = [question_id]
+    review_flags = _review_flags_by_question(connection, user_id=user_id, question_ids=question_ids)
+    stats_by_question = _question_stats_by_question(connection, user_id=user_id, question_ids=question_ids)
+    history_by_question = _question_attempt_history(connection, user_id=user_id, question_ids=question_ids)
+    recent_incorrect_answers = _recent_incorrect_answers_by_question(
+        connection,
+        user_id=user_id,
+        question_ids=question_ids,
+    )
+    return _question_payload(
+        row,
+        review_flag=review_flags.get(question_id, False),
+        stats=stats_by_question.get(question_id, _default_question_stats()),
+        history=history_by_question.get(question_id, []),
+        latest_scored_session_id=_latest_scored_session_id(connection, user_id=user_id),
+        recent_incorrect_answers=recent_incorrect_answers.get(question_id, []),
+        now=utc_now(),
+    )
 
 
 def get_stats(
@@ -48,59 +145,16 @@ def get_stats(
         if review_only and not review_flag:
             continue
 
-        stats = stats_by_question.get(
-            row["question_id"],
-            {
-                "attempts_count": 0,
-                "correct_count": 0.0,
-                "incorrect_count": 0.0,
-                "first_asked_at": None,
-                "last_asked_at": None,
-            },
-        )
-        schedule = _schedule_snapshot_from_attempts(
-            history_by_question.get(row["question_id"], []),
-            now=now,
-            latest_scored_session_id=latest_scored_session_id,
-        )
-        type_config = row["type_config"]
-        denominator = stats["correct_count"] + stats["incorrect_count"]
         questions.append(
-            {
-                "question_id": row["question_id"],
-                "module_id": row["module_id"],
-                "module_full_slug": row["module_full_slug"],
-                "prompt": row["prompt"],
-                "prompt_preview": preview_prompt(row["prompt"], row["question_type"], type_config),
-                "question_type": row["question_type"],
-                "rank": row["rank"],
-                "attempts": stats["attempts_count"],
-                "correct_percentage": (stats["correct_count"] / denominator) if denominator else 0.0,
-                "first_asked_at": stats["first_asked_at"],
-                "last_asked_at": stats["last_asked_at"],
-                "review_flag": review_flag,
-                "admin_verified": bool(row["admin_verified"]),
-                "moderation_status": row["moderation_status"],
-                "created_by_user_id": row["created_by_user_id"],
-                "creator_display_name": row["creator_display_name"],
-                "accepted_answers": type_config.get("accepted_answers", []),
-                "segments": type_config.get("segments", []),
-                "bundle_qml": row.get("bundle_qml"),
-                "recent_incorrect_answers": recent_incorrect_answers.get(row["question_id"], []),
-                "schedule": {
-                    "bucket": schedule["bucket"],
-                    "logical_bucket": _logical_bucket_label(
-                        bucket=schedule["bucket"],
-                        interval_step=schedule["interval_step"],
-                        bucket_origin_step=schedule.get("bucket_origin_step"),
-                        review_flag=review_flag,
-                    ),
-                    "recovery_streak": schedule["recovery_streak"],
-                    "interval_step": schedule["interval_step"],
-                    "last_incorrect_at": schedule["last_incorrect_at"],
-                    "next_due_at": schedule["next_due_at"],
-                },
-            }
+            _question_payload(
+                row,
+                review_flag=review_flag,
+                stats=stats_by_question.get(row["question_id"], _default_question_stats()),
+                history=history_by_question.get(row["question_id"], []),
+                latest_scored_session_id=latest_scored_session_id,
+                recent_incorrect_answers=recent_incorrect_answers.get(row["question_id"], []),
+                now=now,
+            )
         )
 
     questions.sort(

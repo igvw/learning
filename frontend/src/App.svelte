@@ -48,6 +48,7 @@
     getModerationQueue,
     getModulesTree,
     getMyContributions,
+    getQuestion,
     getStats,
     getUsers,
     login,
@@ -107,6 +108,7 @@
   let session: QuizSession | null = null;
   let quizBusyItemId: number | null = null;
   let markingReviewQuestionId: number | null = null;
+  let openingQuizEditorQuestionId: number | null = null;
   let quizError = '';
   let quizQuestionCount = 10;
 
@@ -117,6 +119,7 @@
 
   let editorOpen = false;
   let editorMode: 'standard' | 'moderation' = 'standard';
+  let editorOrigin: 'default' | 'quiz' = 'default';
   let editingQuestion: QuestionRow | null = null;
   let editingRevisionProposal: QuestionRevisionProposal | null = null;
   let savingQuestion = false;
@@ -144,6 +147,7 @@
     session = null;
     stats = null;
     statsError = '';
+    openingQuizEditorQuestionId = null;
     users = [];
     moderationQueue = null;
     contributions = null;
@@ -363,23 +367,24 @@
     reviewOnly = value;
   }
 
-  async function handleMarkForRevision(questionId: number): Promise<void> {
+  async function handleToggleReviewFlag(questionId: number, reviewFlag: boolean): Promise<void> {
     if (!session) {
       return;
     }
     markingReviewQuestionId = questionId;
     quizError = '';
     try {
-      await setQuestionReviewFlag(questionId, true);
-      session = applyQuestionReviewFlag(session, questionId, true);
+      const result = await setQuestionReviewFlag(questionId, reviewFlag);
+      session = applyQuestionReviewFlag(session, result.question_id, result.review_flag);
     } catch (error) {
-      quizError = error instanceof Error ? error.message : 'Unable to mark this question for revision.';
+      quizError = error instanceof Error ? error.message : 'Unable to update this review flag.';
     } finally {
       markingReviewQuestionId = null;
     }
   }
 
   function handleOpenCreate(): void {
+    editorOrigin = 'default';
     editorMode = 'standard';
     editingRevisionProposal = null;
     editingQuestion = null;
@@ -388,6 +393,7 @@
   }
 
   function handleOpenEdit(question: QuestionRow): void {
+    editorOrigin = 'default';
     editorMode = 'standard';
     editingRevisionProposal = null;
     deletingQuestion = false;
@@ -395,7 +401,26 @@
     editingQuestion = question;
   }
 
+  async function handleOpenQuizEdit(questionId: number): Promise<void> {
+    openingQuizEditorQuestionId = questionId;
+    quizError = '';
+    try {
+      const question = await getQuestion(questionId);
+      editorOrigin = 'quiz';
+      editorMode = 'standard';
+      editingRevisionProposal = null;
+      deletingQuestion = false;
+      editingQuestion = question;
+      editorOpen = true;
+    } catch (error) {
+      quizError = error instanceof Error ? error.message : 'Unable to load this question for editing.';
+    } finally {
+      openingQuizEditorQuestionId = null;
+    }
+  }
+
   function handleOpenRevisionEditor(proposal: QuestionRevisionProposal): void {
+    editorOrigin = 'default';
     editorMode = 'moderation';
     editingRevisionProposal = proposal;
     editingQuestion = buildModerationRevisionSeed(proposal, proposal.delete_requested ? 'current' : 'proposed');
@@ -443,6 +468,7 @@
   function closeEditor(): void {
     editorOpen = false;
     editorMode = 'standard';
+    editorOrigin = 'default';
     editingQuestion = null;
     editingRevisionProposal = null;
     deletingQuestion = false;
@@ -463,6 +489,7 @@
   async function handleSaveQuestion(payload: QuestionDraftPayload, resetStats: boolean): Promise<void> {
     savingQuestion = true;
     try {
+      const origin = editorOrigin;
       const reloadKind = await saveQuestionMutation({
         editorMode,
         editingQuestion,
@@ -476,6 +503,8 @@
       closeEditor();
       if (reloadKind === 'moderation') {
         await reloadAfterModerationMutation();
+      } else if (origin === 'quiz') {
+        await refreshAuthenticatedData();
       } else {
         await reloadAfterQuestionMutation();
       }
@@ -487,9 +516,14 @@
   async function handleDeleteQuestion(questionId: number): Promise<void> {
     deletingQuestion = true;
     try {
+      const origin = editorOrigin;
       await deleteQuestion(questionId);
       closeEditor();
-      await reloadAfterQuestionMutation();
+      if (origin === 'quiz') {
+        await refreshAuthenticatedData();
+      } else {
+        await reloadAfterQuestionMutation();
+      }
     } finally {
       deletingQuestion = false;
     }
@@ -639,10 +673,12 @@
           questionCount={quizQuestionCount}
           busyItemId={quizBusyItemId}
           markingReviewQuestionId={markingReviewQuestionId}
+          openingEditorQuestionId={openingQuizEditorQuestionId}
           errorMessage={quizError}
           onChangeQuestionCount={(value) => (quizQuestionCount = value)}
           onStartQuiz={handleStartQuiz}
-          onMarkForRevision={handleMarkForRevision}
+          onToggleReviewFlag={handleToggleReviewFlag}
+          onOpenEdit={handleOpenQuizEdit}
           onSubmit={handleSubmitAnswer}
         />
       {:else if currentRoute === 'stats'}

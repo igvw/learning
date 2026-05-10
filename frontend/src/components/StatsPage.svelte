@@ -110,10 +110,14 @@
     };
   }
 
-  $: mainQuestions = stats ? stats.questions.filter((question) => !question.review_flag) : [];
-  $: reviewQuestions = stats ? stats.questions.filter((question) => question.review_flag) : [];
-  $: displayedQuestions = reviewOnly ? reviewQuestions : mainQuestions;
-  $: bucketGroups = groupQuestionsByBucket(displayedQuestions);
+  $: displayedQuestions = stats
+    ? stats.questions.filter((question) =>
+        reviewOnly ? question.schedule.logical_bucket === 'review' : question.schedule.logical_bucket !== 'review'
+      )
+    : [];
+  $: bucketGroups = groupQuestionsByBucket(displayedQuestions).filter((group) =>
+    reviewOnly ? group.key === 'review' : group.key !== 'review'
+  );
   $: emptyMessage = reviewOnly ? 'No review questions in this scope.' : 'No non-review questions in this scope.';
   $: sessionGraph = stats ? buildSessionGraph(stats.recent_sessions) : emptySessionGraph;
   $: recoveryStageGraph = stats ? buildRecoveryStageGraph(stats.questions) : emptyRecoveryStageGraph;
@@ -137,9 +141,7 @@
     stageDetailOpen = false;
   }
   $: {
-    const nextBucketResetSignature = stats
-      ? `${moduleLabel}:${reviewOnly}:${displayedQuestions.map((question) => question.question_id).join('|')}`
-      : '';
+    const nextBucketResetSignature = stats ? `${moduleLabel}:${reviewOnly}` : '';
     if (nextBucketResetSignature !== bucketResetSignature) {
       bucketResetSignature = nextBucketResetSignature;
       expandedBuckets = {};
@@ -159,7 +161,7 @@
           checked={reviewOnly}
           on:change={(event) => onToggleReviewOnly((event.currentTarget as HTMLInputElement).checked)}
         />
-        Review only
+        Review
       </label>
     </div>
   </div>
@@ -433,48 +435,40 @@
       </div>
     </div>
 
-    <div class="panel table-panel question-bucket-panel">
-      <div class="panel-header">
-        <div>
-          <h3>Questions</h3>
-        </div>
-      </div>
-
+    <div class="question-bucket-stack stats-question-buckets">
       {#if displayedQuestions.length === 0}
-        <p class="muted-copy">{emptyMessage}</p>
+        <p class="muted-copy question-bucket-summary-empty">{emptyMessage}</p>
       {/if}
 
-      <div class="question-bucket-stack">
-        {#each bucketGroups as group (group.key)}
-          <section class="question-bucket-card">
-            <button
-              class="question-bucket-toggle"
-              type="button"
-              aria-expanded={expandedBuckets[group.key] ?? false}
-              on:click={() => toggleBucket(group.key)}
-            >
-              <span class="question-bucket-title">{group.label}</span>
-              <span class="question-bucket-count">{group.questions.length}</span>
-              <span class="question-bucket-caret" aria-hidden="true">{expandedBuckets[group.key] ? '-' : '+'}</span>
-            </button>
+      {#each bucketGroups as group (group.key)}
+        <section class="question-bucket-card">
+          <button
+            class="question-bucket-toggle"
+            type="button"
+            aria-expanded={expandedBuckets[group.key] ?? false}
+            on:click={() => toggleBucket(group.key)}
+          >
+            <span class="question-bucket-title">{group.label}</span>
+            <span class="question-bucket-count">{group.questions.length}</span>
+            <span class="question-bucket-caret" aria-hidden="true">{expandedBuckets[group.key] ? '^' : 'v'}</span>
+          </button>
 
-            {#if expandedBuckets[group.key]}
-              {#if group.questions.length === 0}
-                <p class="muted-copy question-bucket-empty">No questions in this bucket.</p>
-              {:else}
-                <StatsQuestionTable
-                  questions={group.questions}
-                  definitions={visibleQuestionSortDefinitions}
-                  sortKey={sortKey}
-                  sortDirection={sortDirection}
-                  onSort={handleSort}
-                  onOpenEdit={onOpenEdit}
-                />
-              {/if}
+          {#if expandedBuckets[group.key]}
+            {#if group.questions.length === 0}
+              <p class="muted-copy question-bucket-empty">No questions in this bucket.</p>
+            {:else}
+              <StatsQuestionTable
+                questions={group.questions}
+                definitions={visibleQuestionSortDefinitions}
+                sortKey={sortKey}
+                sortDirection={sortDirection}
+                onSort={handleSort}
+                onOpenEdit={onOpenEdit}
+              />
             {/if}
-          </section>
-        {/each}
-      </div>
+          {/if}
+        </section>
+      {/each}
     </div>
   {:else}
     <div class="panel empty-state">

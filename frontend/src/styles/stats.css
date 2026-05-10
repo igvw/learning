@@ -187,14 +187,13 @@
   position: relative;
 }
 
-.question-bucket-panel {
-  display: grid;
-  gap: 0.95rem;
-}
-
 .question-bucket-stack {
   display: grid;
   gap: 0.65rem;
+}
+
+.stats-question-buckets {
+  margin-top: 1rem;
 }
 
 .question-bucket-card {
@@ -250,6 +249,10 @@
 .question-bucket-empty {
   margin: 0;
   padding: 0 1rem 1rem;
+}
+
+.question-bucket-summary-empty {
+  margin: 0;
 }
 
 .stats-all-questions-panel {

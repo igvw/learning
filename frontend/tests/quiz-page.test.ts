@@ -111,13 +111,13 @@ describe('QuizPage', () => {
     expect(screen.queryByText('Accepted answers')).toBeNull();
     expect(screen.queryByText(/Slot 1:/)).toBeNull();
     expect(screen.queryAllByRole('listitem')).toHaveLength(0);
-    expect(screen.getByText(/questions above for revision/i)).toBeTruthy();
+    expect(screen.getByText(/questions above for review/i)).toBeTruthy();
     expect(answeredCard?.className).toContain('incorrect');
     expect(answeredInput.className).toContain('answer-incorrect');
     expect(answerBox?.className).toContain('plain-answer-box');
     const startAnotherQuizButton = screen.getByRole('button', { name: 'Start Another Quiz' });
     await waitFor(() => expect(document.activeElement).toBe(startAnotherQuizButton));
-    expect(screen.getByRole('button', { name: 'Flag for revision' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Flag for review' })).toBeTruthy();
   });
 
   it('lets you choose the number of questions before starting a quiz', async () => {
@@ -205,7 +205,7 @@ describe('QuizPage', () => {
 
   it('shows all accepted answers inside the input for a correct primary single-slot answer', async () => {
     const user = userEvent.setup();
-    const markSpy = vi.fn().mockResolvedValue(undefined);
+    const toggleSpy = vi.fn().mockResolvedValue(undefined);
     const session = buildQuizSession({
       id: 25,
       completed_at: '2026-04-04T10:00:00Z',
@@ -234,7 +234,7 @@ describe('QuizPage', () => {
         moduleLabel: 'Geography',
         busyItemId: null,
         markingReviewQuestionId: null,
-        onMarkForRevision: markSpy,
+        onToggleReviewFlag: toggleSpy,
         onSubmit: vi.fn()
       }
     });
@@ -248,8 +248,304 @@ describe('QuizPage', () => {
     expect(screen.queryByText('nile')).toBeNull();
     expect(screen.queryByText('nile / the nile')).toBeNull();
     expect(screen.queryByRole('list')).toBeNull();
-    await user.click(screen.getByRole('button', { name: 'Flag for revision' }));
-    expect(markSpy).toHaveBeenCalledWith(21);
+    await user.click(screen.getByRole('button', { name: 'Flag for review' }));
+    expect(toggleSpy).toHaveBeenCalledWith(21, true);
+  });
+
+  it('shows and toggles review flags as soon as a question has been submitted', async () => {
+    const user = userEvent.setup();
+    const toggleSpy = vi.fn().mockResolvedValue(undefined);
+    const session = buildQuizSession({
+      id: 29,
+      items: [
+        buildQuizItem({
+          id: 31,
+          question_id: 41,
+          prompt: 'What is the capital of Norway?',
+          submitted_answer: ['Oslo'],
+          is_correct: true,
+          score_earned: 1,
+          score_possible: 1,
+          canonical_answers: ['oslo'],
+          default_answers: ['oslo'],
+          accepted_answer_groups: [['oslo']],
+          matched_default_answers: [true]
+        }),
+        buildQuizItem({
+          id: 32,
+          position: 2,
+          question_id: 42,
+          prompt: 'What is the capital of Sweden?'
+        })
+      ]
+    });
+
+    render(QuizPage, {
+      props: {
+        session,
+        moduleLabel: 'Geography',
+        busyItemId: null,
+        onToggleReviewFlag: toggleSpy,
+        onSubmit: vi.fn()
+      }
+    });
+
+    expect(screen.queryByText('Session complete')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Edit question' })).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Flag for review' }));
+
+    expect(toggleSpy).toHaveBeenCalledWith(41, true);
+  });
+
+  it('opens the editor from flagged answered questions only', async () => {
+    const user = userEvent.setup();
+    const openEditSpy = vi.fn().mockResolvedValue(undefined);
+    const session = buildQuizSession({
+      id: 34,
+      items: [
+        buildQuizItem({
+          id: 40,
+          question_id: 50,
+          prompt: 'What is the capital of Germany?',
+          submitted_answer: ['Berlin'],
+          is_correct: true,
+          review_flag: true,
+          score_earned: 1,
+          score_possible: 1,
+          canonical_answers: ['berlin'],
+          default_answers: ['berlin'],
+          accepted_answer_groups: [['berlin']],
+          matched_default_answers: [true]
+        }),
+        buildQuizItem({
+          id: 41,
+          position: 2,
+          question_id: 51,
+          prompt: 'What is the capital of Austria?'
+        })
+      ]
+    });
+
+    render(QuizPage, {
+      props: {
+        session,
+        moduleLabel: 'Geography',
+        busyItemId: null,
+        onOpenEdit: openEditSpy,
+        onSubmit: vi.fn()
+      }
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Edit question' }));
+
+    expect(openEditSpy).toHaveBeenCalledWith(50);
+  });
+
+  it('lets submitted questions be unflagged during the current quiz page', async () => {
+    const user = userEvent.setup();
+    const toggleSpy = vi.fn().mockResolvedValue(undefined);
+    const session = buildQuizSession({
+      id: 30,
+      items: [
+        buildQuizItem({
+          id: 33,
+          question_id: 43,
+          prompt: 'What is the capital of Denmark?',
+          submitted_answer: ['Copenhagen'],
+          is_correct: true,
+          review_flag: true,
+          score_earned: 1,
+          score_possible: 1,
+          canonical_answers: ['copenhagen'],
+          default_answers: ['copenhagen'],
+          accepted_answer_groups: [['copenhagen']],
+          matched_default_answers: [true]
+        }),
+        buildQuizItem({
+          id: 34,
+          position: 2,
+          question_id: 44,
+          prompt: 'What is the capital of Finland?'
+        })
+      ]
+    });
+
+    const view = render(QuizPage, {
+      props: {
+        session,
+        moduleLabel: 'Geography',
+        busyItemId: null,
+        onToggleReviewFlag: toggleSpy,
+        onSubmit: vi.fn()
+      }
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Remove review flag' }));
+
+    expect(toggleSpy).toHaveBeenCalledWith(43, false);
+
+    await view.rerender({
+      session: buildQuizSession({
+        ...session,
+        items: session.items.map((item) => (item.question_id === 43 ? { ...item, review_flag: false } : item))
+      }),
+      moduleLabel: 'Geography',
+      busyItemId: null,
+      onToggleReviewFlag: toggleSpy,
+      onSubmit: vi.fn()
+    });
+
+    expect(screen.queryByRole('button', { name: 'Edit question' })).toBeNull();
+  });
+
+  it('uses Alt+R to toggle the most recently submitted question', () => {
+    const toggleSpy = vi.fn().mockResolvedValue(undefined);
+    const session = buildQuizSession({
+      id: 31,
+      items: [
+        buildQuizItem({
+          id: 35,
+          question_id: 45,
+          prompt: 'What is the capital of Iceland?',
+          submitted_answer: ['Reykjavik'],
+          is_correct: true,
+          score_earned: 1,
+          score_possible: 1,
+          canonical_answers: ['reykjavik'],
+          default_answers: ['reykjavik'],
+          accepted_answer_groups: [['reykjavik']],
+          matched_default_answers: [true]
+        }),
+        buildQuizItem({
+          id: 36,
+          position: 2,
+          question_id: 46,
+          prompt: 'What is the capital of Estonia?'
+        })
+      ]
+    });
+
+    render(QuizPage, {
+      props: {
+        session,
+        moduleLabel: 'Geography',
+        busyItemId: null,
+        onToggleReviewFlag: toggleSpy,
+        onSubmit: vi.fn()
+      }
+    });
+
+    const event = new KeyboardEvent('keydown', {
+      altKey: true,
+      bubbles: true,
+      cancelable: true,
+      code: 'KeyR',
+      key: 'r'
+    });
+    window.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(toggleSpy).toHaveBeenCalledWith(45, true);
+  });
+
+  it('does not intercept Alt+R when there is no submitted previous question', () => {
+    const toggleSpy = vi.fn().mockResolvedValue(undefined);
+    const session = buildQuizSession({
+      id: 32,
+      items: [
+        buildQuizItem({
+          id: 37,
+          question_id: 47,
+          prompt: 'What is the capital of Latvia?'
+        })
+      ]
+    });
+
+    render(QuizPage, {
+      props: {
+        session,
+        moduleLabel: 'Geography',
+        busyItemId: null,
+        onToggleReviewFlag: toggleSpy,
+        onSubmit: vi.fn()
+      }
+    });
+
+    const event = new KeyboardEvent('keydown', {
+      altKey: true,
+      bubbles: true,
+      cancelable: true,
+      code: 'KeyR',
+      key: 'r'
+    });
+    window.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(toggleSpy).not.toHaveBeenCalled();
+  });
+
+  it('uses Alt+R on the final submitted item even when completed review mode hides it', async () => {
+    const user = userEvent.setup();
+    const toggleSpy = vi.fn().mockResolvedValue(undefined);
+    const session = buildQuizSession({
+      id: 33,
+      completed_at: '2026-04-04T10:00:00Z',
+      items: [
+        buildQuizItem({
+          id: 38,
+          question_id: 48,
+          prompt: 'What is the capital of Kenya?',
+          submitted_answer: ['Mombasa'],
+          is_correct: false,
+          score_earned: 0,
+          score_possible: 1,
+          canonical_answers: ['nairobi'],
+          default_answers: ['nairobi'],
+          accepted_answer_groups: [['nairobi']],
+          matched_default_answers: [false]
+        }),
+        buildQuizItem({
+          id: 39,
+          position: 2,
+          question_id: 49,
+          prompt: 'What is the capital of Japan?',
+          submitted_answer: ['Tokyo'],
+          is_correct: true,
+          score_earned: 1,
+          score_possible: 1,
+          canonical_answers: ['tokyo'],
+          default_answers: ['tokyo'],
+          accepted_answer_groups: [['tokyo']],
+          matched_default_answers: [true]
+        })
+      ]
+    });
+
+    render(QuizPage, {
+      props: {
+        session,
+        moduleLabel: 'Geography',
+        busyItemId: null,
+        onToggleReviewFlag: toggleSpy,
+        onSubmit: vi.fn()
+      }
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Review Mistakes' }));
+    expect(screen.queryByText('2. What is the capital of Japan?')).toBeNull();
+
+    const event = new KeyboardEvent('keydown', {
+      altKey: true,
+      bubbles: true,
+      cancelable: true,
+      code: 'KeyR',
+      key: 'r'
+    });
+    window.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(toggleSpy).toHaveBeenCalledWith(49, true);
   });
 
   it('shows all accepted answers inside the input when a correct alternative is submitted', () => {
@@ -342,7 +638,7 @@ describe('QuizPage', () => {
     expect(answerBox?.className).toContain('plain-answer-box');
     expect(screen.queryByText('thorax')).toBeNull();
     expect(screen.queryAllByRole('listitem')).toHaveLength(0);
-    expect(screen.getByRole('button', { name: 'Flag for revision' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Flag for review' })).toBeTruthy();
   });
 
   it('shows all accepted answers in every correct slot for fully correct multi-slot submissions', () => {
