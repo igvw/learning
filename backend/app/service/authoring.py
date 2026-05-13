@@ -20,7 +20,7 @@ from .catalog import (
     ensure_unique_module_slug,
     ensure_user_exists,
 )
-from .errors import NotFoundError, ValidationError
+from .errors import NotFoundError, UnprocessableEntityError, ValidationError
 from .questions import draft_kwargs_from_storage, serialize_type_config, stored_prompt_key
 from .text import json_dumps, normalize_text
 from .visibility import question_visible_to_actor
@@ -290,7 +290,6 @@ def _insert_replacement_question(
         """,
         (replacement_id, current["id"]),
     )
-    connection.execute("DELETE FROM user_review_flags WHERE question_id = ?", (current["id"],))
     return replacement_id
 
 
@@ -372,7 +371,6 @@ def apply_import_revision(connection: DatabaseConnection, *, question_id: int, p
         question_type=payload.question_type,
         bundle_variants=bundle_variants,
     )
-    connection.execute("DELETE FROM user_review_flags WHERE question_id = ?", (question_id,))
     return question_id
 
 
@@ -437,7 +435,6 @@ def relocate_question_for_import(
         question_type=payload.question_type,
         bundle_variants=bundle_variants,
     )
-    connection.execute("DELETE FROM user_review_flags WHERE question_id = ?", (question_id,))
     return int(current["module_id"])
 
 
@@ -564,6 +561,8 @@ def revise_question(
             raise ValidationError("Regular-user revisions cannot move a verified question to another module.")
         if int(payload.rank) != int(current["rank"]):
             raise ValidationError("Regular-user revisions cannot change rank for a verified question.")
+        if _payload_matches_question_row(payload, current):
+            raise UnprocessableEntityError("Suggest at least one change before moving this question to review.")
         proposal = _upsert_question_revision_proposal(
             connection,
             question_id=question_id,
@@ -703,26 +702,35 @@ def delete_question(connection: DatabaseConnection, question_id: int, *, actor: 
     }
 
 
-def set_question_review_flag(
+def withdraw_question_revision(
     connection: DatabaseConnection,
     *,
-    user_id: int,
+    actor: Actor,
     question_id: int,
-    review_flag: bool,
-) -> dict[str, Any]:
-    ensure_user_exists(connection, user_id)
+) -> None:
+    if actor.user_id is None:
+        raise ValidationError("You must be signed in to remove a review proposal.")
+    ensure_user_exists(connection, int(actor.user_id))
     _require_question_row(connection, question_id)
+    row = connection.execute(
+        """
+        SELECT id
+        FROM question_revision_proposals
+        WHERE question_id = ?
+          AND proposer_user_id = ?
+          AND status = 'pending'
+        """,
+        (question_id, actor.user_id),
+    ).fetchone()
+    if row is None:
+        raise NotFoundError(f"No pending revision was found for question {question_id}.")
     connection.execute(
         """
-        INSERT INTO user_review_flags (user_id, question_id, review_flag, updated_at)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(user_id, question_id) DO UPDATE SET
-            review_flag = excluded.review_flag,
-            updated_at = excluded.updated_at
+        DELETE FROM question_revision_proposals
+        WHERE id = ?
         """,
-        (user_id, question_id, int(review_flag), utc_now()),
+        (row["id"],),
     )
-    return {"question_id": question_id, "review_flag": review_flag}
 
 
 def delete_question_record(connection: DatabaseConnection, question_id: int) -> None:
@@ -735,10 +743,9 @@ def delete_question_record(connection: DatabaseConnection, question_id: int) -> 
             UPDATE questions
             SET enabled = 0, replaced_by_question_id = NULL
             WHERE id = ?
-            """,
+        """,
             (question_id,),
         )
-        connection.execute("DELETE FROM user_review_flags WHERE question_id = ?", (question_id,))
         return
     connection.execute("DELETE FROM questions WHERE id = ?", (question_id,))
 

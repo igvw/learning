@@ -4,8 +4,6 @@ from ...database import DatabaseConnection
 from ...schemas import (
     QuestionDraftIn,
     QuestionMutationOut,
-    QuestionReviewFlagIn,
-    QuestionReviewFlagOut,
     QuestionRevisionIn,
     QuestionRowOut,
 )
@@ -15,7 +13,7 @@ from ...services import (
     delete_question,
     get_question,
     revise_question,
-    set_question_review_flag,
+    withdraw_question_revision,
 )
 from ..dependencies import database_connection, require_actor
 
@@ -61,16 +59,11 @@ def questions_delete(
     return delete_question(connection, question_id, actor=actor)
 
 
-@router.patch("/api/questions/{question_id}/review-flag", response_model=QuestionReviewFlagOut)
-def questions_review_flag(
+@router.delete("/api/questions/{question_id}/revisions/mine", status_code=204)
+def questions_revision_withdraw(
     question_id: int,
-    payload: QuestionReviewFlagIn,
     actor: Actor = Depends(require_actor),
     connection: DatabaseConnection = Depends(database_connection),
-) -> dict:
-    return set_question_review_flag(
-        connection,
-        user_id=int(actor.user_id),
-        question_id=question_id,
-        review_flag=payload.review_flag,
-    )
+) -> None:
+    withdraw_question_revision(connection, actor=actor, question_id=question_id)
+    return None

@@ -15,7 +15,7 @@ The database is organized around:
 - shared study content
 - moderation state around shared study content
 - user-owned quiz history
-- user-owned review state
+- user-owned revision/delete proposal state
 - authenticated account sessions
 
 The runtime database is PostgreSQL.
@@ -88,7 +88,7 @@ Important choices:
 - each bundle variant is a row so quiz items and attempts can point to the exact served variant
 - export rebuilds canonical bundle QML from ordered variant rows
 
-## Users, Sessions, And Review Flags
+## Users, Sessions, And Review Proposals
 
 `users` stores real authenticated accounts.
 
@@ -104,12 +104,10 @@ Each user keeps:
 
 `question_revision_proposals` stores regular-user revisions and delete requests against verified shared questions.
 
-`user_review_flags` stores user-specific review state keyed by `(user_id, question_id)`.
-
 Important choices:
 
-- review flags are personal, not shared question metadata
-- shared content stays separate from user maintenance state
+- review means an actual pending revision or delete proposal
+- shared content stays separate from pending user-authored proposal state
 
 ## Quiz History
 
@@ -169,7 +167,7 @@ The model separates:
 - long-term bucket memory (`1h` through `60d`)
 - `mastery`
 
-Review-flagged questions are excluded from serving and treated separately in stats.
+Questions with the current user’s pending revision or delete proposal are excluded from serving and shown separately in stats Review mode.
 
 ## Seed Content
 
@@ -186,7 +184,6 @@ Behavior:
 - modules own questions
 - users own quiz sessions
 - quiz sessions own quiz session items
-- users own review flags over shared questions
 - users also own auth sessions
 - users can own pending modules, pending uploaded questions, and revision proposals
 
@@ -194,4 +191,4 @@ That split keeps the durable model relatively small:
 
 - shared content in `modules` and `questions`
 - user study history in `quiz_sessions` and `attempts`
-- user maintenance state in `user_review_flags`
+- pending contribution state in moderation tables such as `question_revision_proposals`

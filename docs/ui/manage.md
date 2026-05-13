@@ -16,7 +16,7 @@ Admins see:
 - overlay-based global module editing, path-based creation, and safe module deletion
 - overlay-based manual full-content export
 - overlay-based QML import
-- moderation summary cards for pending modules, pending uploaded questions, and question revision/delete proposals
+- moderation summary cards for pending modules and pending uploaded questions
 
 Module management behavior:
 
@@ -30,10 +30,7 @@ Moderation behavior:
 - the `Modules` moderation overlay opens with `Pending` and `Rejected` summary cards before drilling into either list
 - rejected modules move out of the pending list, stay admin-visible, and can be either approved or hard-deleted
 - the pending uploaded questions overlay groups rows by module and supports bulk approve/reject per module table
-- the pending revisions overlay opens with module cards, then drills into one module at a time with collapsed change sections
-- each revision row keeps all question details in one `Changes` snapshot
-- clicking a revision snapshot opens the shared question drawer in moderation-review mode, and saving approves the edited revision immediately
-- pending revisions support bulk approve/reject per expanded change section
+- question revision/delete proposal moderation lives on the stats page Review card
 
 ## Regular User View
 
@@ -41,5 +38,5 @@ Regular users see:
 
 - a compact `Modules` summary card that opens pending-module creation and editing
 - one wide `My contributions` summary card
-- a browsable contributions overlay with pending `Modules`, `Uploaded questions`, and active `Revisions`
-- read-only revision detail using the same snapshot or diff card style as admin moderation, without moderation actions
+- a browsable contributions overlay with pending `Modules` and `Uploaded questions`
+- pending revision/delete proposals live on the stats page Review card

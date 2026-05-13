@@ -101,7 +101,6 @@ describe('EditorDrawer', () => {
           attempts: 4,
           correct_percentage: 0.5,
           last_asked_at: '2026-04-04T09:00:00Z',
-          review_flag: true,
           accepted_answers: [['dog']],
           segments: [],
           schedule: {
@@ -189,7 +188,6 @@ describe('EditorDrawer', () => {
           attempts: 2,
           correct_percentage: 0.5,
           last_asked_at: '2026-04-05T09:00:00Z',
-          review_flag: false,
           accepted_answers: [['Saturday']],
           segments: [],
           schedule: {

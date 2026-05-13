@@ -17,30 +17,28 @@ The page includes:
 - entry-state graph
 - retry-eligibility graph
 - first-time questions answered by day over the last 7 app-timezone days
-- sortable question table
-- `Review only` checkbox that filters the same table between non-review and review-flagged rows
+- collapsible question bucket cards
+- `Review` checkbox that switches between normal question buckets and pending revision/delete proposals
 - floating create-question action
 
-## Question Table
+## Question Buckets
 
-The table focuses on:
+Normal bucket cards focus on:
 
 - rank
 - prompt
-- logical bucket
 - last seen
 - attempts
 - correctness
 
-Table behavior:
+Bucket behavior:
 
-- when unchecked, the table shows only non-review rows
-- when checked, the table shows only review-flagged rows
-- summary cards and graphs stay based on the full module scope while the table is filtered
-- unverified uploaded questions and personal revision overlays show badges in the question table
-- review rows stay orange when shown in the filtered table
+- when `Review` is unchecked, cards show normal quiz-eligible question buckets
+- when `Review` is checked, the page shows the `Review` card with pending revision/delete proposals
+- pending proposals can be re-edited or removed by the proposing user
+- admins can approve, reject, or edit-then-approve pending proposals from the same Review card
 - hot rows are shaded red in two intensities in the main table
-- logical bucket and hotness are separated intentionally
+- clicking `Entry states` opens the all-questions overlay for the active non-review question set
 
 ## Graph Detail Overlays
 

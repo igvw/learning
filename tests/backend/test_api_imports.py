@@ -77,7 +77,6 @@ class ImportApiTests(PostgresBackendTestCase):
         session = self.start_quiz_session(user["id"], module_ids["source_a"], 1)
         item = session["items"][0]
         self.submit_quiz_item(user["id"], session["id"], item["id"], ["dog"])
-        self.set_review_flag(user["id"], question_id, True)
 
         validate_payload = self.validate_import_payload(module_ids["target"], qml_text="hund [dog]")
         self.assertEqual(validate_payload["review_rows"][0]["status"], "info")
@@ -99,7 +98,6 @@ class ImportApiTests(PostgresBackendTestCase):
         self.assertEqual(len(target_stats["questions"]), 3)
         moved_question = next(question for question in target_stats["questions"] if question["question_id"] == question_id)
         self.assertEqual(moved_question["attempts"], 1)
-        self.assertFalse(moved_question["review_flag"])
 
         with get_connection(self.database_url) as connection:
             target_prompts = [
@@ -172,7 +170,6 @@ class ImportApiTests(PostgresBackendTestCase):
         session = self.start_quiz_session(user["id"], target["id"], 1)
         item = session["items"][0]
         self.submit_quiz_item(user["id"], session["id"], item["id"], ["against"])
-        self.set_review_flag(user["id"], question_id, True)
 
         validate_payload = self.validate_import_payload(target["id"], qml_text="mot [against | toward]")
         self.assertEqual(validate_payload["review_rows"][0]["status"], "duplicate")
@@ -190,7 +187,6 @@ class ImportApiTests(PostgresBackendTestCase):
         replacement_id = target_stats["questions"][0]["question_id"]
         self.assertNotEqual(replacement_id, question_id)
         self.assertEqual(target_stats["questions"][0]["attempts"], 1)
-        self.assertFalse(target_stats["questions"][0]["review_flag"])
         self.assertEqual(target_stats["questions"][0]["accepted_answers"], [["against", "toward"]])
         self.assertEqual(target_stats["questions"][0]["rank"], 1)
         with get_connection(self.database_url) as connection:
@@ -251,7 +247,6 @@ class ImportApiTests(PostgresBackendTestCase):
         session = self.start_quiz_session(user["id"], target["id"], 1)
         item = session["items"][0]
         self.submit_quiz_item(user["id"], session["id"], item["id"], ["against"])
-        self.set_review_flag(user["id"], question_id, True)
 
         commit_payload = self.commit_import_payload(
             target["id"],
@@ -265,7 +260,6 @@ class ImportApiTests(PostgresBackendTestCase):
         self.assertEqual(len(target_stats["questions"]), 1)
         self.assertEqual(target_stats["questions"][0]["question_id"], question_id)
         self.assertEqual(target_stats["questions"][0]["attempts"], 1)
-        self.assertTrue(target_stats["questions"][0]["review_flag"])
         self.assertEqual(target_stats["questions"][0]["accepted_answers"], [["against"]])
 
     def test_same_upload_changed_duplicate_blocks_commit_until_resolved(self) -> None:
@@ -312,8 +306,6 @@ class ImportApiTests(PostgresBackendTestCase):
         session = self.start_quiz_session(user["id"], module_ids["source_b"], 1)
         item = session["items"][0]
         self.submit_quiz_item(user["id"], session["id"], item["id"], ["wrong"])
-        self.set_review_flag(user["id"], first_question_id, True)
-        self.set_review_flag(user["id"], second_question_id, True)
 
         validate_payload = self.validate_import_payload(module_ids["target"], qml_text="hund [dog | canine | pooch]")
         self.assertEqual(validate_payload["review_rows"][0]["status"], "conflict")

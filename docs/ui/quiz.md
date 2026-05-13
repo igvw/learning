@@ -18,12 +18,11 @@ The quiz page is the keyboard-first study surface.
 ## Feedback
 
 - incorrect answers show all accepted answers in the grey feedback box
-- correct answers that used a non-default accepted alternative expand that slot’s disabled input to all accepted answers
-- correct answers that used the default accepted answer do not show a separate neutral feedback box
+- correct answers expand that slot’s disabled input to all accepted answers
+- answered cards show `Suggest change`, which opens the shared question editor without moving the question to Review until an actual revision/delete proposal is saved
 
 ## Completed Session
 
-- the completed session becomes the review surface
 - the start-another-quiz action is prominent
-- review actions live directly on answered cards
+- suggestion actions live directly on answered cards
 - correctly answered cards can be hidden to focus review

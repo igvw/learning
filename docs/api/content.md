@@ -131,10 +131,8 @@ Returns the current regular user’s active contribution queue:
 
 - pending modules
 - pending uploaded questions
-- active revision/delete proposals (`pending`)
 
-Rejected revision proposals remain in the database for moderation history, but are not returned in this user-facing payload.
-Rejected modules are also excluded from this user-facing payload.
+Pending revision/delete proposals live on the stats Review surface instead of this Manage-page contribution queue. Rejected modules are excluded from this user-facing payload.
 
 ### `GET /api/moderation/queue`
 
@@ -143,7 +141,8 @@ Admin-only. Returns:
 - `pending_modules`
 - `rejected_modules`
 - pending question uploads
-- pending question revisions/delete requests
+
+Pending revision/delete proposals are returned by `GET /api/stats` for the selected scope. Admins moderate them from the stats Review surface through `POST /api/moderation/question-revisions/{proposal_id}`.
 
 ### `POST /api/moderation/modules/{module_id}`
 
@@ -203,6 +202,8 @@ Role behavior:
 - regular users editing a verified question create or update a personal revision proposal instead
 - regular users editing their own pending uploaded question update that pending row directly
 
+Regular-user verified-question revisions must contain an actual content change. Unchanged revision payloads return `422`.
+
 ### `DELETE /api/questions/{question_id}`
 
 Role behavior:
@@ -211,14 +212,6 @@ Role behavior:
 - regular users delete only their own pending uploaded questions immediately
 - regular users deleting a verified question create or update a personal delete request proposal instead
 
-### `PATCH /api/questions/{question_id}/review-flag`
+### `DELETE /api/questions/{question_id}/revisions/mine`
 
-Sets the current user’s review flag for a question.
-
-Practical request shape:
-
-```json
-{
-  "review_flag": true
-}
-```
+Deletes the current user’s pending revision/delete proposal for the question. This removes the item from stats Review mode and returns the original question to normal quiz eligibility based on its existing history-derived schedule.

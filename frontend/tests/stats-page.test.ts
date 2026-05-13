@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 import StatsPage from '../src/components/StatsPage.svelte';
-import { buildQuestionRow, buildRecentSession, buildStatsResponse } from './builders';
+import { buildQuestionRevisionProposal, buildQuestionRow, buildRecentSession, buildStatsResponse } from './builders';
 import {
   buildRecoveryStageGraph
 } from '../src/lib/stats/stage-graphs';
@@ -18,6 +18,12 @@ import {
 } from '../src/lib/stats/due-graphs';
 
 describe('StatsPage', () => {
+  function reviewBucketToggle(container: HTMLElement): HTMLElement {
+    const toggle = within(container).getByText('Review').closest('label');
+    expect(toggle).toBeTruthy();
+    return toggle as HTMLElement;
+  }
+
   it('builds retry eligibility counts across the coming week from fixed buckets only', () => {
     const referenceTime = new Date(2026, 3, 5, 10, 30, 0);
     const localIso = (year: number, monthIndex: number, day: number, hours: number, minutes = 0): string =>
@@ -37,7 +43,6 @@ describe('StatsPage', () => {
         correct_percentage: questionId === 15 ? 0 : 1,
         first_asked_at: questionId === 15 ? null : '2026-04-05T09:00:00Z',
         last_asked_at: questionId === 15 ? null : '2026-04-05T09:00:00Z',
-        review_flag: questionId === 13,
         schedule
       });
 
@@ -226,7 +231,6 @@ describe('StatsPage', () => {
       }),
       buildQuestionRow({
         question_id: 6,
-        review_flag: true,
         schedule: {
           bucket: 'hot0',
           logical_bucket: 'review'
@@ -601,34 +605,6 @@ describe('StatsPage', () => {
       ],
       questions: [
         buildQuestionRow({
-          question_id: 50,
-          module_id: 3,
-          module_full_slug: 'biology/plants',
-          prompt: 'What structure anchors most plants in the ground?',
-          prompt_preview: 'What structure anchors most plants in the ground?',
-          rank: 2,
-          attempts: 3,
-          correct_percentage: 2 / 3,
-          first_asked_at: '2026-04-01T06:00:00Z',
-          last_asked_at: '2026-04-01T06:00:00Z',
-          review_flag: true,
-          accepted_answers: [['roots']],
-          recent_incorrect_answers: [
-            {
-              answer_text: 'stems',
-              count: 2,
-              latest_answered_at: '2026-04-04T08:00:00Z'
-            }
-          ],
-          schedule: {
-            bucket: 'hot1_sit_out',
-            logical_bucket: 'review',
-            recovery_streak: 1,
-            interval_step: 0,
-            last_incorrect_at: '2026-04-04T08:00:00Z'
-          }
-        }),
-        buildQuestionRow({
           question_id: 51,
           module_id: 5,
           module_full_slug: 'geography/capitals',
@@ -691,34 +667,28 @@ describe('StatsPage', () => {
             interval_step: 0,
             last_incorrect_at: '2026-04-04T07:30:00Z'
           }
+        })
+      ],
+      revision_proposals: [
+        buildQuestionRevisionProposal({
+          proposal_id: 501,
+          question_id: 50,
+          module_id: 3,
+          module_full_slug: 'biology/plants',
+          current_prompt: 'What structure anchors most plants in the ground?',
+          proposed_prompt: 'What root structure anchors most plants in the ground?',
+          current_accepted_answers: [['roots']],
+          proposed_accepted_answers: [['roots']]
         }),
-        buildQuestionRow({
+        buildQuestionRevisionProposal({
+          proposal_id: 503,
           question_id: 53,
           module_id: 3,
           module_full_slug: 'biology/plants',
-          prompt: 'What process lets plants turn light into stored energy?',
-          prompt_preview: 'What process lets plants turn light into stored energy?',
-          rank: 1,
-          attempts: 2,
-          correct_percentage: 1 / 2,
-          first_asked_at: '2026-04-03T07:00:00Z',
-          last_asked_at: '2026-04-03T07:00:00Z',
-          review_flag: true,
-          accepted_answers: [['photosynthesis']],
-          recent_incorrect_answers: [
-            {
-              answer_text: 'respiration',
-              count: 1,
-              latest_answered_at: '2026-04-03T07:00:00Z'
-            }
-          ],
-          schedule: {
-            bucket: 'hot0',
-            logical_bucket: 'review',
-            recovery_streak: 0,
-            interval_step: 0,
-            last_incorrect_at: '2026-04-03T07:00:00Z'
-          }
+          current_prompt: 'What process lets plants turn light into stored energy?',
+          proposed_prompt: 'What process lets plants convert light into stored energy?',
+          current_accepted_answers: [['photosynthesis']],
+          proposed_accepted_answers: [['photosynthesis']]
         })
       ]
     });
@@ -770,7 +740,7 @@ describe('StatsPage', () => {
       '1'
     ]);
     expect(Array.from(bucketStack.querySelectorAll('.question-bucket-caret')).map((node) => node.textContent)).toEqual(
-      Array.from({ length: 13 }, () => 'v')
+      Array.from({ length: 13 }, () => '')
     );
     expect(screen.queryByText('What structure anchors most plants in the ground?')).toBeNull();
     expect(screen.queryByText('What is the capital of Canada?')).toBeNull();
@@ -784,13 +754,13 @@ describe('StatsPage', () => {
     expect(threeHourBucket.getAttribute('aria-expanded')).toBe('false');
     await user.click(threeHourBucket);
     expect(threeHourBucket.getAttribute('aria-expanded')).toBe('true');
-    expect(threeHourBucket.querySelector('.question-bucket-caret')?.textContent).toBe('^');
+    expect(threeHourBucket.querySelector('.question-bucket-caret')?.className).toContain('expanded');
     expect(within(bucketStack).getByText('What is the capital of Canada?')).toBeTruthy();
     expect(within(bucketStack).queryByRole('button', { name: 'Bucket' })).toBeNull();
     expect(within(bucketStack).getAllByRole('button', { name: /^Last seen/ }).length).toBeGreaterThan(0);
 
     await user.click(within(bucketStack).getByText('What is the capital of Canada?'));
-    expect(openSpy).toHaveBeenCalledWith(stats.questions[1]);
+    expect(openSpy).toHaveBeenCalledWith(stats.questions[0]);
 
     await user.click(screen.getByRole('button', { name: 'Open all questions' }));
     let allQuestionsDialog = await screen.findByRole('dialog', { name: 'All questions' });
@@ -811,7 +781,7 @@ describe('StatsPage', () => {
       expect(rowsAfterLastSeenSort[3].textContent).toContain('What is the capital of Canada?');
     });
     await user.click(within(allQuestionsDialog).getByText('What is the capital of Sweden?'));
-    expect(openSpy).toHaveBeenLastCalledWith(stats.questions[2]);
+    expect(openSpy).toHaveBeenLastCalledWith(stats.questions[1]);
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: 'All questions' })).toBeNull();
     });
@@ -855,26 +825,28 @@ describe('StatsPage', () => {
     expect(Array.from(bucketStack.querySelectorAll('.question-bucket-count')).map((node) => node.textContent)).toEqual([
       '2'
     ]);
-    expect(within(bucketStack).getByRole('button', { name: /^Review\s+2/ }).getAttribute('aria-expanded')).toBe('false');
+    expect(reviewBucketToggle(bucketStack).getAttribute('aria-expanded')).toBe('false');
     expect(screen.queryByText('What is the capital of Canada?')).toBeNull();
 
-    await user.click(within(bucketStack).getByRole('button', { name: /^Review\s+2/ }));
+    await user.click(reviewBucketToggle(bucketStack));
     expect(within(bucketStack).getByText('What structure anchors most plants in the ground?')).toBeTruthy();
     expect(within(bucketStack).getByText('What process lets plants turn light into stored energy?')).toBeTruthy();
 
+    const refreshedStats = buildStatsResponse({
+      ...stats,
+      revision_proposals: [
+        buildQuestionRevisionProposal({
+          ...stats.revision_proposals[0],
+          current_prompt: 'What root structure anchors most plants in the ground?',
+          proposed_prompt: 'What root structure anchors most plants in the ground?'
+        }),
+        stats.revision_proposals[1]
+      ]
+    });
+
     await view.rerender({
       moduleLabel: 'Biology',
-      stats: buildStatsResponse({
-        ...stats,
-        questions: [
-          buildQuestionRow({
-            ...stats.questions[0],
-            prompt: 'What root structure anchors most plants in the ground?',
-            prompt_preview: 'What root structure anchors most plants in the ground?'
-          }),
-          stats.questions[4]
-        ]
-      }),
+      stats: refreshedStats,
       loading: false,
       reviewOnly: true,
       onToggleReviewOnly: toggleSpy,
@@ -883,7 +855,7 @@ describe('StatsPage', () => {
     });
 
     bucketStack = view.container.querySelector('.stats-question-buckets') as HTMLElement;
-    expect(within(bucketStack).getByRole('button', { name: /^Review\s+2/ }).getAttribute('aria-expanded')).toBe('true');
+    expect(reviewBucketToggle(bucketStack).getAttribute('aria-expanded')).toBe('true');
     expect(within(bucketStack).getByText('What root structure anchors most plants in the ground?')).toBeTruthy();
     expect(within(bucketStack).getByText('What process lets plants turn light into stored energy?')).toBeTruthy();
 
@@ -898,12 +870,10 @@ describe('StatsPage', () => {
     });
 
     bucketStack = view.container.querySelector('.stats-question-buckets') as HTMLElement;
-    expect(within(bucketStack).getByRole('button', { name: /^Review\s+2/ }).getAttribute('aria-expanded')).toBe('false');
+    expect(reviewBucketToggle(bucketStack).getAttribute('aria-expanded')).toBe('false');
 
-    await user.click(within(bucketStack).getByRole('button', { name: /^Review\s+2/ }));
-
-    await user.click(within(bucketStack).getByText('What structure anchors most plants in the ground?'));
-    expect(openSpy).toHaveBeenLastCalledWith(stats.questions[0]);
+    await user.click(reviewBucketToggle(bucketStack));
+    expect(within(bucketStack).getAllByRole('button', { name: 'Edit proposal' }).length).toBeGreaterThan(0);
 
     expect(screen.getByRole('img', { name: 'Recent session accuracy graph' })).toBeTruthy();
     expect(screen.getByRole('img', { name: 'Spaced repetition stage counts' })).toBeTruthy();
@@ -937,24 +907,18 @@ describe('StatsPage', () => {
     expect(graphLabels).toContain('7');
     expect(graphLabels).toContain('>7');
     expect(view.container.querySelector('.graph-average-line title')?.textContent).toBe('83%');
-    expect(within(bucketStack).getByRole('button', { name: /^Review\s+2/ })).toBeTruthy();
+    expect(reviewBucketToggle(bucketStack)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Open spaced repetition stage details' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Open retry eligibility details' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Open all questions' })).toBeTruthy();
     expect(within(bucketStack).queryByRole('button', { name: 'Bucket' })).toBeNull();
-    expect(within(bucketStack).getByRole('button', { name: /^Last seen/ })).toBeTruthy();
+    expect(within(bucketStack).queryByRole('button', { name: /^Last seen/ })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Type' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Module' })).toBeNull();
 
-    const firstRowClass =
-      within(bucketStack).getByText('What structure anchors most plants in the ground?').closest('tr')?.className ?? '';
-    expect(firstRowClass).toContain('flagged-review');
-    expect(firstRowClass).not.toContain('hot1-row');
-
     await user.click(screen.getByRole('button', { name: 'Open all questions' }));
     allQuestionsDialog = await screen.findByRole('dialog', { name: 'All questions' });
-    expect(within(allQuestionsDialog).getByText('What structure anchors most plants in the ground?')).toBeTruthy();
-    expect(within(allQuestionsDialog).getByText('What process lets plants turn light into stored energy?')).toBeTruthy();
+    expect(within(allQuestionsDialog).getByText('No review proposals in this scope.')).toBeTruthy();
     expect(within(allQuestionsDialog).queryByText('What is the capital of Canada?')).toBeNull();
     await user.keyboard('{Escape}');
     await waitFor(() => {
@@ -1197,7 +1161,8 @@ describe('StatsPage', () => {
     expect(within(dialog).queryByRole('img', { name: 'Spaced repetition stage due-day heatmap' })).toBeNull();
   });
 
-  it('shows an empty review state when the toggle is on but no review questions exist', () => {
+  it('shows an empty review state when the toggle is on but no review proposals exist', async () => {
+    const user = userEvent.setup();
     render(StatsPage, {
       props: {
         stats: buildStatsResponse({
@@ -1218,10 +1183,13 @@ describe('StatsPage', () => {
       }
     });
 
-    expect(screen.getByText('No review questions in this scope.')).toBeTruthy();
+    const bucketStack = document.querySelector('.stats-question-buckets') as HTMLElement;
+    await user.click(reviewBucketToggle(bucketStack));
+
+    expect(screen.getByText('No review proposals in this scope.')).toBeTruthy();
   });
 
-  it('shows an empty main table when every question is review-flagged', () => {
+  it('shows an empty main table when there are no non-review questions', () => {
     render(StatsPage, {
       props: {
         stats: buildStatsResponse({
@@ -1233,25 +1201,13 @@ describe('StatsPage', () => {
             total_possible: 1,
             accuracy: 1
           },
-          questions: [
-            buildQuestionRow({
-              module_id: 2,
+          questions: [],
+          revision_proposals: [
+            buildQuestionRevisionProposal({
+              question_id: 2,
               module_full_slug: 'biology/plants',
-              prompt: 'What structure anchors most plants in the ground?',
-              prompt_preview: 'What structure anchors most plants in the ground?',
-              attempts: 1,
-              correct_percentage: 1,
-              first_asked_at: '2026-04-01T06:00:00Z',
-              last_asked_at: '2026-04-01T06:00:00Z',
-              review_flag: true,
-              accepted_answers: [['roots']],
-              schedule: {
-                bucket: 'hot1_sit_out',
-                logical_bucket: 'review',
-                recovery_streak: 1,
-                interval_step: 0,
-                last_incorrect_at: '2026-04-01T06:00:00Z'
-              }
+              current_prompt: 'What structure anchors most plants in the ground?',
+              proposed_prompt: 'What root structure anchors most plants in the ground?'
             })
           ]
         })

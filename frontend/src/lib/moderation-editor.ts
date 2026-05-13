@@ -35,13 +35,13 @@ export function buildModerationRevisionSeed(
     correct_percentage: 0,
     first_asked_at: null,
     last_asked_at: null,
-    review_flag: false,
     admin_verified: true,
     moderation_status: 'verified',
     created_by_user_id: null,
     creator_display_name: proposal.proposer_display_name,
     accepted_answers: useCurrent ? proposal.current_accepted_answers : proposal.proposed_accepted_answers,
     segments: useCurrent ? proposal.current_segments : proposal.proposed_segments,
+    bundle_qml: useCurrent ? proposal.current_bundle_qml : proposal.proposed_bundle_qml,
     recent_incorrect_answers: [],
     schedule: { ...EMPTY_SCHEDULE }
   };

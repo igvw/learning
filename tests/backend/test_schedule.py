@@ -7,7 +7,6 @@ from zoneinfo import ZoneInfo
 from backend.app.service.text import title_from_slug
 from backend.app.service.schedule import (
     _bucketed_question_selection,
-    _eligible_quiz_candidates,
     _logical_bucket_label,
     _randomize_quiz_order,
     _schedule_snapshot_from_attempts,
@@ -114,42 +113,20 @@ class SchedulerUnitTests(unittest.TestCase):
 
         self.assertEqual([row["question_id"] for row in shuffled], [4, 2, 1, 3])
 
-    def test_review_flagged_questions_are_excluded_from_quiz_candidates(self) -> None:
-        eligible = _eligible_quiz_candidates(
-            [
-                {"question_id": 1, "review_flag": True},
-                {"question_id": 2, "review_flag": False},
-                {"question_id": 3},
-            ]
-        )
-
-        self.assertEqual([row["question_id"] for row in eligible], [2, 3])
-
-    def test_logical_bucket_uses_review_and_bucket_origin_before_hotness(self) -> None:
+    def test_logical_bucket_uses_bucket_origin_before_hotness(self) -> None:
         self.assertEqual(
             _logical_bucket_label(
                 bucket="hot1_sit_out",
                 interval_step=None,
                 bucket_origin_step=8,
-                review_flag=False,
             ),
             "30d",
-        )
-        self.assertEqual(
-            _logical_bucket_label(
-                bucket="hot0",
-                interval_step=None,
-                bucket_origin_step=2,
-                review_flag=True,
-            ),
-            "review",
         )
         self.assertEqual(
             _logical_bucket_label(
                 bucket="cooling",
                 interval_step=9,
                 bucket_origin_step=None,
-                review_flag=False,
             ),
             "60d",
         )
@@ -342,7 +319,6 @@ class SchedulerUnitTests(unittest.TestCase):
                 bucket=thirty_day["bucket"],
                 interval_step=thirty_day["interval_step"],
                 bucket_origin_step=thirty_day.get("bucket_origin_step"),
-                review_flag=False,
             ),
             "30d",
         )
@@ -360,7 +336,6 @@ class SchedulerUnitTests(unittest.TestCase):
                 bucket=sixty_day["bucket"],
                 interval_step=sixty_day["interval_step"],
                 bucket_origin_step=sixty_day.get("bucket_origin_step"),
-                review_flag=False,
             ),
             "60d",
         )

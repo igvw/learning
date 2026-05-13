@@ -76,7 +76,6 @@ export interface QuizItem {
   question_id: number;
   module_id: number;
   module_instruction: string;
-  review_flag: boolean;
   prompt: string;
   question_type: QuestionType;
   rank: number;
@@ -94,6 +93,7 @@ export interface QuizItem {
   default_answers?: string[];
   accepted_answer_groups?: string[][];
   matched_default_answers?: boolean[];
+  viewer_revision_proposal_id?: number | null;
 }
 
 export interface QuizSession {
@@ -172,7 +172,6 @@ export interface QuestionRow {
   correct_percentage: number;
   first_asked_at: string | null;
   last_asked_at: string | null;
-  review_flag: boolean;
   admin_verified: boolean;
   moderation_status: ModerationStatus;
   created_by_user_id: number | null;
@@ -200,6 +199,7 @@ export interface StatsResponse {
   };
   recent_sessions: RecentSession[];
   questions: QuestionRow[];
+  revision_proposals: QuestionRevisionProposal[];
 }
 
 export interface QuestionDraftPayload {
@@ -222,11 +222,6 @@ export interface QuestionMutationResult {
   admin_verified: boolean;
   moderation_status: ModerationStatus;
   delete_requested: boolean;
-}
-
-export interface QuestionReviewFlagResult {
-  question_id: number;
-  review_flag: boolean;
 }
 
 export interface CreateModulePayload {
@@ -252,11 +247,6 @@ export interface ModerationActionPayload {
 export interface ModerationRevisionActionPayload extends ModerationActionPayload {
   reset_stats?: boolean;
   edited_revision?: ModerationEditedRevisionPayload;
-}
-
-export interface BulkRevisionModerationItem {
-  proposalId: number;
-  resetStats: boolean;
 }
 
 export interface BulkModerationResult {
@@ -320,13 +310,11 @@ export interface ModerationQueue {
   pending_modules: PendingModule[];
   rejected_modules: PendingModule[];
   pending_questions: PendingQuestion[];
-  pending_revisions: QuestionRevisionProposal[];
 }
 
 export interface MyContributions {
   modules: PendingModule[];
   questions: PendingQuestion[];
-  revisions: QuestionRevisionProposal[];
 }
 
 export type QuestionImportReviewStatus = 'invalid' | 'duplicate' | 'relocation' | 'info' | 'conflict';

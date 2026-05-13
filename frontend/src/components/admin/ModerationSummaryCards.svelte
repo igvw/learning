@@ -2,11 +2,10 @@
   export let pendingModulesCount = 0;
   export let rejectedModulesCount = 0;
   export let pendingQuestionsCount = 0;
-  export let pendingRevisionsCount = 0;
-  export let onOpen: (kind: 'modules' | 'questions' | 'revisions') => void = () => {};
+  export let onOpen: (kind: 'modules' | 'questions') => void = () => {};
 
   $: moduleModerationCount = pendingModulesCount + rejectedModulesCount;
-  $: totalModerationCount = moduleModerationCount + pendingQuestionsCount + pendingRevisionsCount;
+  $: totalModerationCount = moduleModerationCount + pendingQuestionsCount;
 </script>
 
 <article class="panel admin-bar-panel">
@@ -40,16 +39,6 @@
     >
       <strong>Uploads</strong>
       <span class="moderation-summary-count">{pendingQuestionsCount}</span>
-    </button>
-
-    <button
-      type="button"
-      class="dynamic-card moderation-summary-card"
-      aria-haspopup="dialog"
-      on:click={() => onOpen('revisions')}
-    >
-      <strong>Revisions</strong>
-      <span class="moderation-summary-count">{pendingRevisionsCount}</span>
     </button>
   </div>
 </article>

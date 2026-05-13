@@ -36,13 +36,13 @@ class ServiceFacadeUnitTests(unittest.TestCase):
             "review_module_submission",
             "review_question_revision",
             "review_question_submission",
-            "set_question_review_flag",
             "submit_answer",
             "sync_seed_content",
             "update_module",
             "update_user_password",
             "update_user_role",
             "validate_question_import",
+            "withdraw_question_revision",
         }
 
         self.assertEqual(set(services.__all__), expected_public_names)

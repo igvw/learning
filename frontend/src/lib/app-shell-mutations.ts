@@ -1,14 +1,18 @@
 import type {
   BulkModerationResult,
-  BulkRevisionModerationItem,
   ModerationActionPayload,
   ModerationRevisionActionPayload,
   QuestionDraftPayload,
+  QuestionMutationResult,
   QuestionRevisionProposal,
   QuestionRow
 } from './types';
 
 export type QuestionMutationReloadKind = 'question' | 'moderation';
+export interface SavedQuestionMutation {
+  reloadKind: QuestionMutationReloadKind;
+  mutationResult: QuestionMutationResult | null;
+}
 
 export async function saveQuestionMutation({
   editorMode,
@@ -25,10 +29,10 @@ export async function saveQuestionMutation({
   editingRevisionProposal: QuestionRevisionProposal | null;
   payload: QuestionDraftPayload;
   resetStats: boolean;
-  createQuestion: (payload: QuestionDraftPayload) => Promise<unknown>;
-  reviseQuestion: (questionId: number, payload: QuestionDraftPayload & { reset_stats: boolean }) => Promise<unknown>;
+  createQuestion: (payload: QuestionDraftPayload) => Promise<QuestionMutationResult>;
+  reviseQuestion: (questionId: number, payload: QuestionDraftPayload & { reset_stats: boolean }) => Promise<QuestionMutationResult>;
   reviewQuestionRevision: (proposalId: number, payload: ModerationRevisionActionPayload) => Promise<unknown>;
-}): Promise<QuestionMutationReloadKind> {
+}): Promise<SavedQuestionMutation> {
   if (editorMode === 'moderation' && editingRevisionProposal) {
     await reviewQuestionRevision(editingRevisionProposal.proposal_id, {
       action: 'approve',
@@ -38,19 +42,19 @@ export async function saveQuestionMutation({
         reset_stats: resetStats
       }
     });
-    return 'moderation';
+    return { reloadKind: 'moderation', mutationResult: null };
   }
 
   if (editingQuestion) {
-    await reviseQuestion(editingQuestion.question_id, {
+    const mutationResult = await reviseQuestion(editingQuestion.question_id, {
       ...payload,
       reset_stats: resetStats
     });
-    return 'question';
+    return { reloadKind: 'question', mutationResult };
   }
 
-  await createQuestion(payload);
-  return 'question';
+  const mutationResult = await createQuestion(payload);
+  return { reloadKind: 'question', mutationResult };
 }
 
 export async function runBulkModeration({
@@ -68,34 +72,6 @@ export async function runBulkModeration({
   for (const id of ids) {
     try {
       await handler(id, payload);
-      succeeded += 1;
-    } catch (error) {
-      console.error(error);
-      failed += 1;
-    }
-  }
-
-  return { succeeded, failed };
-}
-
-export async function runBulkRevisionModeration({
-  items,
-  payload,
-  reviewQuestionRevision
-}: {
-  items: BulkRevisionModerationItem[];
-  payload: ModerationActionPayload;
-  reviewQuestionRevision: (proposalId: number, payload: ModerationRevisionActionPayload) => Promise<unknown>;
-}): Promise<BulkModerationResult> {
-  let succeeded = 0;
-  let failed = 0;
-
-  for (const item of items) {
-    try {
-      await reviewQuestionRevision(item.proposalId, {
-        ...payload,
-        ...(payload.action === 'approve' ? { reset_stats: item.resetStats } : {})
-      });
       succeeded += 1;
     } catch (error) {
       console.error(error);

@@ -11,12 +11,10 @@ from .questions import accepted_answer_groups, canonical_answers, default_answer
 from .text import json_dumps, normalize_text
 from .schedule import (
     _bucketed_question_selection,
-    _eligible_quiz_candidates,
     _latest_scored_session_id,
     _question_attempt_history,
     _question_stats_by_question,
     _randomize_quiz_order,
-    _review_flags_by_question,
     _schedule_snapshot_from_attempts,
 )
 from .visibility import list_effective_question_rows
@@ -36,7 +34,6 @@ def create_quiz_session(
     candidate_rows = list_effective_question_rows(connection, actor=actor, scope_module_ids=scope_module_ids)
 
     question_ids = [row["question_id"] for row in candidate_rows]
-    review_flags = _review_flags_by_question(connection, user_id=user_id, question_ids=question_ids)
     stats_by_question = _question_stats_by_question(connection, user_id=user_id, question_ids=question_ids)
     history_by_question = _question_attempt_history(connection, user_id=user_id, question_ids=question_ids)
     latest_scored_session_id = _latest_scored_session_id(connection, user_id=user_id)
@@ -58,17 +55,12 @@ def create_quiz_session(
                 **stats,
                 **schedule,
                 "latest_scored_session_id": latest_scored_session_id,
-                "review_flag": review_flags.get(row["question_id"], False),
             }
         )
 
-    eligible_candidates = _eligible_quiz_candidates(scheduled_candidates)
-    if scheduled_candidates and not eligible_candidates:
-        raise ValidationError("All questions in this scope are currently flagged for review.")
-
     chosen_rows = _bucketed_question_selection(
-        eligible_candidates,
-        count=min(count, len(eligible_candidates)),
+        scheduled_candidates,
+        count=min(count, len(scheduled_candidates)),
         now=now,
     )
     chosen_rows = _randomize_quiz_order(chosen_rows, rng=rng)
@@ -129,7 +121,6 @@ def create_quiz_session(
                 "question_id": row["question_id"],
                 "module_id": row["module_id"],
                 "module_instruction": row["module_instruction"] or "",
-                "review_flag": bool(row["review_flag"]),
                 "prompt": resolved_prompt,
                 "question_type": runtime_question_type,
                 "rank": row["rank"],

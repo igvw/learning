@@ -27,13 +27,13 @@ vi.mock('../src/lib/api', () => ({
   reviewQuestion: vi.fn(),
   reviewQuestionRevision: vi.fn(),
   reviseQuestion: vi.fn(),
-  setQuestionReviewFlag: vi.fn(),
   submitQuizAnswer: vi.fn(),
   updateModule: vi.fn(),
   updateUserPassword: vi.fn(),
   updateUserRole: vi.fn(),
   validateQuestionImportRows: vi.fn(),
-  validateQuestionImportText: vi.fn()
+  validateQuestionImportText: vi.fn(),
+  withdrawQuestionRevision: vi.fn()
 }));
 
 import App from '../src/App.svelte';
@@ -133,7 +133,7 @@ describe('App', () => {
     });
   });
 
-  it('opens a flagged quiz question in the editor and returns to the quiz after save', async () => {
+  it('opens a submitted quiz question in the editor and returns to the quiz after save', async () => {
     const user = userEvent.setup();
     const bundleQml =
       '{A patient needs {} mg. The solution has {} mg/ml. How much is needed? []\n {500} {40} [12.5 ml]\n {600} {30} [20 ml]}';
@@ -150,7 +150,6 @@ describe('App', () => {
             question_type: 'single_text',
             submitted_answer: ['12.5 ml'],
             is_correct: true,
-            review_flag: true,
             score_earned: 1,
             score_possible: 1,
             canonical_answers: ['12.5 ml'],
@@ -175,8 +174,7 @@ describe('App', () => {
         prompt: 'A patient needs {} mg. The solution has {} mg/ml. How much is needed? []',
         question_type: 'bundle',
         accepted_answers: [],
-        bundle_qml: bundleQml,
-        review_flag: true
+        bundle_qml: bundleQml
       })
     );
     vi.mocked(api.reviseQuestion).mockResolvedValue({
@@ -194,7 +192,7 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Start Quiz' }));
     await screen.findByText('1. A patient needs 500 mg. The solution has 40 mg/ml. How much is needed?');
 
-    await user.click(screen.getByRole('button', { name: 'Edit question' }));
+    await user.click(screen.getByRole('button', { name: 'Suggest change' }));
 
     await waitFor(() => {
       expect(api.getQuestion).toHaveBeenCalledWith(91);
@@ -217,7 +215,9 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.queryByRole('heading', { name: 'Revise Question' })).toBeNull();
     });
-    expect(screen.getByText('1. A patient needs 500 mg. The solution has 40 mg/ml. How much is needed?')).toBeTruthy();
+    const quizPrompt = screen.getByText('1. A patient needs 500 mg. The solution has 40 mg/ml. How much is needed?');
+    expect(quizPrompt).toBeTruthy();
+    expect(quizPrompt.closest('article')?.className).toContain('flagged-review');
   });
 
   it('refreshes auth state after an admin updates their own role', async () => {
@@ -239,8 +239,7 @@ describe('App', () => {
     vi.mocked(api.getModerationQueue).mockResolvedValue({
       pending_modules: [],
       rejected_modules: [],
-      pending_questions: [],
-      pending_revisions: []
+      pending_questions: []
     });
     vi.mocked(api.updateUserRole).mockResolvedValue({
       id: 1,
@@ -348,7 +347,7 @@ describe('App', () => {
     expect(api.getModulesTree).toHaveBeenCalledTimes(initialModuleLoads + 1);
   });
 
-  it('bulk approves pending revisions and refreshes shared data once after the batch', async () => {
+  it('approves pending revisions from stats review and refreshes shared data', async () => {
     const user = userEvent.setup();
     const modules = [buildModules()[0]];
 
@@ -364,12 +363,14 @@ describe('App', () => {
     vi.mocked(api.getUsers).mockResolvedValue([
       { id: 1, handle: 'admin', display_name: 'Admin', role: 'admin', created_at: '2026-04-05T10:00:00Z' }
     ]);
-    const moderationQueueMock = vi.mocked(api.getModerationQueue);
-    moderationQueueMock.mockReset();
-    moderationQueueMock
+    vi.mocked(api.getModerationQueue).mockResolvedValue(buildModerationQueue());
+    const statsMock = vi.mocked(api.getStats);
+    statsMock.mockReset();
+    statsMock
       .mockResolvedValueOnce(
-        buildModerationQueue({
-          pending_revisions: [
+        buildStatsResponse({
+          summary: { reviewed_questions: 2 },
+          revision_proposals: [
             buildQuestionRevisionProposal({
               proposal_id: 81,
               question_id: 71,
@@ -389,42 +390,29 @@ describe('App', () => {
           ]
         })
       )
-      .mockResolvedValueOnce(buildModerationQueue());
+      .mockResolvedValue(buildStatsResponse());
     vi.mocked(api.reviewQuestionRevision).mockResolvedValue({});
 
-    window.history.replaceState({}, '', '/admin');
+    window.history.replaceState({}, '', '/stats');
     render(App);
 
-    await screen.findByText('Catalog and moderation');
+    await screen.findByRole('heading', { name: 'Biology' });
 
     const initialModuleLoads = vi.mocked(api.getModulesTree).mock.calls.length;
-    const initialModerationLoads = moderationQueueMock.mock.calls.length;
+    const initialStatsLoads = statsMock.mock.calls.length;
 
-    await user.click(screen.getByRole('button', { name: /^Revisions/i }));
-    await user.click(screen.getByRole('button', { name: 'Open pending revisions for biology' }));
-    const revisionsDialog = screen.getByRole('dialog', { name: 'Pending revisions' });
-    const promptToggle = within(revisionsDialog).getByText('Prompt changes').closest('button');
-    expect(promptToggle).toBeTruthy();
-    await user.click(promptToggle as HTMLElement);
-    await waitFor(() => {
-      expect(screen.getByLabelText('Select all revisions in Prompt changes')).toBeTruthy();
-    });
-    await user.click(screen.getByLabelText('Select all revisions in Prompt changes'));
-    await user.click(screen.getAllByRole('button', { name: 'Approve selected' })[0]);
+    await user.click(screen.getByLabelText('Review'));
+    await user.click(screen.getByRole('button', { name: /^Review\s+2/ }));
+    await user.click(screen.getAllByRole('button', { name: 'Approve' })[0]);
 
     await waitFor(() => {
-      expect(api.reviewQuestionRevision).toHaveBeenCalledTimes(2);
+      expect(api.reviewQuestionRevision).toHaveBeenCalledTimes(1);
     });
     await waitFor(() => {
-      expect(api.getModerationQueue).toHaveBeenCalledTimes(initialModerationLoads + 1);
+      expect(api.getStats).toHaveBeenCalledTimes(initialStatsLoads + 1);
     });
 
-    expect(api.reviewQuestionRevision).toHaveBeenNthCalledWith(1, 81, {
-      action: 'approve',
-      note: '',
-      reset_stats: true
-    });
-    expect(api.reviewQuestionRevision).toHaveBeenNthCalledWith(2, 82, {
+    expect(api.reviewQuestionRevision).toHaveBeenCalledWith(81, {
       action: 'approve',
       note: '',
       reset_stats: true
@@ -432,7 +420,7 @@ describe('App', () => {
     expect(api.getModulesTree).toHaveBeenCalledTimes(initialModuleLoads + 1);
   });
 
-  it('opens the moderation revision drawer and approves an edited revision', async () => {
+  it('opens the stats revision drawer and approves an edited revision', async () => {
     const user = userEvent.setup();
     const modules = [buildModules()[0]];
 
@@ -448,11 +436,11 @@ describe('App', () => {
     vi.mocked(api.getUsers).mockResolvedValue([
       { id: 1, handle: 'admin', display_name: 'Admin', role: 'admin', created_at: '2026-04-05T10:00:00Z' }
     ]);
-    const moderationQueueMock = vi.mocked(api.getModerationQueue);
-    moderationQueueMock.mockReset();
-    moderationQueueMock.mockResolvedValue(
-      buildModerationQueue({
-        pending_revisions: [
+    vi.mocked(api.getModerationQueue).mockResolvedValue(buildModerationQueue());
+    vi.mocked(api.getStats).mockResolvedValue(
+      buildStatsResponse({
+        summary: { reviewed_questions: 1 },
+        revision_proposals: [
           buildQuestionRevisionProposal({
             proposal_id: 81,
             question_id: 71,
@@ -468,21 +456,14 @@ describe('App', () => {
     );
     vi.mocked(api.reviewQuestionRevision).mockResolvedValue({});
 
-    window.history.replaceState({}, '', '/admin');
+    window.history.replaceState({}, '', '/stats');
     render(App);
 
-    await screen.findByText('Catalog and moderation');
+    await screen.findByRole('heading', { name: 'Biology' });
 
-    await user.click(screen.getByRole('button', { name: /^Revisions/i }));
-    await user.click(screen.getByRole('button', { name: 'Open pending revisions for biology' }));
-    const revisionsDialog = screen.getByRole('dialog', { name: 'Pending revisions' });
-    const promptToggle = within(revisionsDialog).getByText('Prompt changes').closest('button');
-    expect(promptToggle).toBeTruthy();
-    await user.click(promptToggle as HTMLElement);
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Open revision editor for cell' })).toBeTruthy();
-    });
-    await user.click(screen.getByRole('button', { name: 'Open revision editor for cell' }));
+    await user.click(screen.getByLabelText('Review'));
+    await user.click(screen.getByRole('button', { name: /^Review\s+1/ }));
+    await user.click(screen.getByRole('button', { name: 'Edit then approve' }));
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Approve Revision' })).toBeTruthy();

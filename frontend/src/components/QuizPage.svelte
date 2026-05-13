@@ -6,12 +6,10 @@
   export let moduleLabel = 'Selected Module';
   export let questionCount = 10;
   export let busyItemId: number | null = null;
-  export let markingReviewQuestionId: number | null = null;
   export let openingEditorQuestionId: number | null = null;
   export let errorMessage = '';
   export let onChangeQuestionCount: (value: number) => void = () => {};
   export let onStartQuiz: () => Promise<void> | void = () => {};
-  export let onToggleReviewFlag: (questionId: number, reviewFlag: boolean) => Promise<void> | void = () => {};
   export let onOpenEdit: (questionId: number) => Promise<void> | void = () => {};
   export let onSubmit: (itemId: number, answers: string[]) => Promise<void> = async () => {};
 
@@ -108,20 +106,6 @@
   function handleSubmit(item: QuizItem): void {
     const answers = ensureDraft(item).map((value) => value.trimEnd());
     void onSubmit(item.id, answers);
-  }
-
-  function reviewFlagLabel(item: QuizItem): string {
-    if (markingReviewQuestionId === item.question_id) {
-      return 'Updating review flag';
-    }
-    return item.review_flag ? 'Remove review flag' : 'Flag for review';
-  }
-
-  function toggleReviewFlag(item: QuizItem): void {
-    if (markingReviewQuestionId === item.question_id) {
-      return;
-    }
-    void onToggleReviewFlag(item.question_id, !item.review_flag);
   }
 
   function openEdit(item: QuizItem): void {
@@ -243,18 +227,18 @@
     );
   }
 
-  function handleReviewShortcut(event: KeyboardEvent): void {
+  function handleSuggestChangeShortcut(event: KeyboardEvent): void {
     if (!isReviewShortcut(event)) {
       return;
     }
 
     const target = findShortcutReviewTarget();
-    if (!target || markingReviewQuestionId === target.question_id) {
+    if (!target || openingEditorQuestionId === target.question_id) {
       return;
     }
 
     event.preventDefault();
-    toggleReviewFlag(target);
+    openEdit(target);
   }
 
   $: if (session?.id !== sessionMarker) {
@@ -287,7 +271,7 @@
   }
 </script>
 
-<svelte:window on:keydown={handleReviewShortcut} />
+<svelte:window on:keydown={handleSuggestChangeShortcut} />
 
 <section class="page quiz-page">
   <div class="page-intro">
@@ -340,7 +324,7 @@
             class="panel quiz-card"
             class:correct={item.is_correct === true}
             class:incorrect={item.is_correct === false}
-            class:flagged-review={item.review_flag}
+            class:flagged-review={item.viewer_revision_proposal_id !== null && item.viewer_revision_proposal_id !== undefined}
           >
             {#if showCardHeader}
               <div class="quiz-card-header">
@@ -361,24 +345,15 @@
                 </div>
                 {#if answered}
                   <div class="quiz-card-review-actions">
-                    {#if item.review_flag}
-                      <button
-                        class="ghost-button quiz-edit-button"
-                        type="button"
-                        disabled={openingEditorQuestionId === item.question_id}
-                        on:click={() => openEdit(item)}
-                      >
-                        {openingEditorQuestionId === item.question_id ? 'Opening...' : 'Edit question'}
-                      </button>
-                    {/if}
                     <button
                       class="ghost-button flag-button"
-                      class:flagged={item.review_flag}
-                      class:loading={markingReviewQuestionId === item.question_id}
+                      class:loading={openingEditorQuestionId === item.question_id}
+                      class:flagged={item.viewer_revision_proposal_id !== null && item.viewer_revision_proposal_id !== undefined}
                       type="button"
-                      aria-label={reviewFlagLabel(item)}
-                      disabled={markingReviewQuestionId === item.question_id}
-                      on:click={() => toggleReviewFlag(item)}
+                      aria-label="Suggest change"
+                      title={openingEditorQuestionId === item.question_id ? 'Opening...' : 'Suggest change'}
+                      disabled={openingEditorQuestionId === item.question_id}
+                      on:click={() => openEdit(item)}
                     >
                       <svg class="flag-icon" viewBox="0 0 16 16" aria-hidden="true">
                         <path d="M4 2v12" />
@@ -493,7 +468,7 @@
       <div class="panel completion-panel">
         <p class="eyebrow">Session complete</p>
         <h3>{formatScore(totalScoreEarned)}/{formatScore(totalScorePossible)} points</h3>
-        <p>{completedCount} submissions recorded. Mark any questions above for review, review mistakes, or start another quiz.</p>
+        <p>{completedCount} submissions recorded. Suggest changes above, review mistakes, or start another quiz.</p>
         <div class="completion-actions">
           <button
             bind:this={completionActionButton}

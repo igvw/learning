@@ -46,9 +46,8 @@
     <tbody>
       {#each sortedQuestions as question (question.question_id)}
         <tr
-          class:flagged-review={question.review_flag}
-          class:hot0-row={!question.review_flag && question.schedule.bucket === 'hot0'}
-          class:hot1-row={!question.review_flag && (question.schedule.bucket === 'hot1' || question.schedule.bucket === 'hot1_sit_out')}
+          class:hot0-row={question.schedule.bucket === 'hot0'}
+          class:hot1-row={question.schedule.bucket === 'hot1' || question.schedule.bucket === 'hot1_sit_out'}
           on:click={() => onOpenEdit(question)}
         >
           {#each definitions as definition (definition.key)}

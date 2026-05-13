@@ -272,7 +272,6 @@ class ModuleApiTests(PostgresBackendTestCase):
         session = self.start_quiz_session(user["id"], weekdays["id"], 2)
         first_item = next(item for item in session["items"] if item["question_id"] == first_question_id)
         self.submit_quiz_item(user["id"], session["id"], first_item["id"], ["Monday"])
-        self.set_review_flag(user["id"], first_question_id, True)
 
         delete_response = self.client.delete(f"/api/questions/{first_question_id}", headers=self.admin_headers)
         self.assertEqual(delete_response.status_code, 200)

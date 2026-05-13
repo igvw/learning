@@ -25,13 +25,13 @@ vi.mock('../src/lib/api', () => ({
   reviewQuestion: vi.fn(),
   reviewQuestionRevision: vi.fn(),
   reviseQuestion: vi.fn(),
-  setQuestionReviewFlag: vi.fn(),
   submitQuizAnswer: vi.fn(),
   updateModule: vi.fn(),
   updateUserPassword: vi.fn(),
   updateUserRole: vi.fn(),
   validateQuestionImportRows: vi.fn(),
-  validateQuestionImportText: vi.fn()
+  validateQuestionImportText: vi.fn(),
+  withdrawQuestionRevision: vi.fn()
 }));
 
 import App from '../src/App.svelte';

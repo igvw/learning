@@ -1,9 +1,16 @@
 <script lang="ts">
   import StatsAllQuestionsOverlay from './StatsAllQuestionsOverlay.svelte';
   import StatsQuestionTable from './StatsQuestionTable.svelte';
+  import RevisionProposalCard from './RevisionProposalCard.svelte';
   import RetryEligibilityOverlay from './RetryEligibilityOverlay.svelte';
   import StageDueMatrixOverlay from './StageDueMatrixOverlay.svelte';
-  import type { QuestionRow, StatsResponse } from '../lib/types';
+  import type {
+    AuthActor,
+    ModerationRevisionActionPayload,
+    QuestionRevisionProposal,
+    QuestionRow,
+    StatsResponse
+  } from '../lib/types';
   import { formatScore } from '../lib/stats/format';
   import {
     buildAuxiliaryStageGraph,
@@ -39,9 +46,14 @@
   export let loading = false;
   export let reviewOnly = false;
   export let errorMessage = '';
+  export let currentActor: AuthActor | null = null;
   export let onToggleReviewOnly: (value: boolean) => void = () => {};
   export let onOpenCreate: () => void = () => {};
   export let onOpenEdit: (question: QuestionRow) => void = () => {};
+  export let onOpenUserRevisionEditor: (proposal: QuestionRevisionProposal) => void = () => {};
+  export let onOpenAdminRevisionEditor: (proposal: QuestionRevisionProposal) => void = () => {};
+  export let onRevisionModeration: (proposalId: number, payload: ModerationRevisionActionPayload) => Promise<void> | void = () => {};
+  export let onWithdrawRevision: (questionId: number) => Promise<void> | void = () => {};
 
   let sortKey: SortKey | null = null;
   let sortDirection: SortDirection = 'asc';
@@ -49,7 +61,10 @@
   let retryDetailOpen = false;
   let stageDetailOpen = false;
   let expandedBuckets: Record<string, boolean> = {};
+  let reviewBucketExpanded = false;
   let bucketResetSignature = '';
+  let reviewActionBusyKey = '';
+  let reviewActionError = '';
 
   function handleSort(nextSortKey: SortKey): void {
     const definition = sortDefinitions.find((candidate) => candidate.key === nextSortKey);
@@ -110,18 +125,44 @@
     };
   }
 
+  async function handleRevisionModeration(proposalId: number, payload: ModerationRevisionActionPayload): Promise<void> {
+    reviewActionBusyKey = `revision:${proposalId}:${payload.action}`;
+    reviewActionError = '';
+    try {
+      await onRevisionModeration(proposalId, payload);
+    } catch (error) {
+      reviewActionError = error instanceof Error ? error.message : 'Unable to update this revision proposal.';
+    } finally {
+      reviewActionBusyKey = '';
+    }
+  }
+
+  async function handleWithdrawRevision(questionId: number, proposalId: number): Promise<void> {
+    reviewActionBusyKey = `revision:${proposalId}:withdraw`;
+    reviewActionError = '';
+    try {
+      await onWithdrawRevision(questionId);
+    } catch (error) {
+      reviewActionError = error instanceof Error ? error.message : 'Unable to remove this review item.';
+    } finally {
+      reviewActionBusyKey = '';
+    }
+  }
+
   $: displayedQuestions = stats
     ? stats.questions.filter((question) =>
-        reviewOnly ? question.schedule.logical_bucket === 'review' : question.schedule.logical_bucket !== 'review'
+        reviewOnly ? false : question.schedule.logical_bucket !== 'review'
       )
     : [];
   $: bucketGroups = groupQuestionsByBucket(displayedQuestions).filter((group) =>
     reviewOnly ? group.key === 'review' : group.key !== 'review'
   );
-  $: emptyMessage = reviewOnly ? 'No review questions in this scope.' : 'No non-review questions in this scope.';
+  $: revisionProposals = stats?.revision_proposals ?? [];
+  $: emptyMessage = reviewOnly ? 'No review proposals in this scope.' : 'No non-review questions in this scope.';
+  $: isAdmin = currentActor?.role === 'admin';
   $: sessionGraph = stats ? buildSessionGraph(stats.recent_sessions) : emptySessionGraph;
   $: recoveryStageGraph = stats ? buildRecoveryStageGraph(stats.questions) : emptyRecoveryStageGraph;
-  $: auxiliaryStageGraph = stats ? buildAuxiliaryStageGraph(stats.questions) : emptyAuxiliaryStageGraph;
+  $: auxiliaryStageGraph = stats ? buildAuxiliaryStageGraph(stats.questions, revisionProposals.length) : emptyAuxiliaryStageGraph;
   $: retryEligibilityGraph = stats
     ? buildRetryEligibilityGraph(stats.questions, new Date(), stats.schedule_timezone)
     : emptyRetryEligibilityGraph;
@@ -145,6 +186,7 @@
     if (nextBucketResetSignature !== bucketResetSignature) {
       bucketResetSignature = nextBucketResetSignature;
       expandedBuckets = {};
+      reviewBucketExpanded = false;
     }
   }
 </script>
@@ -178,7 +220,7 @@
     <div class="stats-grid">
       <article class="panel stat-card">
         <h3>{stats.summary.total_questions}</h3>
-        <p>{stats.summary.reviewed_questions} flagged for review by this user.</p>
+        <p>{stats.summary.reviewed_questions} pending review proposals.</p>
       </article>
       <article class="panel stat-card">
         <h3>{stats.summary.total_attempts}</h3>
@@ -436,39 +478,81 @@
     </div>
 
     <div class="question-bucket-stack stats-question-buckets">
-      {#if displayedQuestions.length === 0}
-        <p class="muted-copy question-bucket-summary-empty">{emptyMessage}</p>
+      {#if reviewActionError}
+        <div class="banner error">{reviewActionError}</div>
       {/if}
 
-      {#each bucketGroups as group (group.key)}
+      {#if reviewOnly}
         <section class="question-bucket-card">
-          <button
-            class="question-bucket-toggle"
-            type="button"
-            aria-expanded={expandedBuckets[group.key] ?? false}
-            on:click={() => toggleBucket(group.key)}
-          >
-            <span class="question-bucket-title">{group.label}</span>
-            <span class="question-bucket-count">{group.questions.length}</span>
-            <span class="question-bucket-caret" aria-hidden="true">{expandedBuckets[group.key] ? '^' : 'v'}</span>
-          </button>
+          <label class="question-bucket-toggle question-bucket-disclosure" aria-expanded={reviewBucketExpanded}>
+            <input
+              class="question-bucket-disclosure-control"
+              type="checkbox"
+              bind:checked={reviewBucketExpanded}
+              aria-label={`Toggle Review bucket with ${revisionProposals.length} proposals`}
+            />
+            <span class="question-bucket-title">Review</span>
+            <span class="question-bucket-count">{revisionProposals.length}</span>
+            <span class="question-bucket-caret" class:expanded={reviewBucketExpanded} aria-hidden="true"></span>
+          </label>
 
-          {#if expandedBuckets[group.key]}
-            {#if group.questions.length === 0}
-              <p class="muted-copy question-bucket-empty">No questions in this bucket.</p>
+          {#if reviewBucketExpanded}
+            {#if revisionProposals.length === 0}
+              <p class="muted-copy question-bucket-empty">No review proposals in this scope.</p>
             {:else}
-              <StatsQuestionTable
-                questions={group.questions}
-                definitions={visibleQuestionSortDefinitions}
-                sortKey={sortKey}
-                sortDirection={sortDirection}
-                onSort={handleSort}
-                onOpenEdit={onOpenEdit}
-              />
+              <div class="revision-proposal-stack">
+                {#each revisionProposals as proposal (proposal.proposal_id)}
+                  <RevisionProposalCard
+                    {proposal}
+                    {isAdmin}
+                    busyKey={reviewActionBusyKey}
+                    onOpenEditor={isAdmin ? onOpenAdminRevisionEditor : onOpenUserRevisionEditor}
+                    onWithdraw={(questionId) => handleWithdrawRevision(questionId, proposal.proposal_id)}
+                    onModeration={handleRevisionModeration}
+                  />
+                {/each}
+              </div>
             {/if}
           {/if}
         </section>
-      {/each}
+      {:else}
+        {#if displayedQuestions.length === 0}
+          <p class="muted-copy question-bucket-summary-empty">{emptyMessage}</p>
+        {/if}
+        {#each bucketGroups as group (group.key)}
+          <section class="question-bucket-card">
+            <button
+              class="question-bucket-toggle"
+              type="button"
+              aria-expanded={expandedBuckets[group.key] ?? false}
+              on:click={() => toggleBucket(group.key)}
+            >
+              <span class="question-bucket-title">{group.label}</span>
+              <span class="question-bucket-count">{group.questions.length}</span>
+              <span
+                class="question-bucket-caret"
+                class:expanded={expandedBuckets[group.key] ?? false}
+                aria-hidden="true"
+              ></span>
+            </button>
+
+            {#if expandedBuckets[group.key]}
+              {#if group.questions.length === 0}
+                <p class="muted-copy question-bucket-empty">No questions in this bucket.</p>
+              {:else}
+                <StatsQuestionTable
+                  questions={group.questions}
+                  definitions={visibleQuestionSortDefinitions}
+                  sortKey={sortKey}
+                  sortDirection={sortDirection}
+                  onSort={handleSort}
+                  onOpenEdit={onOpenEdit}
+                />
+              {/if}
+            {/if}
+          </section>
+        {/each}
+      {/if}
     </div>
   {:else}
     <div class="panel empty-state">

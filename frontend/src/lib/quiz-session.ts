@@ -27,21 +27,3 @@ export function applySubmitAnswerResult(
     )
   };
 }
-
-export function applyQuestionReviewFlag(
-  session: QuizSession,
-  questionId: number,
-  reviewFlag = true
-): QuizSession {
-  return {
-    ...session,
-    items: session.items.map((item) =>
-      item.question_id === questionId
-        ? {
-            ...item,
-            review_flag: reviewFlag
-          }
-        : item
-    )
-  };
-}

@@ -65,7 +65,6 @@ export function buildQuizItem(overrides: Partial<QuizItem> = {}): QuizItem {
     question_id: 1,
     module_id: 1,
     module_instruction: '',
-    review_flag: false,
     prompt: 'Question prompt',
     question_type: 'single_text',
     rank: 1,
@@ -132,7 +131,6 @@ export function buildQuestionRow(
     correct_percentage: 0,
     first_asked_at: null,
     last_asked_at: null,
-    review_flag: false,
     admin_verified: true,
     moderation_status: 'verified',
     created_by_user_id: null,
@@ -146,13 +144,14 @@ export function buildQuestionRow(
 }
 
 export function buildStatsResponse(
-  overrides: Omit<Partial<StatsResponse>, 'summary' | 'recent_sessions' | 'questions'> & {
+  overrides: Omit<Partial<StatsResponse>, 'summary' | 'recent_sessions' | 'questions' | 'revision_proposals'> & {
     summary?: Partial<StatsResponse['summary']>;
     recent_sessions?: RecentSession[];
     questions?: QuestionRow[];
+    revision_proposals?: QuestionRevisionProposal[];
   } = {}
 ): StatsResponse {
-  const { summary, recent_sessions, questions, ...statsOverrides } = overrides;
+  const { summary, recent_sessions, questions, revision_proposals, ...statsOverrides } = overrides;
   return {
     schedule_timezone: 'UTC',
     summary: {
@@ -166,6 +165,7 @@ export function buildStatsResponse(
     },
     recent_sessions: recent_sessions ?? [],
     questions: questions ?? [],
+    revision_proposals: revision_proposals ?? [],
     ...statsOverrides
   };
 }
@@ -225,7 +225,6 @@ export function buildModerationQueue(overrides: Partial<ModerationQueue> = {}): 
     pending_modules: [],
     rejected_modules: [],
     pending_questions: [],
-    pending_revisions: [],
     ...overrides
   };
 }
@@ -259,7 +258,6 @@ export function buildMyContributions(overrides: Partial<MyContributions> = {}): 
   return {
     modules: [],
     questions: [],
-    revisions: [],
     ...overrides
   };
 }

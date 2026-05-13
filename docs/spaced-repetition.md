@@ -12,7 +12,7 @@ The scheduler has two layers:
 3. due fixed-bucket questions, shortest bucket first
 4. unseen questions
 
-Review-flagged questions are skipped. `mastery` questions are not served.
+Questions with the current user’s pending revision/delete proposal are skipped. `mastery` questions are not served.
 
 ## States
 

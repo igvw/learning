@@ -1,19 +1,16 @@
 <script lang="ts">
   import type {
-    BulkRevisionModerationItem,
     BulkModerationResult,
     ModerationActionPayload,
     ModerationKind,
     ModerationQueue,
-    ModerationRevisionActionPayload,
-    QuestionRevisionProposal
+    ModerationRevisionActionPayload
   } from '../../lib/types';
   import ModerationSummaryCards from './ModerationSummaryCards.svelte';
   import PendingModulesOverlay from './PendingModulesOverlay.svelte';
   import PendingQuestionsOverlay from './PendingQuestionsOverlay.svelte';
-  import PendingRevisionsOverlay from './PendingRevisionsOverlay.svelte';
 
-  type ModerationOverlayKind = 'modules' | 'questions' | 'revisions' | null;
+  type ModerationOverlayKind = 'modules' | 'questions' | null;
 
   export let moderationQueue: ModerationQueue | null = null;
   export let onModerationAction: (
@@ -32,20 +29,11 @@
   ) => Promise<BulkModerationResult> = async () => {
     throw new Error('Bulk moderation handler is not configured.');
   };
-  export let onBulkRevisionModeration: (
-    items: BulkRevisionModerationItem[],
-    payload: ModerationActionPayload
-  ) => Promise<BulkModerationResult> = async () => {
-    throw new Error('Bulk revision moderation handler is not configured.');
-  };
-  export let onOpenRevisionEditor: (proposal: QuestionRevisionProposal) => void = () => {};
-
   let openOverlay: ModerationOverlayKind = null;
 
   $: pendingModules = moderationQueue?.pending_modules ?? [];
   $: rejectedModules = moderationQueue?.rejected_modules ?? [];
   $: pendingQuestions = moderationQueue?.pending_questions ?? [];
-  $: pendingRevisions = moderationQueue?.pending_revisions ?? [];
 
   function openModerationOverlay(kind: Exclude<ModerationOverlayKind, null>): void {
     openOverlay = kind;
@@ -61,7 +49,6 @@
     pendingModulesCount={pendingModules.length}
     rejectedModulesCount={rejectedModules.length}
     pendingQuestionsCount={pendingQuestions.length}
-    pendingRevisionsCount={pendingRevisions.length}
     onOpen={openModerationOverlay}
   />
 
@@ -80,14 +67,5 @@
     onClose={closeModerationOverlay}
     onQuestionModeration={(id, payload) => onModerationAction('question', id, payload)}
     {onBulkQuestionModeration}
-  />
-
-  <PendingRevisionsOverlay
-    open={openOverlay === 'revisions'}
-    {pendingRevisions}
-    onClose={closeModerationOverlay}
-    onRevisionModeration={(id, payload) => onModerationAction('revision', id, payload)}
-    {onBulkRevisionModeration}
-    {onOpenRevisionEditor}
   />
 {/if}

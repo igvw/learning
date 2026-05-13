@@ -27,7 +27,7 @@ Learning App is a keyboard-first study tool for facts, language, and procedural 
 - shared content lives in modules and questions
 - shared content can be pending, contributor-owned, or verified
 - user progress comes from quiz history
-- review flags are user-specific
+- pending review items are revision/delete proposals
 
 The stack is:
 
@@ -64,7 +64,6 @@ The app is multi-user over shared content and authenticated accounts.
 - verified modules and questions are shared
 - users can own pending uploads and revision proposals
 - quiz history is user-owned
-- review flags are user-owned
 - stats and scheduling are derived per user
 
 ### Scheduling

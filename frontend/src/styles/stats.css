@@ -214,6 +214,18 @@
   background: transparent;
   color: #f8fafc;
   text-align: left;
+  cursor: pointer;
+}
+
+.question-bucket-disclosure {
+  position: relative;
+}
+
+.question-bucket-disclosure-control {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
 }
 
 .question-bucket-toggle:hover,
@@ -237,9 +249,24 @@
 
 .question-bucket-caret {
   width: 1.25rem;
+  height: 1.25rem;
+  display: inline-grid;
+  place-items: center;
   color: var(--accent-text);
-  font-weight: 700;
-  text-align: center;
+}
+
+.question-bucket-caret::before {
+  content: "";
+  width: 0.46rem;
+  height: 0.46rem;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg) translate(-0.08rem, -0.08rem);
+  transition: transform 160ms ease;
+}
+
+.question-bucket-caret.expanded::before {
+  transform: rotate(225deg) translate(-0.08rem, -0.08rem);
 }
 
 .question-bucket-card .table-shell {
@@ -253,6 +280,30 @@
 
 .question-bucket-summary-empty {
   margin: 0;
+}
+
+.revision-proposal-stack {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.revision-proposal-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.revision-proposal-header {
+  margin-bottom: 0;
+}
+
+.revision-proposal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: flex-end;
 }
 
 .stats-all-questions-panel {
@@ -303,14 +354,6 @@ tbody tr {
 
 tbody tr:hover {
   background: var(--surface-hover);
-}
-
-tbody tr.flagged-review {
-  background: rgba(245, 158, 11, 0.14);
-}
-
-tbody tr.flagged-review:hover {
-  background: rgba(245, 158, 11, 0.22);
 }
 
 tbody tr.hot0-row {

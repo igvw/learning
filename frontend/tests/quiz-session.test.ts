@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { buildQuizItem, buildQuizSession } from './builders';
-import { applyQuestionReviewFlag, applySubmitAnswerResult } from '../src/lib/quiz-session';
+import { applySubmitAnswerResult } from '../src/lib/quiz-session';
 import type { SubmitAnswerResult } from '../src/lib/types';
 
 describe('quiz-session helpers', () => {
@@ -35,22 +35,4 @@ describe('quiz-session helpers', () => {
     expect(updated.items[1].submitted_answer).toBeNull();
   });
 
-  it('applies and clears a review flag only on the targeted question', () => {
-    const session = buildQuizSession({
-      items: [
-        buildQuizItem({ id: 1, question_id: 10, review_flag: false }),
-        buildQuizItem({ id: 2, question_id: 11, review_flag: false })
-      ]
-    });
-
-    const updated = applyQuestionReviewFlag(session, 11, true);
-
-    expect(updated.items[0].review_flag).toBe(false);
-    expect(updated.items[1].review_flag).toBe(true);
-
-    const cleared = applyQuestionReviewFlag(updated, 11, false);
-
-    expect(cleared.items[0].review_flag).toBe(false);
-    expect(cleared.items[1].review_flag).toBe(false);
-  });
 });

@@ -90,7 +90,6 @@ def reset_test_database(database_url: str) -> None:
                 attempts,
                 quiz_session_items,
                 quiz_sessions,
-                user_review_flags,
                 questions,
                 modules,
                 users
@@ -231,15 +230,6 @@ class PostgresBackendTestCase(unittest.TestCase):
         response = self.client.get(
             "/api/stats",
             params=params,
-            headers=self.user_headers(user_id),
-        )
-        self.assertEqual(response.status_code, 200)
-        return response.json()
-
-    def set_review_flag(self, user_id: int, question_id: int, review_flag: bool = True) -> dict[str, object]:
-        response = self.client.patch(
-            f"/api/questions/{question_id}/review-flag",
-            json={"review_flag": review_flag},
             headers=self.user_headers(user_id),
         )
         self.assertEqual(response.status_code, 200)

@@ -7,8 +7,7 @@ import type { ModuleNode } from '../src/lib/types';
 import {
   buildAuthActor,
   buildModuleNode,
-  buildMyContributions,
-  buildQuestionRevisionProposal
+  buildMyContributions
 } from './builders';
 
 describe('AdminPage', () => {
@@ -85,7 +84,7 @@ describe('AdminPage', () => {
         modules,
         users: [{ id: 9, handle: 'ignazio', display_name: 'Ignazio', role: 'user', created_at: '2026-04-05T10:00:00Z' }],
         selectedModuleId: 2,
-        moderationQueue: { pending_modules: [], rejected_modules: [], pending_questions: [], pending_revisions: [] },
+        moderationQueue: { pending_modules: [], rejected_modules: [], pending_questions: [] },
         onCreateUser: createUserSpy,
         onUpdateUserRole: updateRoleSpy,
         onUpdateUserPassword: updatePasswordSpy,
@@ -234,13 +233,19 @@ describe('AdminPage', () => {
         selectedModuleId: 2,
         moderationQueue: null,
         contributions: buildMyContributions({
-          revisions: [
-            buildQuestionRevisionProposal({
-              proposal_id: 41,
-              module_full_slug: 'nursing/checks',
-              current_prompt: 'sanitize',
-              proposed_prompt: 'sanitize hands'
-            })
+          modules: [
+            {
+              id: 7,
+              title: 'Checks',
+              full_slug: 'nursing/checks',
+              parent_id: 1,
+              instruction: '',
+              admin_verified: false,
+              moderation_status: 'pending',
+              created_by_user_id: 2,
+              creator_display_name: 'Alice',
+              admin_review_note: ''
+            }
           ]
         })
       }
@@ -258,7 +263,7 @@ describe('AdminPage', () => {
 
     await user.click(screen.getByRole('button', { name: /^My contributions/ }));
     const contributionsDialog = await screen.findByRole('dialog', { name: 'My contributions' });
-    await user.click(within(contributionsDialog).getByRole('button', { name: /^nursing\/checks/i }));
-    expect(await screen.findByRole('dialog', { name: 'Revision detail' })).toBeTruthy();
+    expect(within(contributionsDialog).getByText('nursing/checks')).toBeTruthy();
+    expect(within(contributionsDialog).queryByText('Revisions')).toBeNull();
   });
 });

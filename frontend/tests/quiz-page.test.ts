@@ -111,13 +111,13 @@ describe('QuizPage', () => {
     expect(screen.queryByText('Accepted answers')).toBeNull();
     expect(screen.queryByText(/Slot 1:/)).toBeNull();
     expect(screen.queryAllByRole('listitem')).toHaveLength(0);
-    expect(screen.getByText(/questions above for review/i)).toBeTruthy();
+    expect(screen.getByText(/suggest changes above/i)).toBeTruthy();
     expect(answeredCard?.className).toContain('incorrect');
     expect(answeredInput.className).toContain('answer-incorrect');
     expect(answerBox?.className).toContain('plain-answer-box');
     const startAnotherQuizButton = screen.getByRole('button', { name: 'Start Another Quiz' });
     await waitFor(() => expect(document.activeElement).toBe(startAnotherQuizButton));
-    expect(screen.getByRole('button', { name: 'Flag for review' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Suggest change' })).toBeTruthy();
   });
 
   it('lets you choose the number of questions before starting a quiz', async () => {
@@ -205,7 +205,7 @@ describe('QuizPage', () => {
 
   it('shows all accepted answers inside the input for a correct primary single-slot answer', async () => {
     const user = userEvent.setup();
-    const toggleSpy = vi.fn().mockResolvedValue(undefined);
+    const openEditSpy = vi.fn().mockResolvedValue(undefined);
     const session = buildQuizSession({
       id: 25,
       completed_at: '2026-04-04T10:00:00Z',
@@ -233,8 +233,7 @@ describe('QuizPage', () => {
         session,
         moduleLabel: 'Geography',
         busyItemId: null,
-        markingReviewQuestionId: null,
-        onToggleReviewFlag: toggleSpy,
+        onOpenEdit: openEditSpy,
         onSubmit: vi.fn()
       }
     });
@@ -248,13 +247,13 @@ describe('QuizPage', () => {
     expect(screen.queryByText('nile')).toBeNull();
     expect(screen.queryByText('nile / the nile')).toBeNull();
     expect(screen.queryByRole('list')).toBeNull();
-    await user.click(screen.getByRole('button', { name: 'Flag for review' }));
-    expect(toggleSpy).toHaveBeenCalledWith(21, true);
+    await user.click(screen.getByRole('button', { name: 'Suggest change' }));
+    expect(openEditSpy).toHaveBeenCalledWith(21);
   });
 
-  it('shows and toggles review flags as soon as a question has been submitted', async () => {
+  it('shows the suggest-change action as soon as a question has been submitted', async () => {
     const user = userEvent.setup();
-    const toggleSpy = vi.fn().mockResolvedValue(undefined);
+    const openEditSpy = vi.fn().mockResolvedValue(undefined);
     const session = buildQuizSession({
       id: 29,
       items: [
@@ -285,20 +284,20 @@ describe('QuizPage', () => {
         session,
         moduleLabel: 'Geography',
         busyItemId: null,
-        onToggleReviewFlag: toggleSpy,
+        onOpenEdit: openEditSpy,
         onSubmit: vi.fn()
       }
     });
 
     expect(screen.queryByText('Session complete')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Edit question' })).toBeNull();
+    expect(screen.getAllByRole('button', { name: 'Suggest change' })).toHaveLength(1);
 
-    await user.click(screen.getByRole('button', { name: 'Flag for review' }));
+    await user.click(screen.getByRole('button', { name: 'Suggest change' }));
 
-    expect(toggleSpy).toHaveBeenCalledWith(41, true);
+    expect(openEditSpy).toHaveBeenCalledWith(41);
   });
 
-  it('opens the editor from flagged answered questions only', async () => {
+  it('opens the editor from answered questions only', async () => {
     const user = userEvent.setup();
     const openEditSpy = vi.fn().mockResolvedValue(undefined);
     const session = buildQuizSession({
@@ -310,7 +309,6 @@ describe('QuizPage', () => {
           prompt: 'What is the capital of Germany?',
           submitted_answer: ['Berlin'],
           is_correct: true,
-          review_flag: true,
           score_earned: 1,
           score_possible: 1,
           canonical_answers: ['berlin'],
@@ -337,14 +335,13 @@ describe('QuizPage', () => {
       }
     });
 
-    await user.click(screen.getByRole('button', { name: 'Edit question' }));
+    expect(screen.getAllByRole('button', { name: 'Suggest change' })).toHaveLength(1);
+    await user.click(screen.getByRole('button', { name: 'Suggest change' }));
 
     expect(openEditSpy).toHaveBeenCalledWith(50);
   });
 
-  it('lets submitted questions be unflagged during the current quiz page', async () => {
-    const user = userEvent.setup();
-    const toggleSpy = vi.fn().mockResolvedValue(undefined);
+  it('does not show suggest-change actions for unanswered questions', () => {
     const session = buildQuizSession({
       id: 30,
       items: [
@@ -352,15 +349,8 @@ describe('QuizPage', () => {
           id: 33,
           question_id: 43,
           prompt: 'What is the capital of Denmark?',
-          submitted_answer: ['Copenhagen'],
-          is_correct: true,
-          review_flag: true,
-          score_earned: 1,
-          score_possible: 1,
-          canonical_answers: ['copenhagen'],
-          default_answers: ['copenhagen'],
-          accepted_answer_groups: [['copenhagen']],
-          matched_default_answers: [true]
+          submitted_answer: null,
+          is_correct: null
         }),
         buildQuizItem({
           id: 34,
@@ -371,36 +361,21 @@ describe('QuizPage', () => {
       ]
     });
 
-    const view = render(QuizPage, {
+    render(QuizPage, {
       props: {
         session,
         moduleLabel: 'Geography',
         busyItemId: null,
-        onToggleReviewFlag: toggleSpy,
+        onOpenEdit: vi.fn(),
         onSubmit: vi.fn()
       }
     });
 
-    await user.click(screen.getByRole('button', { name: 'Remove review flag' }));
-
-    expect(toggleSpy).toHaveBeenCalledWith(43, false);
-
-    await view.rerender({
-      session: buildQuizSession({
-        ...session,
-        items: session.items.map((item) => (item.question_id === 43 ? { ...item, review_flag: false } : item))
-      }),
-      moduleLabel: 'Geography',
-      busyItemId: null,
-      onToggleReviewFlag: toggleSpy,
-      onSubmit: vi.fn()
-    });
-
-    expect(screen.queryByRole('button', { name: 'Edit question' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Suggest change' })).toBeNull();
   });
 
-  it('uses Alt+R to toggle the most recently submitted question', () => {
-    const toggleSpy = vi.fn().mockResolvedValue(undefined);
+  it('uses Alt+R to open the most recently submitted question for editing', () => {
+    const openEditSpy = vi.fn().mockResolvedValue(undefined);
     const session = buildQuizSession({
       id: 31,
       items: [
@@ -431,7 +406,7 @@ describe('QuizPage', () => {
         session,
         moduleLabel: 'Geography',
         busyItemId: null,
-        onToggleReviewFlag: toggleSpy,
+        onOpenEdit: openEditSpy,
         onSubmit: vi.fn()
       }
     });
@@ -446,11 +421,11 @@ describe('QuizPage', () => {
     window.dispatchEvent(event);
 
     expect(event.defaultPrevented).toBe(true);
-    expect(toggleSpy).toHaveBeenCalledWith(45, true);
+    expect(openEditSpy).toHaveBeenCalledWith(45);
   });
 
   it('does not intercept Alt+R when there is no submitted previous question', () => {
-    const toggleSpy = vi.fn().mockResolvedValue(undefined);
+    const openEditSpy = vi.fn().mockResolvedValue(undefined);
     const session = buildQuizSession({
       id: 32,
       items: [
@@ -467,7 +442,7 @@ describe('QuizPage', () => {
         session,
         moduleLabel: 'Geography',
         busyItemId: null,
-        onToggleReviewFlag: toggleSpy,
+        onOpenEdit: openEditSpy,
         onSubmit: vi.fn()
       }
     });
@@ -482,12 +457,12 @@ describe('QuizPage', () => {
     window.dispatchEvent(event);
 
     expect(event.defaultPrevented).toBe(false);
-    expect(toggleSpy).not.toHaveBeenCalled();
+    expect(openEditSpy).not.toHaveBeenCalled();
   });
 
-  it('uses Alt+R on the final submitted item even when completed review mode hides it', async () => {
+  it('uses Alt+R on the final submitted item even when completed mistake mode hides it', async () => {
     const user = userEvent.setup();
-    const toggleSpy = vi.fn().mockResolvedValue(undefined);
+    const openEditSpy = vi.fn().mockResolvedValue(undefined);
     const session = buildQuizSession({
       id: 33,
       completed_at: '2026-04-04T10:00:00Z',
@@ -527,7 +502,7 @@ describe('QuizPage', () => {
         session,
         moduleLabel: 'Geography',
         busyItemId: null,
-        onToggleReviewFlag: toggleSpy,
+        onOpenEdit: openEditSpy,
         onSubmit: vi.fn()
       }
     });
@@ -545,7 +520,7 @@ describe('QuizPage', () => {
     window.dispatchEvent(event);
 
     expect(event.defaultPrevented).toBe(true);
-    expect(toggleSpy).toHaveBeenCalledWith(49, true);
+    expect(openEditSpy).toHaveBeenCalledWith(49);
   });
 
   it('shows all accepted answers inside the input when a correct alternative is submitted', () => {
@@ -638,7 +613,7 @@ describe('QuizPage', () => {
     expect(answerBox?.className).toContain('plain-answer-box');
     expect(screen.queryByText('thorax')).toBeNull();
     expect(screen.queryAllByRole('listitem')).toHaveLength(0);
-    expect(screen.getByRole('button', { name: 'Flag for review' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Suggest change' })).toBeTruthy();
   });
 
   it('shows all accepted answers in every correct slot for fully correct multi-slot submissions', () => {

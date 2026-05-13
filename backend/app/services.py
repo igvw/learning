@@ -20,8 +20,8 @@ from .service.authoring import (
     create_question,
     delete_question,
     revise_question,
-    set_question_review_flag,
     sync_seed_content,
+    withdraw_question_revision,
 )
 from .service.catalog import (
     create_module,
@@ -77,11 +77,11 @@ __all__ = [
     "review_module_submission",
     "review_question_revision",
     "review_question_submission",
-    "set_question_review_flag",
     "submit_answer",
     "sync_seed_content",
     "update_module",
     "update_user_password",
     "update_user_role",
     "validate_question_import",
+    "withdraw_question_revision",
 ]

@@ -420,14 +420,10 @@ class ModerationApiTests(PostgresBackendTestCase):
             {item["question_id"] for item in bob_session["items"]},
         )
 
-        contributions_response = self.client.get(
-            "/api/contributions/me",
-            headers=self.user_headers(int(alice["id"])),
-        )
-        self.assertEqual(contributions_response.status_code, 200)
+        alice_review_stats = self.get_stats_payload(int(alice["id"]), words["id"])
         proposed_revision = next(
             proposal
-            for proposal in contributions_response.json()["revisions"]
+            for proposal in alice_review_stats["revision_proposals"]
             if proposal["proposal_id"] == proposal_id
         )
         self.assertEqual(proposed_revision["proposed_prompt"], "hunden")
@@ -703,21 +699,17 @@ class ModerationApiTests(PostgresBackendTestCase):
         self.assertEqual(reject_response.status_code, 200)
         self.assertEqual(reject_response.json()["status"], "rejected")
 
-        queue_response = self.client.get("/api/moderation/queue", headers=self.admin_headers)
-        self.assertEqual(queue_response.status_code, 200)
+        admin_stats_response = self.client.get("/api/stats", params={"module_id": words["id"]}, headers=self.admin_headers)
+        self.assertEqual(admin_stats_response.status_code, 200)
         self.assertNotIn(
             proposal_id,
-            {proposal["proposal_id"] for proposal in queue_response.json()["pending_revisions"]},
+            {proposal["proposal_id"] for proposal in admin_stats_response.json()["revision_proposals"]},
         )
 
-        contributions_response = self.client.get(
-            "/api/contributions/me",
-            headers=self.user_headers(int(alice["id"])),
-        )
-        self.assertEqual(contributions_response.status_code, 200)
+        alice_review_stats = self.get_stats_payload(int(alice["id"]), words["id"])
         self.assertNotIn(
             proposal_id,
-            {proposal["proposal_id"] for proposal in contributions_response.json()["revisions"]},
+            {proposal["proposal_id"] for proposal in alice_review_stats["revision_proposals"]},
         )
 
         stats_after_rejection = self.get_stats_payload(int(alice["id"]), words["id"])
@@ -786,23 +778,19 @@ class ModerationApiTests(PostgresBackendTestCase):
                 (proposal_id,),
             )
 
-        queue_response = self.client.get("/api/moderation/queue", headers=self.admin_headers)
-        self.assertEqual(queue_response.status_code, 200)
+        admin_stats_response = self.client.get("/api/stats", params={"module_id": words["id"]}, headers=self.admin_headers)
+        self.assertEqual(admin_stats_response.status_code, 200)
         reopened_revision = next(
             proposal
-            for proposal in queue_response.json()["pending_revisions"]
+            for proposal in admin_stats_response.json()["revision_proposals"]
             if proposal["proposal_id"] == proposal_id
         )
         self.assertEqual(reopened_revision["status"], "pending")
 
-        contributions_response = self.client.get(
-            "/api/contributions/me",
-            headers=self.user_headers(int(alice["id"])),
-        )
-        self.assertEqual(contributions_response.status_code, 200)
+        alice_review_stats = self.get_stats_payload(int(alice["id"]), words["id"])
         reopened_contribution = next(
             proposal
-            for proposal in contributions_response.json()["revisions"]
+            for proposal in alice_review_stats["revision_proposals"]
             if proposal["proposal_id"] == proposal_id
         )
         self.assertEqual(reopened_contribution["status"], "pending")
@@ -837,10 +825,10 @@ class ModerationApiTests(PostgresBackendTestCase):
         self.assertEqual(len(bob_session["items"]), 1)
         self.assertEqual(bob_session["items"][0]["question_id"], verified_question["question_id"])
 
-        queue_response = self.client.get("/api/moderation/queue", headers=self.admin_headers)
-        self.assertEqual(queue_response.status_code, 200)
+        admin_stats_response = self.client.get("/api/stats", params={"module_id": words["id"]}, headers=self.admin_headers)
+        self.assertEqual(admin_stats_response.status_code, 200)
         queued_revision = next(
-            proposal for proposal in queue_response.json()["pending_revisions"] if proposal["proposal_id"] == proposal_id
+            proposal for proposal in admin_stats_response.json()["revision_proposals"] if proposal["proposal_id"] == proposal_id
         )
         self.assertEqual(queued_revision["delete_requested"], True)
 

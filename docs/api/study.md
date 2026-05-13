@@ -37,7 +37,6 @@ Each quiz item includes:
 - rank
 - normalized `type_config`
 - verification and provenance fields
-- optional viewer proposal state when the actor has a personal revision overlay
 - current answer state fields
 
 ### `POST /api/quiz-sessions/{session_id}/items/{item_id}/submit`
@@ -86,7 +85,7 @@ Supported query params:
 
 Frontend behavior note:
 
-- the shipped stats page requests full-scope stats and filters review rows client-side
+- the shipped stats page requests full-scope stats and switches between non-review question buckets and scoped pending revision proposals client-side
 - `review_only` remains a supported backend query parameter for direct API callers
 
 The response contains:
@@ -95,6 +94,9 @@ The response contains:
 - `summary`
 - `recent_sessions`
 - `questions`
+- `revision_proposals`
+
+`revision_proposals` contains scoped pending revision/delete proposals: admins receive all pending proposals in the selected scope, while regular users receive only their own pending proposals.
 
 Each question row includes:
 
@@ -102,16 +104,14 @@ Each question row includes:
 - attempts and accuracy
 - `first_asked_at`
 - `last_asked_at`
-- user review flag
 - verification and provenance fields
-- optional viewer proposal state when the actor has a personal revision overlay
 - recent aggregated incorrect answers
 - derived schedule state
 
 Schedule fields include:
 
 - `bucket`
-- `logical_bucket` (`review`, `unseen`, fixed bucket labels from `1h` through `60d`, or `mastery`)
+- `logical_bucket` (`unseen`, fixed bucket labels from `1h` through `60d`, or `mastery`)
 - `recovery_streak`
 - `interval_step`
 - `last_incorrect_at`

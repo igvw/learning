@@ -10,7 +10,7 @@ The current model is:
 
 - plain one-line QML remains valid for `single_text`, `multi_text`, `ordered_multi`, and `inline_cloze`
 - bundle blocks create `question_type = "bundle"` questions
-- one bundle is one learning item with shared progress, review flags, revisions, and scheduling
+- one bundle is one learning item with shared progress, revision proposals, and scheduling
 - each quiz serving resolves one concrete bundle variant before the quiz item is persisted
 - accepted numeric forms are written explicitly as answer alternatives; built-in rounding/tolerance is not part of the format
 

@@ -20,7 +20,7 @@ See also:
 - [Authentication and sessions](api/auth.md)
   Healthcheck, first-admin bootstrap, sign-in, and sign-out.
 - [Content, accounts, moderation, and questions](api/content.md)
-  Modules, users, contribution queues, moderation actions, question authoring, and review flags.
+  Modules, users, contribution queues, moderation actions, question authoring, and revision proposals.
 - [Study and stats](api/study.md)
   Quiz-session start/submit behavior, feedback fields, and stats payloads.
 - [Imports](api/imports.md)

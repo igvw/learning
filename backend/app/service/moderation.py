@@ -85,12 +85,28 @@ def _pending_question_rows(connection: DatabaseConnection, *, creator_user_id: i
     ).fetchall()
 
 
-def _proposal_rows(connection: DatabaseConnection, *, proposer_user_id: int | None = None) -> list[Any]:
-    where_sql = ""
-    params: tuple[Any, ...] = ()
+def _proposal_rows(
+    connection: DatabaseConnection,
+    *,
+    proposer_user_id: int | None = None,
+    status: str | None = None,
+    scope_module_ids: list[int] | None = None,
+) -> list[Any]:
+    where_parts: list[str] = []
+    params: list[Any] = []
     if proposer_user_id is not None:
-        where_sql = "WHERE proposals.proposer_user_id = ?"
-        params = (proposer_user_id,)
+        where_parts.append("proposals.proposer_user_id = ?")
+        params.append(proposer_user_id)
+    if status is not None:
+        where_parts.append("proposals.status = ?")
+        params.append(status)
+    if scope_module_ids is not None:
+        if not scope_module_ids:
+            return []
+        placeholders = ",".join("?" for _ in scope_module_ids)
+        where_parts.append(f"questions.module_id IN ({placeholders})")
+        params.extend(scope_module_ids)
+    where_sql = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
     return connection.execute(
         f"""
         SELECT
@@ -118,7 +134,7 @@ def _proposal_rows(connection: DatabaseConnection, *, proposer_user_id: int | No
         {where_sql}
         ORDER BY proposals.updated_at DESC, proposals.id DESC
         """,
-        params,
+        tuple(params),
     ).fetchall()
 
 
@@ -203,8 +219,27 @@ def list_moderation_queue(connection: DatabaseConnection) -> dict[str, Any]:
             _module_payload(row) for row in _module_rows(connection, moderation_statuses=("rejected",))
         ],
         "pending_questions": [_question_payload(row) for row in _pending_question_rows(connection)],
-        "pending_revisions": [_proposal_payload(row) for row in _proposal_rows(connection) if row["status"] == "pending"],
     }
+
+
+def list_pending_revision_proposals(
+    connection: DatabaseConnection,
+    *,
+    actor: Actor | None,
+    scope_module_ids: list[int],
+) -> list[dict[str, Any]]:
+    proposer_user_id = None
+    if actor is not None and actor.role != "admin":
+        proposer_user_id = int(actor.user_id)
+    return [
+        _proposal_payload(row)
+        for row in _proposal_rows(
+            connection,
+            proposer_user_id=proposer_user_id,
+            status="pending",
+            scope_module_ids=scope_module_ids,
+        )
+    ]
 
 
 def list_my_contributions(connection: DatabaseConnection, *, actor: Actor) -> dict[str, Any]:
@@ -218,11 +253,6 @@ def list_my_contributions(connection: DatabaseConnection, *, actor: Actor) -> di
             )
         ],
         "questions": [_question_payload(row) for row in _pending_question_rows(connection, creator_user_id=int(actor.user_id))],
-        "revisions": [
-            _proposal_payload(row)
-            for row in _proposal_rows(connection, proposer_user_id=int(actor.user_id))
-            if row["status"] == "pending"
-        ],
     }
 
 

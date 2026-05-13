@@ -110,7 +110,7 @@ export function buildRecoveryStageGraph(questions: QuestionRow[]) {
   };
 }
 
-export function buildAuxiliaryStageGraph(questions: QuestionRow[]) {
+export function buildAuxiliaryStageGraph(questions: QuestionRow[], reviewCount = 0) {
   const stageDefinitions = [
     { key: 'unseen', label: 'Unseen', fillColor: 'hsl(276, 72%, 62%)' },
     { key: 'review', label: 'Review', fillColor: 'hsl(220, 10%, 72%)' },
@@ -120,7 +120,7 @@ export function buildAuxiliaryStageGraph(questions: QuestionRow[]) {
 
   const counts = {
     unseen: 0,
-    review: 0,
+    review: reviewCount,
     bucketed: 0,
     mastery: 0
   };

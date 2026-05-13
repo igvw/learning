@@ -13,10 +13,10 @@ from .schedule import (
     _question_attempt_history,
     _question_stats_by_question,
     _recent_incorrect_answers_by_question,
-    _review_flags_by_question,
     _schedule_snapshot_from_attempts,
 )
 from .visibility import get_effective_question_row, list_effective_question_rows
+from .moderation import list_pending_revision_proposals
 
 
 def _default_question_stats() -> dict[str, Any]:
@@ -32,7 +32,6 @@ def _default_question_stats() -> dict[str, Any]:
 def _question_payload(
     row: dict[str, Any],
     *,
-    review_flag: bool,
     stats: dict[str, Any],
     history: list[dict[str, Any]],
     latest_scored_session_id: int | None,
@@ -58,7 +57,6 @@ def _question_payload(
         "correct_percentage": (stats["correct_count"] / denominator) if denominator else 0.0,
         "first_asked_at": stats["first_asked_at"],
         "last_asked_at": stats["last_asked_at"],
-        "review_flag": review_flag,
         "admin_verified": bool(row["admin_verified"]),
         "moderation_status": row["moderation_status"],
         "created_by_user_id": row["created_by_user_id"],
@@ -73,7 +71,6 @@ def _question_payload(
                 bucket=schedule["bucket"],
                 interval_step=schedule["interval_step"],
                 bucket_origin_step=schedule.get("bucket_origin_step"),
-                review_flag=review_flag,
             ),
             "recovery_streak": schedule["recovery_streak"],
             "interval_step": schedule["interval_step"],
@@ -96,7 +93,6 @@ def get_question(
         raise NotFoundError(f"Question {question_id} was not found.")
 
     question_ids = [question_id]
-    review_flags = _review_flags_by_question(connection, user_id=user_id, question_ids=question_ids)
     stats_by_question = _question_stats_by_question(connection, user_id=user_id, question_ids=question_ids)
     history_by_question = _question_attempt_history(connection, user_id=user_id, question_ids=question_ids)
     recent_incorrect_answers = _recent_incorrect_answers_by_question(
@@ -106,7 +102,6 @@ def get_question(
     )
     return _question_payload(
         row,
-        review_flag=review_flags.get(question_id, False),
         stats=stats_by_question.get(question_id, _default_question_stats()),
         history=history_by_question.get(question_id, []),
         latest_scored_session_id=_latest_scored_session_id(connection, user_id=user_id),
@@ -128,7 +123,6 @@ def get_stats(
     question_rows = list_effective_question_rows(connection, actor=actor, scope_module_ids=scope_ids)
 
     question_ids = [row["question_id"] for row in question_rows]
-    review_flags = _review_flags_by_question(connection, user_id=user_id, question_ids=question_ids)
     stats_by_question = _question_stats_by_question(connection, user_id=user_id, question_ids=question_ids)
     history_by_question = _question_attempt_history(connection, user_id=user_id, question_ids=question_ids)
     latest_scored_session_id = _latest_scored_session_id(connection, user_id=user_id)
@@ -141,14 +135,12 @@ def get_stats(
     now = utc_now()
     questions = []
     for row in question_rows:
-        review_flag = review_flags.get(row["question_id"], False)
-        if review_only and not review_flag:
+        if review_only:
             continue
 
         questions.append(
             _question_payload(
                 row,
-                review_flag=review_flag,
                 stats=stats_by_question.get(row["question_id"], _default_question_stats()),
                 history=history_by_question.get(row["question_id"], []),
                 latest_scored_session_id=latest_scored_session_id,
@@ -159,7 +151,6 @@ def get_stats(
 
     questions.sort(
         key=lambda row: (
-            0 if row["review_flag"] else 1,
             row["last_asked_at"] is None,
             _iso_timestamp_sort_value(row["last_asked_at"], descending=True),
             row["rank"],
@@ -168,7 +159,8 @@ def get_stats(
     )
 
     total_questions = len(question_rows)
-    reviewed_questions = sum(1 for question_id in question_ids if review_flags.get(question_id, False))
+    revision_proposals = list_pending_revision_proposals(connection, actor=actor, scope_module_ids=scope_ids)
+    reviewed_questions = len(revision_proposals)
     total_attempts = sum(stats["attempts_count"] for stats in stats_by_question.values())
     total_correct = sum(stats["correct_count"] for stats in stats_by_question.values())
     total_possible = sum(stats["correct_count"] + stats["incorrect_count"] for stats in stats_by_question.values())
@@ -221,4 +213,5 @@ def get_stats(
         },
         "recent_sessions": recent_sessions,
         "questions": questions,
+        "revision_proposals": revision_proposals,
     }

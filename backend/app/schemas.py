@@ -153,13 +153,11 @@ class ModerationQueueOut(BaseModel):
     pending_modules: list[PendingModuleOut] = Field(default_factory=list)
     rejected_modules: list[PendingModuleOut] = Field(default_factory=list)
     pending_questions: list[PendingQuestionOut] = Field(default_factory=list)
-    pending_revisions: list[QuestionRevisionProposalOut] = Field(default_factory=list)
 
 
 class MyContributionsOut(BaseModel):
     modules: list[PendingModuleOut] = Field(default_factory=list)
     questions: list[PendingQuestionOut] = Field(default_factory=list)
-    revisions: list[QuestionRevisionProposalOut] = Field(default_factory=list)
 
 
 class QuizSessionCreateIn(BaseModel):
@@ -173,7 +171,6 @@ class QuizItemOut(BaseModel):
     question_id: int
     module_id: int
     module_instruction: str = ""
-    review_flag: bool
     prompt: str
     question_type: QuestionType
     rank: int
@@ -297,15 +294,6 @@ class QuestionMutationOut(BaseModel):
     delete_requested: bool = False
 
 
-class QuestionReviewFlagIn(BaseModel):
-    review_flag: bool
-
-
-class QuestionReviewFlagOut(BaseModel):
-    question_id: int
-    review_flag: bool
-
-
 class RecentSessionOut(BaseModel):
     session_id: int
     created_at: str
@@ -345,7 +333,6 @@ class QuestionRowOut(BaseModel):
     correct_percentage: float
     first_asked_at: str | None = None
     last_asked_at: str | None = None
-    review_flag: bool
     admin_verified: bool = True
     moderation_status: ModerationStatus = "verified"
     created_by_user_id: int | None = None
@@ -362,6 +349,7 @@ class StatsResponseOut(BaseModel):
     summary: StatsSummaryOut
     recent_sessions: list[RecentSessionOut]
     questions: list[QuestionRowOut]
+    revision_proposals: list[QuestionRevisionProposalOut] = Field(default_factory=list)
 
 
 class QuestionImportRowIn(BaseModel):

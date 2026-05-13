@@ -12,7 +12,6 @@ class QuestionDetailApiTests(PostgresBackendTestCase):
             rank=3,
         )["question_id"]
         user = self.create_user("alice-question-detail", "Alice Question Detail")
-        self.set_review_flag(user["id"], question_id, True)
 
         response = self.client.get(
             f"/api/questions/{question_id}",
@@ -28,7 +27,6 @@ class QuestionDetailApiTests(PostgresBackendTestCase):
         self.assertEqual(payload["question_type"], "single_text")
         self.assertEqual(payload["rank"], 1)
         self.assertEqual(payload["accepted_answers"], [["Oslo", "Christiania"]])
-        self.assertTrue(payload["review_flag"])
         self.assertEqual(payload["segments"], [])
         self.assertIsNone(payload["bundle_qml"])
         self.assertIn("schedule", payload)
@@ -91,3 +89,61 @@ class QuestionDetailApiTests(PostgresBackendTestCase):
 
         self.assertEqual(missing_response.status_code, 404)
         self.assertEqual(invisible_response.status_code, 404)
+
+    def test_regular_user_revision_requires_a_real_change(self) -> None:
+        module = self.create_module_record("Question Detail Review")
+        question = self.create_question_record(module["id"], "hund", [["dog"]])
+        user = self.create_user("alice-noop-review", "Alice Noop Review")
+
+        response = self.client.post(
+            f"/api/questions/{question['question_id']}/revisions",
+            json={
+                "module_id": module["id"],
+                "prompt": "hund",
+                "question_type": "single_text",
+                "rank": 1,
+                "accepted_answers": [["dog"]],
+                "segments": [],
+                "reset_stats": True,
+            },
+            headers=self.user_headers(user["id"]),
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("Suggest at least one change", response.json()["detail"])
+
+    def test_user_can_withdraw_pending_revision_to_return_question_to_rotation(self) -> None:
+        module = self.create_module_record("Question Detail Withdraw")
+        question = self.create_question_record(module["id"], "hund", [["dog"]])
+        user = self.create_user("alice-withdraw-review", "Alice Withdraw Review")
+
+        revise_response = self.client.post(
+            f"/api/questions/{question['question_id']}/revisions",
+            json={
+                "module_id": module["id"],
+                "prompt": "hunden",
+                "question_type": "single_text",
+                "rank": 1,
+                "accepted_answers": [["dog"]],
+                "segments": [],
+                "reset_stats": True,
+            },
+            headers=self.user_headers(user["id"]),
+        )
+        self.assertEqual(revise_response.status_code, 200)
+        self.assertEqual(len(self.get_stats_payload(user["id"], module["id"])["revision_proposals"]), 1)
+        self.assertEqual(self.start_quiz_session(user["id"], module["id"], 5)["items"], [])
+
+        withdraw_response = self.client.delete(
+            f"/api/questions/{question['question_id']}/revisions/mine",
+            headers=self.user_headers(user["id"]),
+        )
+
+        self.assertEqual(withdraw_response.status_code, 204)
+        stats_payload = self.get_stats_payload(user["id"], module["id"])
+        self.assertEqual(stats_payload["revision_proposals"], [])
+        self.assertEqual(stats_payload["questions"][0]["question_id"], question["question_id"])
+        self.assertEqual(
+            self.start_quiz_session(user["id"], module["id"], 5)["items"][0]["question_id"],
+            question["question_id"],
+        )

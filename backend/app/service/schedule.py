@@ -8,33 +8,6 @@ from ..settings import schedule_timezone
 from .time_utils import is_full_credit, parse_iso_timestamp, schedule_due_at
 
 
-def _review_flags_by_question(
-    connection: DatabaseConnection,
-    *,
-    user_id: int,
-    question_ids: list[int] | None = None,
-) -> dict[int, bool]:
-    if question_ids is not None and not question_ids:
-        return {}
-
-    where_sql = ""
-    params: list[Any] = [user_id]
-    if question_ids is not None:
-        placeholders = ",".join("?" for _ in question_ids)
-        where_sql = f"AND question_id IN ({placeholders})"
-        params.extend(question_ids)
-
-    rows = connection.execute(
-        f"""
-        SELECT question_id, review_flag
-        FROM user_review_flags
-        WHERE user_id = ? {where_sql}
-        """,
-        tuple(params),
-    ).fetchall()
-    return {row["question_id"]: bool(row["review_flag"]) for row in rows}
-
-
 def _question_attempt_history(
     connection: DatabaseConnection,
     *,
@@ -487,10 +460,7 @@ def _logical_bucket_label(
     bucket: str,
     interval_step: int | None,
     bucket_origin_step: int | None,
-    review_flag: bool,
 ) -> str:
-    if review_flag:
-        return "review"
     if bucket == "unseen":
         return "unseen"
     if bucket == "mastery":
@@ -570,10 +540,6 @@ def _bucketed_question_selection(
         selected.extend(bucket[:remaining])
 
     return selected
-
-
-def _eligible_quiz_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [candidate for candidate in candidates if not candidate.get("review_flag", False)]
 
 
 def _randomize_quiz_order(rows: list[dict[str, Any]], *, rng: random.Random | None = None) -> list[dict[str, Any]]:

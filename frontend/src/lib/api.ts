@@ -14,7 +14,6 @@ import type {
   QuestionImportResult,
   QuestionImportRowPayload,
   QuestionMutationResult,
-  QuestionReviewFlagResult,
   QuestionRow,
   QuizSession,
   StatsResponse,
@@ -278,10 +277,9 @@ export function deleteQuestion(questionId: number): Promise<QuestionMutationResu
   });
 }
 
-export function setQuestionReviewFlag(questionId: number, reviewFlag: boolean): Promise<QuestionReviewFlagResult> {
-  return request<QuestionReviewFlagResult>(`/api/questions/${questionId}/review-flag`, {
-    method: 'PATCH',
-    body: JSON.stringify({ review_flag: reviewFlag })
+export function withdrawQuestionRevision(questionId: number): Promise<void> {
+  return request<void>(`/api/questions/${questionId}/revisions/mine`, {
+    method: 'DELETE'
   });
 }
 

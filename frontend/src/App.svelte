@@ -31,7 +31,7 @@
   } from './lib/app-shell-import';
   import { commitImportUiFlow, startImportUiFlow } from './lib/app-shell-import-actions';
   import { IMPORT_COMMIT_CHUNK_SIZE } from './lib/import-session';
-  import { runBulkModeration, runBulkRevisionModeration, saveQuestionMutation } from './lib/app-shell-mutations';
+  import { runBulkModeration, saveQuestionMutation } from './lib/app-shell-mutations';
   import {
     bootstrapAdmin,
     commitQuestionImport,
@@ -57,19 +57,18 @@
     reviewQuestion,
     reviewQuestionRevision,
     reviseQuestion,
-    setQuestionReviewFlag,
     submitQuizAnswer,
     updateModule,
     updateUserPassword,
     updateUserRole,
     validateQuestionImportRows,
-    validateQuestionImportText
+    validateQuestionImportText,
+    withdrawQuestionRevision
   } from './lib/api';
   import { ensureModulePath, findModuleNode as findModuleNodeInTree } from './lib/module-paths';
-  import { applyQuestionReviewFlag, applySubmitAnswerResult } from './lib/quiz-session';
+  import { applySubmitAnswerResult } from './lib/quiz-session';
   import type {
     AuthActor,
-    BulkRevisionModerationItem,
     BulkModerationResult,
     CreateModulePayload,
     CreateUserPayload,
@@ -107,7 +106,6 @@
 
   let session: QuizSession | null = null;
   let quizBusyItemId: number | null = null;
-  let markingReviewQuestionId: number | null = null;
   let openingQuizEditorQuestionId: number | null = null;
   let quizError = '';
   let quizQuestionCount = 10;
@@ -124,6 +122,7 @@
   let editingRevisionProposal: QuestionRevisionProposal | null = null;
   let savingQuestion = false;
   let deletingQuestion = false;
+  let withdrawingRevisionQuestionId: number | null = null;
 
   let importState = initialImportUiState();
   let instanceKey = 'default';
@@ -367,22 +366,6 @@
     reviewOnly = value;
   }
 
-  async function handleToggleReviewFlag(questionId: number, reviewFlag: boolean): Promise<void> {
-    if (!session) {
-      return;
-    }
-    markingReviewQuestionId = questionId;
-    quizError = '';
-    try {
-      const result = await setQuestionReviewFlag(questionId, reviewFlag);
-      session = applyQuestionReviewFlag(session, result.question_id, result.review_flag);
-    } catch (error) {
-      quizError = error instanceof Error ? error.message : 'Unable to update this review flag.';
-    } finally {
-      markingReviewQuestionId = null;
-    }
-  }
-
   function handleOpenCreate(): void {
     editorOrigin = 'default';
     editorMode = 'standard';
@@ -422,6 +405,15 @@
   function handleOpenRevisionEditor(proposal: QuestionRevisionProposal): void {
     editorOrigin = 'default';
     editorMode = 'moderation';
+    editingRevisionProposal = proposal;
+    editingQuestion = buildModerationRevisionSeed(proposal, proposal.delete_requested ? 'current' : 'proposed');
+    deletingQuestion = false;
+    editorOpen = true;
+  }
+
+  function handleOpenUserRevisionEditor(proposal: QuestionRevisionProposal): void {
+    editorOrigin = 'default';
+    editorMode = 'standard';
     editingRevisionProposal = proposal;
     editingQuestion = buildModerationRevisionSeed(proposal, proposal.delete_requested ? 'current' : 'proposed');
     deletingQuestion = false;
@@ -486,11 +478,26 @@
     await refreshAuthenticatedData();
   }
 
+  function markSessionQuestionInReview(questionId: number, proposalId: number): void {
+    if (!session) {
+      return;
+    }
+    session = {
+      ...session,
+      items: session.items.map((item) =>
+        item.question_id === questionId
+          ? { ...item, viewer_revision_proposal_id: proposalId }
+          : item
+      )
+    };
+  }
+
   async function handleSaveQuestion(payload: QuestionDraftPayload, resetStats: boolean): Promise<void> {
     savingQuestion = true;
     try {
       const origin = editorOrigin;
-      const reloadKind = await saveQuestionMutation({
+      const editedQuestionId = editingQuestion?.question_id ?? null;
+      const savedMutation = await saveQuestionMutation({
         editorMode,
         editingQuestion,
         editingRevisionProposal,
@@ -500,8 +507,11 @@
         reviseQuestion,
         reviewQuestionRevision
       });
+      if (origin === 'quiz' && editedQuestionId !== null && savedMutation.mutationResult?.proposal_id) {
+        markSessionQuestionInReview(editedQuestionId, savedMutation.mutationResult.proposal_id);
+      }
       closeEditor();
-      if (reloadKind === 'moderation') {
+      if (savedMutation.reloadKind === 'moderation') {
         await reloadAfterModerationMutation();
       } else if (origin === 'quiz') {
         await refreshAuthenticatedData();
@@ -517,7 +527,10 @@
     deletingQuestion = true;
     try {
       const origin = editorOrigin;
-      await deleteQuestion(questionId);
+      const mutationResult = await deleteQuestion(questionId);
+      if (origin === 'quiz' && mutationResult.proposal_id) {
+        markSessionQuestionInReview(questionId, mutationResult.proposal_id);
+      }
       closeEditor();
       if (origin === 'quiz') {
         await refreshAuthenticatedData();
@@ -526,6 +539,17 @@
       }
     } finally {
       deletingQuestion = false;
+    }
+  }
+
+  async function handleWithdrawRevision(questionId: number): Promise<void> {
+    withdrawingRevisionQuestionId = questionId;
+    try {
+      await withdrawQuestionRevision(questionId);
+      closeEditor();
+      await refreshAuthenticatedData();
+    } finally {
+      withdrawingRevisionQuestionId = null;
     }
   }
 
@@ -587,19 +611,6 @@
       ids: questionIds,
       payload,
       handler: reviewQuestion
-    });
-    await reloadAfterModerationMutation();
-    return result;
-  }
-
-  async function handleBulkRevisionModeration(
-    items: BulkRevisionModerationItem[],
-    payload: ModerationActionPayload
-  ): Promise<BulkModerationResult> {
-    const result = await runBulkRevisionModeration({
-      items,
-      payload,
-      reviewQuestionRevision
     });
     await reloadAfterModerationMutation();
     return result;
@@ -672,12 +683,10 @@
           moduleLabel={selectedModuleLabel}
           questionCount={quizQuestionCount}
           busyItemId={quizBusyItemId}
-          markingReviewQuestionId={markingReviewQuestionId}
           openingEditorQuestionId={openingQuizEditorQuestionId}
           errorMessage={quizError}
           onChangeQuestionCount={(value) => (quizQuestionCount = value)}
           onStartQuiz={handleStartQuiz}
-          onToggleReviewFlag={handleToggleReviewFlag}
           onOpenEdit={handleOpenQuizEdit}
           onSubmit={handleSubmitAnswer}
         />
@@ -688,9 +697,14 @@
           loading={statsLoading}
           reviewOnly={reviewOnly}
           errorMessage={statsError}
+          currentActor={currentActor}
           onToggleReviewOnly={handleToggleReviewOnly}
           onOpenCreate={handleOpenCreate}
           onOpenEdit={handleOpenEdit}
+          onOpenUserRevisionEditor={handleOpenUserRevisionEditor}
+          onOpenAdminRevisionEditor={handleOpenRevisionEditor}
+          onRevisionModeration={(id, payload) => handleModerationAction('revision', id, payload)}
+          onWithdrawRevision={handleWithdrawRevision}
         />
       {:else}
         <AdminPage
@@ -711,8 +725,6 @@
           onModerationAction={handleModerationAction}
           onDeleteRejectedModule={handleDeleteRejectedModule}
           onBulkQuestionModeration={handleBulkQuestionModeration}
-          onBulkRevisionModeration={handleBulkRevisionModeration}
-          onOpenRevisionEditor={handleOpenRevisionEditor}
         />
       {/if}
     </main>
@@ -725,10 +737,13 @@
       mode={editorMode}
       saving={savingQuestion}
       deleting={deletingQuestion}
+      withdrawingRevision={withdrawingRevisionQuestionId === editingQuestion?.question_id}
       currentActor={currentActor}
+      revisionProposal={editingRevisionProposal}
       onClose={closeEditor}
       onSave={handleSaveQuestion}
       onDelete={handleDeleteQuestion}
+      onWithdrawRevision={handleWithdrawRevision}
     />
 
     <ImportDrawer

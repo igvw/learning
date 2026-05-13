@@ -8,3 +8,7 @@ class NotFoundError(ServiceError):
 
 class ValidationError(ServiceError):
     status_code = 400
+
+
+class UnprocessableEntityError(ServiceError):
+    status_code = 422

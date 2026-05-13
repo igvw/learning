@@ -10,7 +10,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 
-CURRENT_SCHEMA_VERSION = 11
+CURRENT_SCHEMA_VERSION = 12
 SCHEMA_VERSION_TABLE = "app_schema_version"
 SCHEMA_SQL = Path(__file__).with_name("schema.sql").read_text()
 
@@ -564,7 +564,7 @@ def initialize_database(database_url: str) -> None:
 
         if existing_tables and current_version == 0:
             raise RuntimeError("Existing PostgreSQL database has no schema version. Refusing to mutate it automatically.")
-        if current_version not in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, CURRENT_SCHEMA_VERSION}:
+        if current_version not in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, CURRENT_SCHEMA_VERSION}:
             raise RuntimeError(f"Unsupported PostgreSQL schema version {current_version}.")
 
         if current_version == 0:
@@ -704,6 +704,8 @@ def initialize_database(database_url: str) -> None:
             _migrate_question_bundles_to_rows(connection)
             _ensure_quiz_session_item_variant_column(connection)
             _migrate_attempts_to_slim_rows(connection)
+        if current_version in {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}:
+            connection.execute("DROP TABLE IF EXISTS user_review_flags")
         if current_version != 0:
             connection.executescript(SCHEMA_SQL)
         _set_schema_version(connection, CURRENT_SCHEMA_VERSION)

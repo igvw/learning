@@ -41,15 +41,28 @@ class QuizApiTests(PostgresBackendTestCase):
         stats_payload = self.get_stats_payload(user["id"], 5)
         self.assertGreaterEqual(stats_payload["summary"]["total_attempts"], 1)
 
-    def test_review_flagged_questions_do_not_reappear_in_quiz(self) -> None:
+    def test_questions_with_pending_user_revisions_do_not_reappear_in_quiz(self) -> None:
         user = self.create_user()
 
-        flagged_question_id = self.get_stats_payload(user["id"], 5)["questions"][0]["question_id"]
-        self.set_review_flag(user["id"], flagged_question_id, True)
+        question = self.get_stats_payload(user["id"], 5)["questions"][0]
+        reviewed_question_id = question["question_id"]
+        response = self.client.post(
+            f"/api/questions/{reviewed_question_id}/revisions",
+            json={
+                "module_id": question["module_id"],
+                "prompt": f"{question['prompt']} updated",
+                "question_type": question["question_type"],
+                "rank": question["rank"],
+                "accepted_answers": question["accepted_answers"],
+                "segments": question["segments"],
+            },
+            headers=self.user_headers(user["id"]),
+        )
+        self.assertEqual(response.status_code, 200)
 
         session = self.start_quiz_session(user["id"], 5, 10)
         returned_ids = [item["question_id"] for item in session["items"]]
-        self.assertNotIn(flagged_question_id, returned_ids)
+        self.assertNotIn(reviewed_question_id, returned_ids)
 
     def test_unseen_miss_then_correct_sits_out_exact_next_quiz(self) -> None:
         norwegian = self.create_module_record("Norwegian Retry")

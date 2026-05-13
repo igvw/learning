@@ -20,6 +20,7 @@
     AuthActor,
     ModuleNode,
     QuestionDraftPayload,
+    QuestionRevisionProposal,
     QuestionRow,
     QuestionType
   } from '../lib/types';
@@ -36,13 +37,18 @@
   export let mode: 'standard' | 'moderation' = 'standard';
   export let saving = false;
   export let deleting = false;
+  export let withdrawingRevision = false;
   export let currentActor: AuthActor | null = null;
+  export let revisionProposal: QuestionRevisionProposal | null = null;
   export let onClose: () => void = () => {};
   export let onSave: (payload: QuestionDraftPayload, resetStats: boolean) => Promise<void> = async () => {
     throw new Error('Question save handler is not configured.');
   };
   export let onDelete: (questionId: number) => Promise<void> = async () => {
     throw new Error('Question delete handler is not configured.');
+  };
+  export let onWithdrawRevision: (questionId: number) => Promise<void> = async () => {
+    throw new Error('Revision withdrawal handler is not configured.');
   };
 
   let prompt = '';
@@ -361,11 +367,31 @@
     }
   }
 
+  async function handleWithdrawRevision(): Promise<void> {
+    if (!editingQuestion) {
+      return;
+    }
+    if (typeof window !== 'undefined') {
+      const confirmed = window.confirm('Remove this pending review item and return the original question to quiz rotation?');
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    formError = '';
+    try {
+      await onWithdrawRevision(editingQuestion.question_id);
+    } catch (error) {
+      formError = error instanceof Error ? error.message : 'Unable to remove this review item.';
+    }
+  }
+
   $: selectedModuleNode = findModuleById(modules, Number(moduleId));
   $: selectedModuleIsLeaf = selectedModuleNode?.children.length === 0;
   $: selectedModuleLabel = selectedModuleNode ? `.../${selectedModuleNode.title}` : 'Select leaf module';
-  $: editorBusy = saving || deleting;
+  $: editorBusy = saving || deleting || withdrawingRevision;
   $: showDeleteAction = Boolean(editingQuestion) && mode !== 'moderation';
+  $: showWithdrawAction = Boolean(editingQuestion && revisionProposal && revisionProposal.status === 'pending' && mode !== 'moderation');
   $: isAdmin = currentActor?.role === 'admin';
   $: isVerifiedNonAdminEdit = Boolean(editingQuestion && !isAdmin && editingQuestion.admin_verified);
   $: moduleSelectionLocked = mode === 'moderation' || isVerifiedNonAdminEdit;
@@ -385,7 +411,8 @@
     : isVerifiedNonAdminEdit
       ? 'Request Delete'
       : 'Delete Question';
-  $: marker = `${open}:${editingQuestion?.question_id ?? 'new'}:${defaultModuleId ?? 'none'}:${modules.map((module) => module.id).join(',')}`;
+  $: withdrawActionLabel = withdrawingRevision ? 'Removing...' : 'Remove from review';
+  $: marker = `${open}:${editingQuestion?.question_id ?? 'new'}:${revisionProposal?.proposal_id ?? 'none'}:${defaultModuleId ?? 'none'}:${modules.map((module) => module.id).join(',')}`;
   $: if (open && marker !== localMarker) {
     localMarker = marker;
     resetFromQuestion(editingQuestion);
@@ -438,6 +465,10 @@
           <div class="banner info">Saving here approves the edited revision. Module placement and order stay locked.</div>
         {:else if isVerifiedNonAdminEdit}
           <div class="banner info">This is a personal revision proposal. Module placement and order stay global until an admin approves it.</div>
+        {/if}
+
+        {#if showWithdrawAction}
+          <div class="banner info">This question is in Review because of your pending proposal. Remove it from review to discard the proposal and return the original question to quiz rotation.</div>
         {/if}
 
         {#if qmlError && (questionType === 'bundle' || questionType === 'inline_cloze' || !editingQuestion)}
@@ -552,6 +583,16 @@
             </div>
 
             <div class="drawer-actions">
+              {#if showWithdrawAction}
+                <button
+                  class="ghost-button"
+                  type="button"
+                  disabled={editorBusy}
+                  on:click={() => void handleWithdrawRevision()}
+                >
+                  {withdrawActionLabel}
+                </button>
+              {/if}
               {#if showDeleteAction}
                 <button
                   class="danger-button"

@@ -8,7 +8,6 @@
   import { flattenModules } from '../lib/module-tree';
   import type {
     AuthActor,
-    BulkRevisionModerationItem,
     BulkModerationResult,
     CreateModulePayload,
     ModerationActionPayload,
@@ -17,7 +16,6 @@
     ModerationQueue,
     ModuleNode,
     MyContributions,
-    QuestionRevisionProposal,
     UpdateModulePayload,
     User
   } from '../lib/types';
@@ -77,14 +75,6 @@
   ) => Promise<BulkModerationResult> = async () => {
     throw new Error('Bulk moderation handler is not configured.');
   };
-  export let onBulkRevisionModeration: (
-    items: BulkRevisionModerationItem[],
-    payload: ModerationActionPayload
-  ) => Promise<BulkModerationResult> = async () => {
-    throw new Error('Bulk revision moderation handler is not configured.');
-  };
-  export let onOpenRevisionEditor: (proposal: QuestionRevisionProposal) => void = () => {};
-
   let openOverlay: 'accounts' | 'modules' | 'import' | 'export' | null = null;
 
   $: isAdmin = currentActor?.role === 'admin';
@@ -160,8 +150,6 @@
         onModerationAction={onModerationAction}
         onDeleteRejectedModule={onDeleteRejectedModule}
         onBulkQuestionModeration={onBulkQuestionModeration}
-        onBulkRevisionModeration={onBulkRevisionModeration}
-        onOpenRevisionEditor={onOpenRevisionEditor}
       />
     {:else}
       <ContributionsPanel contributions={contributions} />
