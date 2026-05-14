@@ -18,7 +18,7 @@ The page includes:
 - retry-eligibility graph
 - first-time questions answered by day over the last 7 app-timezone days
 - collapsible question bucket cards
-- `Review` checkbox that switches between normal question buckets and pending revision/delete proposals
+- `Review` control that switches between normal question buckets and pending revision/delete proposals
 - floating create-question action
 
 ## Question Buckets
@@ -33,8 +33,8 @@ Normal bucket cards focus on:
 
 Bucket behavior:
 
-- when `Review` is unchecked, cards show normal quiz-eligible question buckets
-- when `Review` is checked, the page shows the `Review` card with pending revision/delete proposals
+- when `Questions` is selected, cards show normal quiz-eligible question buckets
+- when `Review` is selected, the page shows the `Review` card with pending revision/delete proposals
 - pending proposals can be re-edited or removed by the proposing user
 - admins can approve, reject, or edit-then-approve pending proposals from the same Review card
 - hot rows are shaded red in two intensities in the main table
@@ -43,7 +43,9 @@ Bucket behavior:
 ## Graph Detail Overlays
 
 - chart layout uses two rows:
-  `Latest quiz performance` with `Entry states` on the top row, then `Spaced repetition stages`, `Retry eligibility`, and `First-time questions answered` below
+  `Latest quiz performance`, `Questions per study block`, and `Entry states` on the top row, then `Spaced repetition stages`, `Retry eligibility`, and `First-time questions answered` below
+- `Questions per study block` groups answer activity by 30-minute inactivity gaps and is separate from quiz-session API/database records
+- the compact `Questions per study block` card shows the latest 10 activity blocks; clicking it opens a latest-20 detail overlay with time range, questions answered, answers per minute, and correct rate
 - `Spaced repetition stages` shows the full fixed ladder through `60d`
 - clicking `Spaced repetition stages` opens a due-day heatmap overlay
 - `Retry eligibility` groups fixed-bucket due times into `<1`, day buckets `1` through `7`, and `>7`

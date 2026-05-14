@@ -12,6 +12,7 @@ import type {
   QuizItem,
   QuizSession,
   RecentSession,
+  StudyBlock,
   StatsResponse,
   User
 } from '../src/lib/types';
@@ -101,6 +102,22 @@ export function buildRecentSession(overrides: Partial<RecentSession> = {}): Rece
   };
 }
 
+export function buildStudyBlock(overrides: Partial<StudyBlock> = {}): StudyBlock {
+  return {
+    started_at: '2026-04-05T10:00:00Z',
+    ended_at: '2026-04-05T10:20:00Z',
+    answered_count: 4,
+    correct_count: 3,
+    score_possible: 4,
+    accuracy: 0.75,
+    duration_minutes: 20,
+    answers_per_minute: 0.2,
+    days_ago: 0,
+    day_label: 'n',
+    ...overrides
+  };
+}
+
 export function buildQuestionSchedule(overrides: Partial<QuestionSchedule> = {}): QuestionSchedule {
   return {
     bucket: 'unseen',
@@ -144,14 +161,18 @@ export function buildQuestionRow(
 }
 
 export function buildStatsResponse(
-  overrides: Omit<Partial<StatsResponse>, 'summary' | 'recent_sessions' | 'questions' | 'revision_proposals'> & {
+  overrides: Omit<
+    Partial<StatsResponse>,
+    'summary' | 'recent_sessions' | 'study_blocks' | 'questions' | 'revision_proposals'
+  > & {
     summary?: Partial<StatsResponse['summary']>;
     recent_sessions?: RecentSession[];
+    study_blocks?: StudyBlock[];
     questions?: QuestionRow[];
     revision_proposals?: QuestionRevisionProposal[];
   } = {}
 ): StatsResponse {
-  const { summary, recent_sessions, questions, revision_proposals, ...statsOverrides } = overrides;
+  const { summary, recent_sessions, study_blocks, questions, revision_proposals, ...statsOverrides } = overrides;
   return {
     schedule_timezone: 'UTC',
     summary: {
@@ -164,6 +185,7 @@ export function buildStatsResponse(
       ...summary
     },
     recent_sessions: recent_sessions ?? [],
+    study_blocks: study_blocks ?? [],
     questions: questions ?? [],
     revision_proposals: revision_proposals ?? [],
     ...statsOverrides

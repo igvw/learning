@@ -401,8 +401,7 @@ describe('App', () => {
     const initialModuleLoads = vi.mocked(api.getModulesTree).mock.calls.length;
     const initialStatsLoads = statsMock.mock.calls.length;
 
-    await user.click(screen.getByLabelText('Review'));
-    await user.click(screen.getByRole('button', { name: /^Review\s+2/ }));
+    await user.click(screen.getByRole('button', { name: 'Review' }));
     await user.click(screen.getAllByRole('button', { name: 'Approve' })[0]);
 
     await waitFor(() => {
@@ -461,8 +460,7 @@ describe('App', () => {
 
     await screen.findByRole('heading', { name: 'Biology' });
 
-    await user.click(screen.getByLabelText('Review'));
-    await user.click(screen.getByRole('button', { name: /^Review\s+1/ }));
+    await user.click(screen.getByRole('button', { name: 'Review' }));
     await user.click(screen.getByRole('button', { name: 'Edit then approve' }));
 
     await waitFor(() => {

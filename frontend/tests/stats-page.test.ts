@@ -3,7 +3,13 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 import StatsPage from '../src/components/StatsPage.svelte';
-import { buildQuestionRevisionProposal, buildQuestionRow, buildRecentSession, buildStatsResponse } from './builders';
+import {
+  buildQuestionRevisionProposal,
+  buildQuestionRow,
+  buildRecentSession,
+  buildStatsResponse,
+  buildStudyBlock
+} from './builders';
 import {
   buildRecoveryStageGraph
 } from '../src/lib/stats/stage-graphs';
@@ -16,13 +22,54 @@ import {
   buildFirstSeenGraph,
   buildStageDueMatrixGraph
 } from '../src/lib/stats/due-graphs';
+import { buildStudyBlockGraph } from '../src/lib/stats/study-block-graph';
 
 describe('StatsPage', () => {
-  function reviewBucketToggle(container: HTMLElement): HTMLElement {
-    const toggle = within(container).getByText('Review').closest('label');
-    expect(toggle).toBeTruthy();
-    return toggle as HTMLElement;
+  function reviewBucketHeader(container: HTMLElement): HTMLElement {
+    const header = within(container).getByText('Review').closest('.question-bucket-toggle-static');
+    expect(header).toBeTruthy();
+    return header as HTMLElement;
   }
+
+  it('builds study block bars with day labels and hover titles', () => {
+    const graph = buildStudyBlockGraph([
+      buildStudyBlock({
+        started_at: '2026-04-04T09:00:00Z',
+        ended_at: '2026-04-04T09:25:00Z',
+        answered_count: 5,
+        days_ago: 1,
+        day_label: '1d'
+      }),
+      buildStudyBlock({
+        started_at: '2026-04-05T11:00:00Z',
+        ended_at: '2026-04-05T11:05:00Z',
+        answered_count: 1,
+        days_ago: 0,
+        day_label: 'n'
+      })
+    ]);
+
+    expect(graph.chartWidth).toBe(360);
+    expect(graph.bars.map((bar) => bar.dayLabel)).toEqual(['1d', 'n']);
+    expect(graph.bars.map((bar) => bar.answeredCount)).toEqual([5, 1]);
+    expect(graph.bars[0].title).toContain('5 questions');
+    expect(graph.bars[0].title).toMatch(/\d{2}:\d{2}/);
+    expect(graph.bars[1].title).toContain('1 question');
+
+    const denseGraph = buildStudyBlockGraph(
+      Array.from({ length: 12 }, (_, index) =>
+        buildStudyBlock({
+          started_at: `2026-04-${String(index + 1).padStart(2, '0')}T09:00:00Z`,
+          ended_at: `2026-04-${String(index + 1).padStart(2, '0')}T09:05:00Z`,
+          answered_count: index + 1,
+          day_label: `${index + 1}d`
+        })
+      )
+    );
+    expect(denseGraph.bars).toHaveLength(10);
+    expect(denseGraph.bars[0].dayLabel).toBe('3d');
+    expect(denseGraph.bars[9].dayLabel).toBe('12d');
+  });
 
   it('builds retry eligibility counts across the coming week from fixed buckets only', () => {
     const referenceTime = new Date(2026, 3, 5, 10, 30, 0);
@@ -176,6 +223,96 @@ describe('StatsPage', () => {
     expect(graph.stages.find((stage) => stage.key === '30d')?.count).toBe(2);
     expect(graph.stages.find((stage) => stage.key === '30d')?.coolingCount).toBe(1);
     expect(graph.stages.find((stage) => stage.key === '60d')?.count).toBe(1);
+  });
+
+  it('renders rounded cooling shading in the spaced repetition stages graph', () => {
+    const view = render(StatsPage, {
+      props: {
+        stats: buildStatsResponse({
+          questions: [
+            buildQuestionRow({
+              question_id: 1,
+              schedule: {
+                bucket: 'cooling',
+                logical_bucket: '30d',
+                interval_step: 8,
+                next_due_at: '2026-05-05T10:00:00Z'
+              }
+            }),
+            buildQuestionRow({
+              question_id: 2,
+              schedule: {
+                bucket: 'due_review',
+                logical_bucket: '30d',
+                interval_step: 8,
+                next_due_at: '2026-05-05T10:00:00Z'
+              }
+            })
+          ]
+        })
+      }
+    });
+
+    const shade = view.container.querySelector('.graph-cooling-shade');
+    expect(shade).toBeTruthy();
+    expect(shade?.getAttribute('clip-path')).toContain('recovery-stage-clip-30d');
+    expect(view.container.querySelector('.graph-cooling-overlay')).toBeNull();
+  });
+
+  it('renders review proposals in bounded chunks so large review queues stay responsive', async () => {
+    const user = userEvent.setup();
+    const proposals = Array.from({ length: 15 }, (_, index) =>
+      buildQuestionRevisionProposal({
+        proposal_id: 900 + index,
+        question_id: 700 + index,
+        current_prompt: `Original prompt ${index + 1}`,
+        proposed_prompt: `Updated prompt ${index + 1}`
+      })
+    );
+    const view = render(StatsPage, {
+      props: {
+        stats: buildStatsResponse({
+          revision_proposals: proposals
+        }),
+        reviewOnly: false,
+        onToggleReviewOnly: vi.fn()
+      }
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Review' }));
+
+    const bucketStack = view.container.querySelector('.stats-question-buckets') as HTMLElement;
+    expect(Array.from(bucketStack.querySelectorAll('.question-bucket-title')).map((node) => node.textContent)).toEqual([
+      'Review'
+    ]);
+    expect(Array.from(bucketStack.querySelectorAll('.question-bucket-count')).map((node) => node.textContent)).toEqual([
+      '15'
+    ]);
+    expect(bucketStack.querySelectorAll('.revision-proposal-card')).toHaveLength(12);
+    expect(within(bucketStack).getByText('Showing 12 of 15')).toBeTruthy();
+    expect(within(bucketStack).queryByText('Original prompt 13')).toBeNull();
+
+    await user.click(within(bucketStack).getByRole('button', { name: 'Show 3 more' }));
+
+    expect(bucketStack.querySelectorAll('.revision-proposal-card')).toHaveLength(15);
+    expect(within(bucketStack).getByText('Original prompt 13')).toBeTruthy();
+    expect(within(bucketStack).queryByRole('button', { name: /Show/ })).toBeNull();
+  });
+
+  it('opens an empty study block detail overlay when no study blocks exist', async () => {
+    const user = userEvent.setup();
+    render(StatsPage, {
+      props: {
+        stats: buildStatsResponse({
+          study_blocks: []
+        })
+      }
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Open study block details' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Study block details' });
+    expect(within(dialog).getByText('No study blocks yet for this scope.')).toBeTruthy();
   });
 
   it('builds hourly retry detail from the current <1 group only', () => {
@@ -603,6 +740,32 @@ describe('StatsPage', () => {
           accuracy: 2 / 3
         })
       ],
+      study_blocks: [
+        buildStudyBlock({
+          started_at: '2026-04-04T09:00:00Z',
+          ended_at: '2026-04-04T09:20:00Z',
+          answered_count: 6,
+          correct_count: 3,
+          score_possible: 6,
+          accuracy: 0.5,
+          duration_minutes: 20,
+          answers_per_minute: 0.3,
+          days_ago: 1,
+          day_label: '1d'
+        }),
+        buildStudyBlock({
+          started_at: '2026-04-05T10:00:00Z',
+          ended_at: '2026-04-05T10:15:00Z',
+          answered_count: 3,
+          correct_count: 2,
+          score_possible: 3,
+          accuracy: 2 / 3,
+          duration_minutes: 15,
+          answers_per_minute: 0.2,
+          days_ago: 0,
+          day_label: 'n'
+        })
+      ],
       questions: [
         buildQuestionRow({
           question_id: 51,
@@ -705,7 +868,9 @@ describe('StatsPage', () => {
       }
     });
 
-    expect(screen.getByLabelText('Review')).toBeTruthy();
+    expect(screen.getByRole('group', { name: 'Stats question view' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Questions' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Review' }).getAttribute('aria-pressed')).toBe('false');
     expect(screen.queryByRole('heading', { name: 'Questions' })).toBeNull();
 
     let bucketStack = view.container.querySelector('.stats-question-buckets') as HTMLElement;
@@ -762,6 +927,39 @@ describe('StatsPage', () => {
     await user.click(within(bucketStack).getByText('What is the capital of Canada?'));
     expect(openSpy).toHaveBeenCalledWith(stats.questions[0]);
 
+    await user.click(screen.getByRole('button', { name: 'Open study block details' }));
+    let studyBlockDialog = await screen.findByRole('dialog', { name: 'Study block details' });
+    expect(within(studyBlockDialog).getByText('3 questions')).toBeTruthy();
+    expect(within(studyBlockDialog).getByText('0.2/min')).toBeTruthy();
+    expect(within(studyBlockDialog).getByText('67%')).toBeTruthy();
+    expect(within(studyBlockDialog).getByText('6 questions')).toBeTruthy();
+    expect(within(studyBlockDialog).getByText('0.3/min')).toBeTruthy();
+    expect(within(studyBlockDialog).getByText('50%')).toBeTruthy();
+    await user.click(within(studyBlockDialog).getByRole('button', { name: 'Close' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Study block details' })).toBeNull();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Open study block details' }));
+    studyBlockDialog = await screen.findByRole('dialog', { name: 'Study block details' });
+    await user.keyboard('{Escape}');
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Study block details' })).toBeNull();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Open study block details' }));
+    studyBlockDialog = await screen.findByRole('dialog', { name: 'Study block details' });
+    await user.click(studyBlockDialog);
+    expect(screen.getByRole('dialog', { name: 'Study block details' })).toBeTruthy();
+    const studyBlockShell = view.container.querySelector('.study-block-detail-shell');
+    expect(studyBlockShell).toBeTruthy();
+    if (studyBlockShell) {
+      await user.click(studyBlockShell);
+    }
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Study block details' })).toBeNull();
+    });
+
     await user.click(screen.getByRole('button', { name: 'Open all questions' }));
     let allQuestionsDialog = await screen.findByRole('dialog', { name: 'All questions' });
     expect(within(allQuestionsDialog).getByRole('button', { name: 'Bucket' })).toBeTruthy();
@@ -806,8 +1004,18 @@ describe('StatsPage', () => {
       expect(screen.queryByRole('dialog', { name: 'All questions' })).toBeNull();
     });
 
-    await user.click(screen.getByRole('checkbox'));
+    await user.click(screen.getByRole('button', { name: 'Review' }));
     expect(toggleSpy).toHaveBeenCalledWith(true);
+    expect(screen.getByRole('button', { name: 'Questions' }).getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByRole('button', { name: 'Review' }).getAttribute('aria-pressed')).toBe('true');
+
+    bucketStack = view.container.querySelector('.stats-question-buckets') as HTMLElement;
+    expect(Array.from(bucketStack.querySelectorAll('.question-bucket-title')).map((node) => node.textContent)).toEqual([
+      'Review'
+    ]);
+    expect(within(bucketStack).getByText('What structure anchors most plants in the ground?')).toBeTruthy();
+    expect(within(bucketStack).getByText('What process lets plants turn light into stored energy?')).toBeTruthy();
+
     await view.rerender({
       moduleLabel: 'Biology',
       stats,
@@ -825,10 +1033,8 @@ describe('StatsPage', () => {
     expect(Array.from(bucketStack.querySelectorAll('.question-bucket-count')).map((node) => node.textContent)).toEqual([
       '2'
     ]);
-    expect(reviewBucketToggle(bucketStack).getAttribute('aria-expanded')).toBe('false');
+    expect(reviewBucketHeader(bucketStack)).toBeTruthy();
     expect(screen.queryByText('What is the capital of Canada?')).toBeNull();
-
-    await user.click(reviewBucketToggle(bucketStack));
     expect(within(bucketStack).getByText('What structure anchors most plants in the ground?')).toBeTruthy();
     expect(within(bucketStack).getByText('What process lets plants turn light into stored energy?')).toBeTruthy();
 
@@ -855,7 +1061,7 @@ describe('StatsPage', () => {
     });
 
     bucketStack = view.container.querySelector('.stats-question-buckets') as HTMLElement;
-    expect(reviewBucketToggle(bucketStack).getAttribute('aria-expanded')).toBe('true');
+    expect(reviewBucketHeader(bucketStack)).toBeTruthy();
     expect(within(bucketStack).getByText('What root structure anchors most plants in the ground?')).toBeTruthy();
     expect(within(bucketStack).getByText('What process lets plants turn light into stored energy?')).toBeTruthy();
 
@@ -870,17 +1076,17 @@ describe('StatsPage', () => {
     });
 
     bucketStack = view.container.querySelector('.stats-question-buckets') as HTMLElement;
-    expect(reviewBucketToggle(bucketStack).getAttribute('aria-expanded')).toBe('false');
-
-    await user.click(reviewBucketToggle(bucketStack));
+    expect(reviewBucketHeader(bucketStack)).toBeTruthy();
     expect(within(bucketStack).getAllByRole('button', { name: 'Edit proposal' }).length).toBeGreaterThan(0);
 
     expect(screen.getByRole('img', { name: 'Recent session accuracy graph' })).toBeTruthy();
+    expect(screen.getByRole('img', { name: 'Questions per study block' })).toBeTruthy();
     expect(screen.getByRole('img', { name: 'Spaced repetition stage counts' })).toBeTruthy();
     expect(screen.getByRole('img', { name: 'Entry state counts' })).toBeTruthy();
     expect(screen.getByRole('img', { name: 'Retry eligibility by day' })).toBeTruthy();
     expect(screen.getByRole('img', { name: 'First-time questions answered by day' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Latest quiz performance' }).closest('.stats-chart-panel-performance')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Questions per study block' }).closest('.stats-chart-panel-study-blocks')).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Entry states' }).closest('.stats-chart-panel-entry')).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Spaced repetition stages' }).closest('.stats-chart-panel-stages')).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Retry eligibility' }).closest('.stats-chart-panel-retry')).toBeTruthy();
@@ -889,6 +1095,10 @@ describe('StatsPage', () => {
     const graphLabels = Array.from(view.container.querySelectorAll('.session-bar text')).map((node) => node.textContent);
     expect(graphLabels).toContain('2/3');
     expect(graphLabels).toContain('2/2');
+    expect(graphLabels).toContain('6');
+    expect(graphLabels).toContain('1d');
+    expect(graphLabels).toContain('3');
+    expect(graphLabels).toContain('n');
     expect(graphLabels).toContain('Unseen');
     expect(graphLabels).toContain('Review');
     expect(graphLabels).toContain('Bucketed');
@@ -907,7 +1117,8 @@ describe('StatsPage', () => {
     expect(graphLabels).toContain('7');
     expect(graphLabels).toContain('>7');
     expect(view.container.querySelector('.graph-average-line title')?.textContent).toBe('83%');
-    expect(reviewBucketToggle(bucketStack)).toBeTruthy();
+    expect(view.container.querySelector('.graph-cooling-overlay')).toBeNull();
+    expect(reviewBucketHeader(bucketStack)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Open spaced repetition stage details' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Open retry eligibility details' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Open all questions' })).toBeTruthy();
@@ -1161,8 +1372,7 @@ describe('StatsPage', () => {
     expect(within(dialog).queryByRole('img', { name: 'Spaced repetition stage due-day heatmap' })).toBeNull();
   });
 
-  it('shows an empty review state when the toggle is on but no review proposals exist', async () => {
-    const user = userEvent.setup();
+  it('shows an empty review state when the toggle is on but no review proposals exist', () => {
     render(StatsPage, {
       props: {
         stats: buildStatsResponse({
@@ -1182,9 +1392,6 @@ describe('StatsPage', () => {
         reviewOnly: true
       }
     });
-
-    const bucketStack = document.querySelector('.stats-question-buckets') as HTMLElement;
-    await user.click(reviewBucketToggle(bucketStack));
 
     expect(screen.getByText('No review proposals in this scope.')).toBeTruthy();
   });

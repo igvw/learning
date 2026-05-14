@@ -126,6 +126,19 @@ export interface RecentSession {
   accuracy: number;
 }
 
+export interface StudyBlock {
+  started_at: string;
+  ended_at: string;
+  answered_count: number;
+  correct_count: number;
+  score_possible: number;
+  accuracy: number;
+  duration_minutes: number;
+  answers_per_minute: number;
+  days_ago: number;
+  day_label: string;
+}
+
 export interface User {
   id: number;
   handle: string;
@@ -198,6 +211,7 @@ export interface StatsResponse {
     accuracy: number;
   };
   recent_sessions: RecentSession[];
+  study_blocks: StudyBlock[];
   questions: QuestionRow[];
   revision_proposals: QuestionRevisionProposal[];
 }

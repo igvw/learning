@@ -1,6 +1,7 @@
 <script lang="ts">
   import StatsAllQuestionsOverlay from './StatsAllQuestionsOverlay.svelte';
   import StatsQuestionTable from './StatsQuestionTable.svelte';
+  import StudyBlockDetailOverlay from './StudyBlockDetailOverlay.svelte';
   import RevisionProposalCard from './RevisionProposalCard.svelte';
   import RetryEligibilityOverlay from './RetryEligibilityOverlay.svelte';
   import StageDueMatrixOverlay from './StageDueMatrixOverlay.svelte';
@@ -33,6 +34,7 @@
     emptyFirstSeenGraph,
     emptyStageDueMatrixGraph,
   } from '../lib/stats/due-graphs';
+  import { buildStudyBlockGraph, emptyStudyBlockGraph } from '../lib/stats/study-block-graph';
   import {
     groupQuestionsByBucket,
     sortDefinitions,
@@ -40,6 +42,8 @@
     type SortDirection,
     type SortKey
   } from '../lib/stats/table';
+
+  const REVIEW_PROPOSAL_PAGE_SIZE = 12;
 
   export let moduleLabel = 'All Modules';
   export let stats: StatsResponse | null = null;
@@ -58,13 +62,17 @@
   let sortKey: SortKey | null = null;
   let sortDirection: SortDirection = 'asc';
   let entryDetailOpen = false;
+  let studyBlockDetailOpen = false;
   let retryDetailOpen = false;
   let stageDetailOpen = false;
+  let activeReviewOnly = reviewOnly;
+  let reviewModeTouched = false;
+  let reviewModeContext = '';
   let expandedBuckets: Record<string, boolean> = {};
-  let reviewBucketExpanded = false;
   let bucketResetSignature = '';
   let reviewActionBusyKey = '';
   let reviewActionError = '';
+  let visibleReviewProposalCount = REVIEW_PROPOSAL_PAGE_SIZE;
 
   function handleSort(nextSortKey: SortKey): void {
     const definition = sortDefinitions.find((candidate) => candidate.key === nextSortKey);
@@ -82,6 +90,7 @@
   function openRetryDetail(): void {
     stageDetailOpen = false;
     entryDetailOpen = false;
+    studyBlockDetailOpen = false;
     retryDetailOpen = true;
   }
 
@@ -95,6 +104,7 @@
   function openStageDetail(): void {
     retryDetailOpen = false;
     entryDetailOpen = false;
+    studyBlockDetailOpen = false;
     stageDetailOpen = true;
   }
 
@@ -107,6 +117,7 @@
 
   function openEntryDetail(): void {
     retryDetailOpen = false;
+    studyBlockDetailOpen = false;
     stageDetailOpen = false;
     entryDetailOpen = true;
   }
@@ -118,11 +129,35 @@
     }
   }
 
+  function openStudyBlockDetail(): void {
+    retryDetailOpen = false;
+    stageDetailOpen = false;
+    entryDetailOpen = false;
+    studyBlockDetailOpen = true;
+  }
+
+  function handleStudyBlockDetailKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      openStudyBlockDetail();
+    }
+  }
+
   function toggleBucket(bucketKey: string): void {
     expandedBuckets = {
       ...expandedBuckets,
       [bucketKey]: !expandedBuckets[bucketKey]
     };
+  }
+
+  function selectReviewMode(value: boolean): void {
+    activeReviewOnly = value;
+    reviewModeTouched = true;
+    onToggleReviewOnly(value);
+  }
+
+  function showMoreReviewProposals(): void {
+    visibleReviewProposalCount += REVIEW_PROPOSAL_PAGE_SIZE;
   }
 
   async function handleRevisionModeration(proposalId: number, payload: ModerationRevisionActionPayload): Promise<void> {
@@ -151,16 +186,19 @@
 
   $: displayedQuestions = stats
     ? stats.questions.filter((question) =>
-        reviewOnly ? false : question.schedule.logical_bucket !== 'review'
+        activeReviewOnly ? false : question.schedule.logical_bucket !== 'review'
       )
     : [];
   $: bucketGroups = groupQuestionsByBucket(displayedQuestions).filter((group) =>
-    reviewOnly ? group.key === 'review' : group.key !== 'review'
+    activeReviewOnly ? group.key === 'review' : group.key !== 'review'
   );
   $: revisionProposals = stats?.revision_proposals ?? [];
-  $: emptyMessage = reviewOnly ? 'No review proposals in this scope.' : 'No non-review questions in this scope.';
+  $: visibleReviewProposals = revisionProposals.slice(0, visibleReviewProposalCount);
+  $: hiddenReviewProposalCount = Math.max(0, revisionProposals.length - visibleReviewProposals.length);
+  $: emptyMessage = activeReviewOnly ? 'No review proposals in this scope.' : 'No non-review questions in this scope.';
   $: isAdmin = currentActor?.role === 'admin';
   $: sessionGraph = stats ? buildSessionGraph(stats.recent_sessions) : emptySessionGraph;
+  $: studyBlockGraph = stats ? buildStudyBlockGraph(stats.study_blocks) : emptyStudyBlockGraph;
   $: recoveryStageGraph = stats ? buildRecoveryStageGraph(stats.questions) : emptyRecoveryStageGraph;
   $: auxiliaryStageGraph = stats ? buildAuxiliaryStageGraph(stats.questions, revisionProposals.length) : emptyAuxiliaryStageGraph;
   $: retryEligibilityGraph = stats
@@ -178,16 +216,31 @@
     : emptyStageDueMatrixGraph;
   $: if (!stats) {
     entryDetailOpen = false;
+    studyBlockDetailOpen = false;
     retryDetailOpen = false;
     stageDetailOpen = false;
   }
   $: {
-    const nextBucketResetSignature = stats ? `${moduleLabel}:${reviewOnly}` : '';
+    const nextReviewModeContext = moduleLabel;
+    if (nextReviewModeContext !== reviewModeContext) {
+      reviewModeContext = nextReviewModeContext;
+      reviewModeTouched = false;
+      activeReviewOnly = reviewOnly;
+    }
+  }
+  $: if (!reviewModeTouched && activeReviewOnly !== reviewOnly) {
+    activeReviewOnly = reviewOnly;
+  }
+  $: {
+    const nextBucketResetSignature = stats ? `${moduleLabel}:${activeReviewOnly}` : '';
     if (nextBucketResetSignature !== bucketResetSignature) {
       bucketResetSignature = nextBucketResetSignature;
       expandedBuckets = {};
-      reviewBucketExpanded = false;
+      visibleReviewProposalCount = REVIEW_PROPOSAL_PAGE_SIZE;
     }
+  }
+  $: if (visibleReviewProposalCount > REVIEW_PROPOSAL_PAGE_SIZE && visibleReviewProposalCount > revisionProposals.length) {
+    visibleReviewProposalCount = Math.max(REVIEW_PROPOSAL_PAGE_SIZE, revisionProposals.length);
   }
 </script>
 
@@ -197,14 +250,24 @@
       <h2>{moduleLabel}</h2>
     </div>
     <div class="stats-page-actions">
-      <label class="review-filter">
-        <input
-          type="checkbox"
-          checked={reviewOnly}
-          on:change={(event) => onToggleReviewOnly((event.currentTarget as HTMLInputElement).checked)}
-        />
-        Review
-      </label>
+      <div class="stats-view-toggle" role="group" aria-label="Stats question view">
+        <button
+          type="button"
+          class:active={!activeReviewOnly}
+          aria-pressed={!activeReviewOnly}
+          on:click={() => selectReviewMode(false)}
+        >
+          Questions
+        </button>
+        <button
+          type="button"
+          class:active={activeReviewOnly}
+          aria-pressed={activeReviewOnly}
+          on:click={() => selectReviewMode(true)}
+        >
+          Review
+        </button>
+      </div>
     </div>
   </div>
 
@@ -276,6 +339,58 @@
                     fill={bar.fillColor}
                   />
                   <text x={bar.labelX} y={sessionGraph.chartHeight - 18} text-anchor="middle">{bar.scoreLabel}</text>
+                </g>
+              {/each}
+            </svg>
+          </div>
+        {/if}
+      </div>
+
+      <div
+        class="panel stats-chart-panel stats-chart-panel-study-blocks graph-launch-panel"
+        role="button"
+        tabindex="0"
+        aria-haspopup="dialog"
+        aria-label="Open study block details"
+        on:click={openStudyBlockDetail}
+        on:keydown={handleStudyBlockDetailKeydown}
+      >
+        <div class="panel-header">
+          <div><h3>Questions per study block</h3></div>
+        </div>
+        {#if stats.study_blocks.length === 0}
+          <p class="muted-copy">No study blocks yet for this scope.</p>
+        {:else}
+          <div class="session-graph-shell">
+            <svg
+              class="session-graph"
+              viewBox={`0 0 ${studyBlockGraph.chartWidth} ${studyBlockGraph.chartHeight}`}
+              role="img"
+              aria-label="Questions per study block"
+            >
+              <line
+                x1={studyBlockGraph.plotLeft}
+                y1={studyBlockGraph.axisY}
+                x2={studyBlockGraph.plotRight}
+                y2={studyBlockGraph.axisY}
+                class="graph-axis"
+              />
+              {#each studyBlockGraph.bars as bar}
+                <g class="session-bar">
+                  <title>{bar.title}</title>
+                  <rect
+                    x={bar.x}
+                    y={bar.y}
+                    width={bar.width}
+                    height={bar.height}
+                    rx="10"
+                    ry="10"
+                    fill="hsl(188, 76%, 56%)"
+                  />
+                  <text x={bar.labelX} y={bar.y - 8} text-anchor="middle" class="stage-count-label">
+                    {bar.answeredCount}
+                  </text>
+                  <text x={bar.labelX} y={studyBlockGraph.chartHeight - 18} text-anchor="middle">{bar.dayLabel}</text>
                 </g>
               {/each}
             </svg>
@@ -357,9 +472,19 @@
               y2={recoveryStageGraph.axisY}
               class="graph-axis"
             />
-              {#each recoveryStageGraph.stages as stage}
+            {#each recoveryStageGraph.stages as stage}
               <g class="session-bar">
                 <title>{stage.label}: {stage.count} questions, {stage.coolingCount} pending cooldown</title>
+                <clipPath id={`recovery-stage-clip-${stage.key}`}>
+                  <rect
+                    x={stage.x}
+                    y={stage.y}
+                    width={stage.width}
+                    height={stage.height}
+                    rx="10"
+                    ry="10"
+                  />
+                </clipPath>
                 <rect
                   x={stage.x}
                   y={stage.y}
@@ -375,7 +500,8 @@
                     y={stage.coolingY}
                     width={stage.width}
                     height={stage.coolingHeight}
-                    class="graph-cooling-overlay"
+                    class="graph-cooling-shade"
+                    clip-path={`url(#recovery-stage-clip-${stage.key})`}
                   />
                 {/if}
                 <text x={stage.labelX} y={stage.y - 8} text-anchor="middle" class="stage-count-label">
@@ -482,35 +608,36 @@
         <div class="banner error">{reviewActionError}</div>
       {/if}
 
-      {#if reviewOnly}
+      {#if activeReviewOnly}
         <section class="question-bucket-card">
-          <label class="question-bucket-toggle question-bucket-disclosure" aria-expanded={reviewBucketExpanded}>
-            <input
-              class="question-bucket-disclosure-control"
-              type="checkbox"
-              bind:checked={reviewBucketExpanded}
-              aria-label={`Toggle Review bucket with ${revisionProposals.length} proposals`}
-            />
+          <div class="question-bucket-toggle question-bucket-toggle-static">
             <span class="question-bucket-title">Review</span>
             <span class="question-bucket-count">{revisionProposals.length}</span>
-            <span class="question-bucket-caret" class:expanded={reviewBucketExpanded} aria-hidden="true"></span>
-          </label>
+          </div>
 
-          {#if reviewBucketExpanded}
-            {#if revisionProposals.length === 0}
-              <p class="muted-copy question-bucket-empty">No review proposals in this scope.</p>
-            {:else}
-              <div class="revision-proposal-stack">
-                {#each revisionProposals as proposal (proposal.proposal_id)}
-                  <RevisionProposalCard
-                    {proposal}
-                    {isAdmin}
-                    busyKey={reviewActionBusyKey}
-                    onOpenEditor={isAdmin ? onOpenAdminRevisionEditor : onOpenUserRevisionEditor}
-                    onWithdraw={(questionId) => handleWithdrawRevision(questionId, proposal.proposal_id)}
-                    onModeration={handleRevisionModeration}
-                  />
-                {/each}
+          {#if revisionProposals.length === 0}
+            <p class="muted-copy question-bucket-empty">No review proposals in this scope.</p>
+          {:else}
+            <div class="revision-proposal-stack">
+              {#each visibleReviewProposals as proposal (proposal.proposal_id)}
+                <RevisionProposalCard
+                  {proposal}
+                  {isAdmin}
+                  busyKey={reviewActionBusyKey}
+                  onOpenEditor={isAdmin ? onOpenAdminRevisionEditor : onOpenUserRevisionEditor}
+                  onWithdraw={(questionId) => handleWithdrawRevision(questionId, proposal.proposal_id)}
+                  onModeration={handleRevisionModeration}
+                />
+              {/each}
+            </div>
+            {#if hiddenReviewProposalCount > 0}
+              <div class="review-proposal-pagination">
+                <span class="muted-copy">
+                  Showing {visibleReviewProposals.length} of {revisionProposals.length}
+                </span>
+                <button class="ghost-button" type="button" on:click={showMoreReviewProposals}>
+                  Show {Math.min(REVIEW_PROPOSAL_PAGE_SIZE, hiddenReviewProposalCount)} more
+                </button>
               </div>
             {/if}
           {/if}
@@ -578,6 +705,11 @@
   onSort={handleSort}
   onOpenEdit={onOpenEdit}
   onClose={() => (entryDetailOpen = false)}
+/>
+<StudyBlockDetailOverlay
+  open={studyBlockDetailOpen}
+  studyBlocks={stats?.study_blocks ?? []}
+  onClose={() => (studyBlockDetailOpen = false)}
 />
 <RetryEligibilityOverlay
   open={retryDetailOpen}

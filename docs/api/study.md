@@ -93,8 +93,11 @@ The response contains:
 - `schedule_timezone`
 - `summary`
 - `recent_sessions`
+- `study_blocks`
 - `questions`
 - `revision_proposals`
+
+`recent_sessions` remains quiz-session based. `study_blocks` is activity based: it groups answered questions into blocks where each consecutive answer is less than 30 minutes after the previous one and starts a new block after a 30+ minute gap. It returns the latest 20 blocks with answer count, score totals, accuracy, duration, and answers-per-minute metrics. The stats UI uses the latest 10 for the compact graph and all 20 in the detail overlay.
 
 `revision_proposals` contains scoped pending revision/delete proposals: admins receive all pending proposals in the selected scope, while regular users receive only their own pending proposals.
 

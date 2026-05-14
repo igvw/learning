@@ -372,6 +372,7 @@
   .stats-chart-grid {
     grid-template-areas:
       "performance"
+      "study-blocks"
       "entry"
       "stages"
       "retry"

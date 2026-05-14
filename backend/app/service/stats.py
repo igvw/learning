@@ -1,7 +1,9 @@
+from datetime import date, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from ..database import DatabaseConnection, utc_now
-from ..settings import schedule_timezone_name
+from ..settings import schedule_timezone, schedule_timezone_name
 from .auth import Actor
 from .catalog import ensure_user_exists, get_scope_module_ids
 from .errors import NotFoundError
@@ -15,8 +17,12 @@ from .schedule import (
     _recent_incorrect_answers_by_question,
     _schedule_snapshot_from_attempts,
 )
+from .time_utils import parse_iso_timestamp
 from .visibility import get_effective_question_row, list_effective_question_rows
 from .moderation import list_pending_revision_proposals
+
+
+STUDY_BLOCK_GAP = timedelta(minutes=30)
 
 
 def _default_question_stats() -> dict[str, Any]:
@@ -26,6 +32,97 @@ def _default_question_stats() -> dict[str, Any]:
         "incorrect_count": 0.0,
         "first_asked_at": None,
         "last_asked_at": None,
+    }
+
+
+def _build_study_blocks(rows: list[dict[str, Any]], *, now: str, limit: int = 20) -> list[dict[str, Any]]:
+    app_schedule_timezone = schedule_timezone()
+    now_date = parse_iso_timestamp(now).astimezone(app_schedule_timezone).date()
+    blocks: list[dict[str, Any]] = []
+    current_started_at: str | None = None
+    current_ended_at: str | None = None
+    current_ended_at_parsed = None
+    current_count = 0
+    current_correct_count = 0.0
+    current_score_possible = 0.0
+
+    for row in sorted(rows, key=lambda attempt: (parse_iso_timestamp(attempt["answered_at"]), attempt.get("id", 0))):
+        answered_at = row["answered_at"]
+        answered_at_parsed = parse_iso_timestamp(answered_at)
+        score_earned = float(row.get("score_earned") or 0.0)
+        score_possible = float(row.get("score_possible") or 0.0)
+        if (
+            current_started_at is not None
+            and current_ended_at is not None
+            and current_ended_at_parsed is not None
+            and answered_at_parsed - current_ended_at_parsed >= STUDY_BLOCK_GAP
+        ):
+            blocks.append(
+                _study_block_payload(
+                    current_started_at,
+                    current_ended_at,
+                    current_count,
+                    current_correct_count,
+                    current_score_possible,
+                    now_date=now_date,
+                    app_schedule_timezone=app_schedule_timezone,
+                )
+            )
+            current_started_at = answered_at
+            current_count = 0
+            current_correct_count = 0.0
+            current_score_possible = 0.0
+        elif current_started_at is None:
+            current_started_at = answered_at
+
+        current_ended_at = answered_at
+        current_ended_at_parsed = answered_at_parsed
+        current_count += 1
+        current_correct_count += score_earned
+        current_score_possible += score_possible
+
+    if current_started_at is not None and current_ended_at is not None:
+        blocks.append(
+            _study_block_payload(
+                current_started_at,
+                current_ended_at,
+                current_count,
+                current_correct_count,
+                current_score_possible,
+                now_date=now_date,
+                app_schedule_timezone=app_schedule_timezone,
+            )
+        )
+
+    return blocks[-limit:]
+
+
+def _study_block_payload(
+    started_at: str,
+    ended_at: str,
+    answered_count: int,
+    correct_count: float,
+    score_possible: float,
+    *,
+    now_date: date,
+    app_schedule_timezone: ZoneInfo,
+) -> dict[str, Any]:
+    started_at_parsed = parse_iso_timestamp(started_at)
+    ended_at_parsed = parse_iso_timestamp(ended_at)
+    duration_minutes = max((ended_at_parsed - started_at_parsed).total_seconds() / 60, 1.0)
+    ended_date = parse_iso_timestamp(ended_at).astimezone(app_schedule_timezone).date()
+    days_ago = max((now_date - ended_date).days, 0)
+    return {
+        "started_at": started_at,
+        "ended_at": ended_at,
+        "answered_count": answered_count,
+        "correct_count": correct_count,
+        "score_possible": score_possible,
+        "accuracy": (correct_count / score_possible) if score_possible else 0.0,
+        "duration_minutes": duration_minutes,
+        "answers_per_minute": answered_count / duration_minutes,
+        "days_ago": days_ago,
+        "day_label": "n" if days_ago == 0 else f"{days_ago}d",
     }
 
 
@@ -201,6 +298,24 @@ def get_stats(
         for row in recent_rows
     ]
 
+    study_attempt_rows: list[dict[str, Any]] = []
+    if scope_ids:
+        scope_placeholders = ",".join("?" for _ in scope_ids)
+        study_attempt_rows = [
+            dict(row)
+            for row in connection.execute(
+                f"""
+                SELECT id, answered_at, score_earned, score_possible
+                FROM attempts
+                WHERE user_id = ?
+                  AND module_id IN ({scope_placeholders})
+                ORDER BY answered_at ASC, id ASC
+                """,
+                (user_id, *scope_ids),
+            ).fetchall()
+        ]
+    study_blocks = _build_study_blocks(study_attempt_rows, now=now)
+
     return {
         "schedule_timezone": schedule_timezone_name(),
         "summary": {
@@ -212,6 +327,7 @@ def get_stats(
             "accuracy": (total_correct / total_possible) if total_possible else 0.0,
         },
         "recent_sessions": recent_sessions,
+        "study_blocks": study_blocks,
         "questions": questions,
         "revision_proposals": revision_proposals,
     }

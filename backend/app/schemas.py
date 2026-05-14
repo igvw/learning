@@ -303,6 +303,19 @@ class RecentSessionOut(BaseModel):
     accuracy: float
 
 
+class StudyBlockOut(BaseModel):
+    started_at: str
+    ended_at: str
+    answered_count: int
+    correct_count: float
+    score_possible: float
+    accuracy: float
+    duration_minutes: float
+    answers_per_minute: float
+    days_ago: int
+    day_label: str
+
+
 class StatsSummaryOut(BaseModel):
     total_questions: int
     reviewed_questions: int
@@ -348,6 +361,7 @@ class StatsResponseOut(BaseModel):
     schedule_timezone: str
     summary: StatsSummaryOut
     recent_sessions: list[RecentSessionOut]
+    study_blocks: list[StudyBlockOut]
     questions: list[QuestionRowOut]
     revision_proposals: list[QuestionRevisionProposalOut] = Field(default_factory=list)
 
